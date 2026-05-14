@@ -4,7 +4,7 @@ import logging
 import os
 import socket
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -195,14 +195,19 @@ def parse_schedule_time(value: str) -> tuple[int, int]:
     return hour, minute
 
 
+def parse_schedule_date(value: str) -> date:
+    return datetime.strptime(value, "%d/%m/%Y").date()
+
+
 def format_schedule(schedule: dict[str, Any]) -> str:
     animal = ANIMALS.get(schedule["animal_key"], {})
     display_name = animal.get("display_name", schedule["animal_key"])
-    weekday = WEEKDAY_NAMES.get(schedule["weekday"], str(schedule["weekday"]))
-    return (
-        f"{schedule['id']} - {display_name} - cada {weekday} "
-        f"a las {schedule['time']} - {schedule['text']}"
-    )
+    if schedule["kind"] == "weekly":
+        weekday = WEEKDAY_NAMES.get(schedule["weekday"], str(schedule["weekday"]))
+        when = f"cada {weekday} a las {schedule['time']}"
+    else:
+        when = f"el {schedule['date']} a las {schedule['time']}"
+    return f"{schedule['id']} - {display_name} - {when} - {schedule['text']}"
 
 
 def is_owner(update: Update) -> bool:
@@ -238,7 +243,7 @@ async def central_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "Comandos disponibles:\n"
         f"{animal_commands}\n"
         "/historial <animal> [cantidad]\n"
-        "/programar <animal> <dia> <HH:MM> <mensaje>\n"
+        "/programar <animal> <dia|DD/MM/AAAA> <HH:MM> <mensaje>\n"
         "/programados\n"
         "/cancelar <id>\n"
         "/status"
@@ -313,8 +318,10 @@ async def central_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if len(context.args) < 4:
         await update.effective_chat.send_message(
-            "Uso: /programar <animal> <dia> <HH:MM> <mensaje>\n"
-            "Ejemplo: /programar mimosuga lunes 09:00 Buena semana, patita."
+            "Uso: /programar <animal> <dia|DD/MM/AAAA> <HH:MM> <mensaje>\n"
+            "Ejemplos:\n"
+            "/programar mimosuga lunes 09:00 Buena semana, patita.\n"
+            "/programar mimosuga 21/03/2026 16:00 Tengo algo que contarte, sol mio."
         )
         return
 
@@ -322,14 +329,6 @@ async def central_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if animal_key not in ANIMALS:
         await update.effective_chat.send_message(
             "Animal no reconocido. Disponibles: " + ", ".join(sorted(ANIMALS))
-        )
-        return
-
-    weekday_text = context.args[1].lower()
-    if weekday_text not in WEEKDAYS:
-        await update.effective_chat.send_message(
-            "Dia no reconocido. Usa lunes, martes, miercoles, jueves, viernes, "
-            "sabado o domingo."
         )
         return
 
@@ -345,19 +344,56 @@ async def central_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     now = datetime.now(APP_TIMEZONE)
-    weekday = WEEKDAYS[weekday_text]
-    last_sent_date = None
-    if now.weekday() == weekday and (now.hour, now.minute) >= (hour, minute):
-        last_sent_date = now.date().isoformat()
+    when_text = context.args[1].lower()
+    schedule: dict[str, Any]
 
-    schedule = {
-        "id": uuid.uuid4().hex[:8],
-        "animal_key": animal_key,
-        "weekday": weekday,
-        "time": f"{hour:02d}:{minute:02d}",
-        "text": text,
-        "last_sent_date": last_sent_date,
-    }
+    if when_text in WEEKDAYS:
+        weekday = WEEKDAYS[when_text]
+        last_sent_date = None
+        if now.weekday() == weekday and (now.hour, now.minute) >= (hour, minute):
+            last_sent_date = now.date().isoformat()
+
+        schedule = {
+            "id": uuid.uuid4().hex[:8],
+            "kind": "weekly",
+            "animal_key": animal_key,
+            "weekday": weekday,
+            "time": f"{hour:02d}:{minute:02d}",
+            "text": text,
+            "last_sent_date": last_sent_date,
+        }
+    else:
+        try:
+            scheduled_date = parse_schedule_date(context.args[1])
+        except ValueError:
+            await update.effective_chat.send_message(
+                "Fecha o dia no reconocido. Usa lunes, martes... o DD/MM/AAAA."
+            )
+            return
+
+        scheduled_at = datetime(
+            scheduled_date.year,
+            scheduled_date.month,
+            scheduled_date.day,
+            hour,
+            minute,
+            tzinfo=APP_TIMEZONE,
+        )
+        if scheduled_at <= now:
+            await update.effective_chat.send_message(
+                "Esa fecha ya ha pasado. Elige una fecha futura."
+            )
+            return
+
+        schedule = {
+            "id": uuid.uuid4().hex[:8],
+            "kind": "once",
+            "animal_key": animal_key,
+            "date": scheduled_date.isoformat(),
+            "time": f"{hour:02d}:{minute:02d}",
+            "text": text,
+            "sent": False,
+        }
     schedules = get_schedules()
     schedules.append(schedule)
     save_schedules(schedules)
@@ -474,25 +510,50 @@ async def scheduler_loop() -> None:
             now = datetime.now(APP_TIMEZONE)
             today = now.date().isoformat()
             schedules = get_schedules()
+            remaining_schedules = []
             changed = False
 
             for schedule in schedules:
                 hour, minute = parse_schedule_time(schedule["time"])
-                is_due = (
-                    now.weekday() == schedule["weekday"]
-                    and (now.hour, now.minute) >= (hour, minute)
-                    and schedule.get("last_sent_date") != today
-                )
+                schedule_kind = schedule.get("kind", "weekly")
+                remove_after_send = False
+
+                if schedule_kind == "weekly":
+                    is_due = (
+                        now.weekday() == schedule["weekday"]
+                        and (now.hour, now.minute) >= (hour, minute)
+                        and schedule.get("last_sent_date") != today
+                    )
+                else:
+                    scheduled_date = date.fromisoformat(schedule["date"])
+                    scheduled_at = datetime(
+                        scheduled_date.year,
+                        scheduled_date.month,
+                        scheduled_date.day,
+                        hour,
+                        minute,
+                        tzinfo=APP_TIMEZONE,
+                    )
+                    is_due = scheduled_at <= now and not schedule.get("sent")
+                    remove_after_send = True
+
                 if not is_due:
+                    remaining_schedules.append(schedule)
                     continue
 
                 sent = await send_scheduled_message(schedule)
                 if sent:
-                    schedule["last_sent_date"] = today
+                    if remove_after_send:
+                        schedule["sent"] = True
+                    else:
+                        schedule["last_sent_date"] = today
+                        remaining_schedules.append(schedule)
                     changed = True
+                else:
+                    remaining_schedules.append(schedule)
 
             if changed:
-                save_schedules(schedules)
+                save_schedules(remaining_schedules)
         except Exception:
             logger.exception("Error revisando mensajes programados")
 
