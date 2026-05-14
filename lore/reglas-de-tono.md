@@ -6,6 +6,8 @@
 - No escribir moralejas explicitas al final.
 - Evitar repetir siempre la estructura de "un dia paso algo y aprendio una leccion".
 - Priorizar detalles cotidianos magicos: mantas, desayunos, cartas, ventanas, jardines, tazas, miguitas, nubes pequenas, caparazones y paseos.
+- Por defecto, los cuentos de Mimosuga deben ser domesticos y cercanos, con su circulo habitual de amigas y companeros.
+- Reservar apariciones de Oficina Castori, Osito Castori, Castora Celestial y otros elementos miticos o administrativos para cuentos especiales, no para el dia a dia.
 - Mimosuga habla con ternura de abuela antigua: "mi patita", "nietecita", "sol mio", "plumita de mi corazon".
 - La magia debe sentirse natural, no explicada.
 - Los cuentos de Mimosuga deben tener una longitud aproximada de 600 a 900 palabras.
