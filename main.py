@@ -141,6 +141,19 @@ def set_partner_chat_id(animal_key: str, chat_id: int) -> None:
     save_data(data)
 
 
+def has_seen_start(animal_key: str, chat_id: int) -> bool:
+    data = load_data()
+    starts = data.get("starts", {})
+    return starts.get(animal_key) == chat_id
+
+
+def mark_seen_start(animal_key: str, chat_id: int) -> None:
+    data = load_data()
+    starts = data.setdefault("starts", {})
+    starts[animal_key] = chat_id
+    save_data(data)
+
+
 def append_history(animal_key: str, direction: str, text: str) -> None:
     if not text:
         return
@@ -181,6 +194,58 @@ def save_schedules(schedules: list[dict[str, Any]]) -> None:
     data = load_data()
     data["schedules"] = schedules
     save_data(data)
+
+
+def schedules_paused() -> bool:
+    data = load_data()
+    return bool(data.get("schedules_paused"))
+
+
+def set_schedules_paused(paused: bool) -> None:
+    data = load_data()
+    data["schedules_paused"] = paused
+    save_data(data)
+
+
+def mark_schedule_before_send(schedule_id: str, today: str) -> dict[str, Any] | None:
+    schedules = get_schedules()
+    for schedule in schedules:
+        if schedule["id"] != schedule_id:
+            continue
+
+        if schedule.get("kind", "weekly") == "weekly":
+            if schedule.get("last_sent_date") == today:
+                return None
+            schedule["last_sent_date"] = today
+        else:
+            if schedule.get("sent") or schedule.get("sending"):
+                return None
+            schedule["sending"] = True
+
+        save_schedules(schedules)
+        return schedule
+    return None
+
+
+def mark_schedule_after_send(schedule_id: str, sent: bool) -> None:
+    schedules = get_schedules()
+    remaining_schedules = []
+    changed = False
+
+    for schedule in schedules:
+        if schedule["id"] != schedule_id:
+            remaining_schedules.append(schedule)
+            continue
+
+        changed = True
+        if schedule.get("kind", "weekly") == "weekly":
+            remaining_schedules.append(schedule)
+        elif not sent:
+            schedule.pop("sending", None)
+            remaining_schedules.append(schedule)
+
+    if changed:
+        save_schedules(remaining_schedules)
 
 
 def parse_schedule_time(value: str) -> tuple[int, int]:
@@ -246,6 +311,8 @@ async def central_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "/programar <animal> <dia|DD/MM/AAAA> <HH:MM> <mensaje>\n"
         "/programados\n"
         "/cancelar <id>\n"
+        "/pausar_programas\n"
+        "/reanudar_programas\n"
         "/status"
     )
 
@@ -439,6 +506,28 @@ async def central_cancel_schedule(
     await update.effective_chat.send_message(f"Programacion {schedule_id} cancelada.")
 
 
+async def central_pause_schedules(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    if not update.effective_chat or not is_owner(update):
+        return
+
+    set_schedules_paused(True)
+    await update.effective_chat.send_message("Programaciones pausadas.")
+
+
+async def central_resume_schedules(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    if not update.effective_chat or not is_owner(update):
+        return
+
+    set_schedules_paused(False)
+    await update.effective_chat.send_message("Programaciones reanudadas.")
+
+
 async def send_as_animal(
     animal_key: str,
     update: Update,
@@ -507,16 +596,17 @@ async def send_scheduled_message(schedule: dict[str, Any]) -> bool:
 async def scheduler_loop() -> None:
     while True:
         try:
+            if schedules_paused():
+                await asyncio.sleep(SCHEDULER_POLL_SECONDS)
+                continue
+
             now = datetime.now(APP_TIMEZONE)
             today = now.date().isoformat()
             schedules = get_schedules()
-            remaining_schedules = []
-            changed = False
 
             for schedule in schedules:
                 hour, minute = parse_schedule_time(schedule["time"])
                 schedule_kind = schedule.get("kind", "weekly")
-                remove_after_send = False
 
                 if schedule_kind == "weekly":
                     is_due = (
@@ -525,6 +615,8 @@ async def scheduler_loop() -> None:
                         and schedule.get("last_sent_date") != today
                     )
                 else:
+                    if schedule.get("sent") or schedule.get("sending"):
+                        continue
                     scheduled_date = date.fromisoformat(schedule["date"])
                     scheduled_at = datetime(
                         scheduled_date.year,
@@ -535,25 +627,16 @@ async def scheduler_loop() -> None:
                         tzinfo=APP_TIMEZONE,
                     )
                     is_due = scheduled_at <= now and not schedule.get("sent")
-                    remove_after_send = True
 
                 if not is_due:
-                    remaining_schedules.append(schedule)
                     continue
 
-                sent = await send_scheduled_message(schedule)
-                if sent:
-                    if remove_after_send:
-                        schedule["sent"] = True
-                    else:
-                        schedule["last_sent_date"] = today
-                        remaining_schedules.append(schedule)
-                    changed = True
-                else:
-                    remaining_schedules.append(schedule)
+                reserved_schedule = mark_schedule_before_send(schedule["id"], today)
+                if not reserved_schedule:
+                    continue
 
-            if changed:
-                save_schedules(remaining_schedules)
+                sent = await send_scheduled_message(reserved_schedule)
+                mark_schedule_after_send(schedule["id"], sent)
         except Exception:
             logger.exception("Error revisando mensajes programados")
 
@@ -569,7 +652,19 @@ async def animal_start(
         return
 
     chat_id = update.effective_chat.id
+    already_started = has_seen_start(animal_key, chat_id) or (
+        get_partner_chat_id(animal_key) == chat_id
+    )
     set_partner_chat_id(animal_key, chat_id)
+    mark_seen_start(animal_key, chat_id)
+
+    if already_started:
+        logger.info(
+            "%s recibio /start repetido de chat_id %s; no se reenvia saludo",
+            ANIMALS[animal_key]["display_name"],
+            chat_id,
+        )
+        return
 
     await update.effective_chat.send_message(ANIMALS[animal_key]["start_message"])
 
@@ -651,6 +746,8 @@ def build_centralita_app() -> Application:
     app.add_handler(CommandHandler("programar", central_schedule))
     app.add_handler(CommandHandler("programados", central_schedules))
     app.add_handler(CommandHandler("cancelar", central_cancel_schedule))
+    app.add_handler(CommandHandler("pausar_programas", central_pause_schedules))
+    app.add_handler(CommandHandler("reanudar_programas", central_resume_schedules))
     for animal_key, animal in ANIMALS.items():
         app.add_handler(
             CommandHandler(
