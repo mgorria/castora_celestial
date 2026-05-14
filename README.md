@@ -57,9 +57,12 @@ Desde tu Telegram, abre **Centralita Magica** y usa:
 ```text
 /status
 /castori texto que quieres enviar
+/historial castori
+/historial castori 20
 ```
 
 Las respuestas que Sandra envie a Oficina Castori se copiaran automaticamente a tu chat privado con Centralita.
+El historial guarda los ultimos mensajes de cada animal en `data.json`.
 
 ## Railway
 
@@ -72,6 +75,7 @@ MI_CHAT_ID=tu_chat_id
 CASTORI_CHAT_ID=chat_id_de_sandra
 LOG_LEVEL=INFO
 DATA_FILE=data.json
+MAX_HISTORY_PER_ANIMAL=50
 ```
 
 Si `CASTORI_CHAT_ID` esta configurado, el bot lo usara directamente aunque `data.json` no exista todavia en Railway.

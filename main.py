@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import socket
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,7 @@ logger = logging.getLogger("control-castora")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 DATA_FILE = Path(os.getenv("DATA_FILE", "data.json"))
+MAX_HISTORY_PER_ANIMAL = int(os.getenv("MAX_HISTORY_PER_ANIMAL", "50"))
 
 TOKEN_CASTORI = os.getenv("TOKEN_CASTORI")
 TOKEN_CENTRALITA = os.getenv("TOKEN_CENTRALITA")
@@ -97,6 +99,37 @@ def set_partner_chat_id(animal_key: str, chat_id: int) -> None:
     save_data(data)
 
 
+def append_history(animal_key: str, direction: str, text: str) -> None:
+    if not text:
+        return
+
+    data = load_data()
+    histories = data.setdefault("history", {})
+    animal_history = histories.setdefault(animal_key, [])
+    animal_history.append(
+        {
+            "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "direction": direction,
+            "text": text,
+        }
+    )
+    histories[animal_key] = animal_history[-MAX_HISTORY_PER_ANIMAL:]
+    save_data(data)
+
+
+def get_history(animal_key: str, limit: int = 10) -> list[dict[str, str]]:
+    data = load_data()
+    history = data.get("history", {}).get(animal_key, [])
+    return history[-limit:]
+
+
+def format_history_entry(entry: dict[str, str]) -> str:
+    direction = entry.get("direction", "")
+    speaker = "Tu" if direction == "out" else "Sandra"
+    text = entry.get("text", "")
+    return f"{speaker}: {text}"
+
+
 def is_owner(update: Update) -> bool:
     return bool(update.effective_user and update.effective_user.id == owner_chat_id())
 
@@ -125,6 +158,7 @@ async def central_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "Centralita Magica operativa.\n\n"
         "Comandos disponibles:\n"
         "/castori <mensaje>\n"
+        "/historial castori [cantidad]\n"
         "/status"
     )
 
@@ -144,6 +178,45 @@ async def central_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def central_castori(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await send_as_animal("castori", update, context)
+
+
+async def central_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_chat or not is_owner(update):
+        return
+
+    if not context.args:
+        await update.effective_chat.send_message(
+            "Uso: /historial <animal> [cantidad]\nEjemplo: /historial castori 10"
+        )
+        return
+
+    animal_key = context.args[0].lower()
+    if animal_key not in ANIMALS:
+        await update.effective_chat.send_message(
+            "Animal no reconocido. Disponibles: " + ", ".join(sorted(ANIMALS))
+        )
+        return
+
+    try:
+        limit = int(context.args[1]) if len(context.args) > 1 else 10
+    except ValueError:
+        await update.effective_chat.send_message("La cantidad debe ser un numero.")
+        return
+
+    limit = max(1, min(limit, MAX_HISTORY_PER_ANIMAL))
+    entries = get_history(animal_key, limit)
+    if not entries:
+        await update.effective_chat.send_message(
+            f"No hay historial guardado para {ANIMALS[animal_key]['display_name']}."
+        )
+        return
+
+    lines = [
+        f"Ultimos {len(entries)} mensajes de {ANIMALS[animal_key]['display_name']}:",
+        "",
+    ]
+    lines.extend(format_history_entry(entry) for entry in entries)
+    await update.effective_chat.send_message("\n".join(lines))
 
 
 async def send_as_animal(
@@ -171,6 +244,7 @@ async def send_as_animal(
     animal_app = animal_apps[animal_key]
     await animal_app.bot.send_chat_action(partner_chat_id, ChatAction.TYPING)
     await animal_app.bot.send_message(chat_id=partner_chat_id, text=text)
+    append_history(animal_key, "out", text)
     await update.effective_chat.send_message(
         f"Enviado desde {ANIMALS[animal_key]['display_name']}."
     )
@@ -231,6 +305,7 @@ async def animal_message(
         text=f"Respuesta recibida en {ANIMALS[animal_key]['display_name']} de {sender}:",
     )
     if text:
+        append_history(animal_key, "in", text)
         await centralita_app.bot.send_message(chat_id=owner_chat_id(), text=text)
     else:
         await centralita_app.bot.send_message(
@@ -265,6 +340,7 @@ def build_centralita_app() -> Application:
     )
     app.add_handler(CommandHandler("start", central_start))
     app.add_handler(CommandHandler("status", central_status))
+    app.add_handler(CommandHandler("historial", central_history))
     app.add_handler(CommandHandler("castori", central_castori))
     app.add_error_handler(error_handler)
     return app
