@@ -144,6 +144,21 @@ def mark_seen_start(animal_key: str, chat_id: int) -> None:
     save_data(data)
 
 
+async def notify_animal_ready(animal_key: str, chat_id: int) -> None:
+    if not centralita_app:
+        raise RuntimeError("Centralita no inicializada")
+
+    await centralita_app.bot.send_message(
+        chat_id=owner_chat_id(),
+        text=(
+            f"{ANIMALS[animal_key]['display_name']} ha capturado un chat_id: "
+            f"{chat_id}\n"
+            f"{ANIMALS[animal_key]['display_name']} ya esta operativo. "
+            f"Puedes saludar con /{ANIMALS[animal_key]['central_command']} <mensaje>."
+        ),
+    )
+
+
 def append_history(animal_key: str, direction: str, text: str) -> None:
     if not text:
         return
@@ -679,10 +694,18 @@ async def animal_message(
         return
 
     partner_chat_id = get_partner_chat_id(animal_key)
+    if not partner_chat_id:
+        chat_id = update.effective_chat.id
+        set_partner_chat_id(animal_key, chat_id)
+        mark_seen_start(animal_key, chat_id)
+        await notify_animal_ready(animal_key, chat_id)
+        return
+
     if update.effective_chat.id != partner_chat_id:
-        await update.effective_chat.send_message(
-            "La Oficina Castori no localiza expediente asociado a este acceso. "
-            "Presente primero /start para su registro provisional."
+        logger.warning(
+            "%s recibio mensaje de chat no vinculado: %s",
+            ANIMALS[animal_key]["display_name"],
+            update.effective_chat.id,
         )
         return
 
