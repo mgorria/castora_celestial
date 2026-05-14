@@ -80,6 +80,43 @@ El historial guarda los ultimos mensajes de cada animal en `data.json`.
 Los mensajes programados pueden ser semanales o de una fecha exacta, se revisan periodicamente y se envian en la zona horaria configurada.
 Si algo raro ocurre, `/pausar_programas` detiene los envios programados hasta usar `/reanudar_programas`.
 
+## Cuentos y lore
+
+Mimosuga puede ofrecer un cuento diario con:
+
+```text
+/cuento
+```
+
+El flujo es:
+
+1. Mimosuga comprueba si Patita ya recibio cuento hoy.
+2. Si no lo recibio, genera dos opciones basadas en `lore/resumen-para-ia.md`.
+3. Patita elige una opcion con botones.
+4. Mimosuga genera y envia el cuento completo.
+5. Solo despues de enviarlo se consume el limite diario.
+6. La historia queda guardada en PostgreSQL con estado `pending`.
+
+Comandos privados de administrador en **Centralita Magica**:
+
+```text
+/admin_ultimos
+/admin_ver ID
+/admin_aprobar ID
+/admin_descartar ID
+/admin_canon ID
+/admin_lore
+```
+
+El lore editable vive en:
+
+```text
+lore/resumen-para-ia.md
+lore/reglas-de-tono.md
+lore/personajes/
+lore/historias/
+```
+
 ## Railway
 
 En Railway, conecta el repositorio de GitHub y configura estas variables:
@@ -97,6 +134,12 @@ MAX_HISTORY_PER_ANIMAL=50
 APP_TIMEZONE=Europe/Madrid
 SCHEDULER_POLL_SECONDS=30
 STARTUP_DELAY_SECONDS=8
+DATABASE_URL=postgresql://...
+OPENAI_API_KEY=tu_api_key_openai
+OPENAI_MODEL=gpt-5.2
+TELEGRAM_ADMIN_ID=tu_chat_id
+SANDRA_TELEGRAM_ID=chat_id_de_sandra
+PENDING_STORIES_DIR=/app/data/lore/historias/pendientes
 ```
 
 Si `CASTORI_CHAT_ID` esta configurado, el bot lo usara directamente aunque `data.json` no exista todavia en Railway.
@@ -114,6 +157,13 @@ Railway usara el `Procfile`:
 ```Procfile
 worker: python main.py
 ```
+
+Al arrancar, el bot crea automaticamente las tablas necesarias si `DATABASE_URL` esta configurada:
+
+- `users`
+- `stories`
+- `daily_limits`
+- `story_offers`
 
 ## Nota de seguridad
 

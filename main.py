@@ -13,13 +13,24 @@ from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.constants import ChatAction
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
     ApplicationBuilder,
+    CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
     MessageHandler,
     filters,
+)
+
+import database
+from lore_utils import read_core_lore, write_pending_story_markdown
+from story_service import (
+    StoryGenerationError,
+    generate_full_story,
+    generate_story_options,
+    openai_available,
 )
 
 
@@ -67,6 +78,8 @@ WEEKDAY_NAMES = {
 TOKEN_CASTORI = os.getenv("TOKEN_CASTORI")
 TOKEN_CENTRALITA = os.getenv("TOKEN_CENTRALITA")
 MI_CHAT_ID = os.getenv("MI_CHAT_ID")
+TELEGRAM_ADMIN_ID = os.getenv("TELEGRAM_ADMIN_ID") or MI_CHAT_ID
+SANDRA_TELEGRAM_ID = os.getenv("SANDRA_TELEGRAM_ID")
 
 ANIMALS: dict[str, dict[str, str]] = {
     "castori": {
@@ -101,6 +114,59 @@ def owner_chat_id() -> int:
     if not MI_CHAT_ID:
         raise RuntimeError("Falta la variable de entorno MI_CHAT_ID")
     return int(MI_CHAT_ID)
+
+
+def admin_chat_id() -> int:
+    if not TELEGRAM_ADMIN_ID:
+        raise RuntimeError("Falta TELEGRAM_ADMIN_ID o MI_CHAT_ID")
+    return int(TELEGRAM_ADMIN_ID)
+
+
+def is_admin(update: Update) -> bool:
+    return bool(update.effective_user and update.effective_user.id == admin_chat_id())
+
+
+def is_sandra_user(update: Update) -> bool:
+    if not update.effective_user:
+        return False
+    if SANDRA_TELEGRAM_ID:
+        return update.effective_user.id == int(SANDRA_TELEGRAM_ID)
+    mimosuga_chat_id = get_partner_chat_id("mimosuga")
+    if not mimosuga_chat_id:
+        return True
+    return bool(mimosuga_chat_id and update.effective_chat and update.effective_chat.id == mimosuga_chat_id)
+
+
+def today_local() -> date:
+    return datetime.now(APP_TIMEZONE).date()
+
+
+def split_telegram_text(text: str, limit: int = 3600) -> list[str]:
+    chunks: list[str] = []
+    remaining = text.strip()
+    while len(remaining) > limit:
+        split_at = remaining.rfind("\n\n", 0, limit)
+        if split_at == -1:
+            split_at = remaining.rfind(" ", 0, limit)
+        if split_at == -1:
+            split_at = limit
+        chunks.append(remaining[:split_at].strip())
+        remaining = remaining[split_at:].strip()
+    if remaining:
+        chunks.append(remaining)
+    return chunks
+
+
+def ensure_json_list(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+        return parsed if isinstance(parsed, list) else []
+    return []
 
 
 def load_data() -> dict[str, Any]:
@@ -325,6 +391,12 @@ async def central_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "/cancelar <id>\n"
         "/pausar_programas\n"
         "/reanudar_programas\n"
+        "/admin_ultimos\n"
+        "/admin_ver ID\n"
+        "/admin_aprobar ID\n"
+        "/admin_descartar ID\n"
+        "/admin_canon ID\n"
+        "/admin_lore\n"
         "/status"
     )
 
@@ -538,6 +610,342 @@ async def central_resume_schedules(
 
     set_schedules_paused(False)
     await update.effective_chat.send_message("Programaciones reanudadas.")
+
+
+async def story_request(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_chat or not update.effective_user:
+        return
+
+    if not is_sandra_user(update):
+        await update.effective_chat.send_message(
+            "Ay, patita, este cuaderno todavia no esta preparado para este caminito."
+        )
+        return
+
+    if not database.db_available() or not openai_available():
+        await update.effective_chat.send_message(
+            "Ay, mi patita, Mimosuga no encuentra ahora mismo su cuaderno de cuentos. "
+            "Vuelve un poquito mas tarde, que lo dejare sobre la mesa."
+        )
+        return
+
+    user_id = update.effective_user.id
+    user_name = update.effective_user.full_name
+    await database.upsert_user(user_id, user_name, "sandra")
+
+    if await database.daily_story_consumed(user_id, today_local()):
+        await update.effective_chat.send_message(
+            "Ay, mi patita, hoy ya te he contado una historia. Guardare otra "
+            "dobladita bajo mi mantita para manana, que las historias tambien "
+            "necesitan dormir un poco."
+        )
+        return
+
+    await context.bot.send_chat_action(update.effective_chat.id, ChatAction.TYPING)
+    try:
+        recent = await database.get_recent_story_summaries("Mimosuga")
+        options = await generate_story_options(narrator="Mimosuga", recent_summaries=recent)
+        offer_id = await database.create_story_offer(user_id, "Mimosuga", options)
+    except Exception:
+        logger.exception("No se pudieron generar opciones de cuento")
+        await update.effective_chat.send_message(
+            "Ay, sol mio, se me han desordenado las paginas del cuaderno. "
+            "Dame un ratito y lo intento otra vez."
+        )
+        return
+
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    options[0]["title"],
+                    callback_data=f"cuento:{offer_id}:0",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    options[1]["title"],
+                    callback_data=f"cuento:{offer_id}:1",
+                )
+            ],
+        ]
+    )
+    message = (
+        "Ven, patita, que Mimosuga tiene dos cuentos preparados. "
+        "Elige el que te llame mas suave:\n\n"
+        f"1. {options[0]['title']}\n{options[0]['teaser']}\n\n"
+        f"2. {options[1]['title']}\n{options[1]['teaser']}"
+    )
+    await update.effective_chat.send_message(message, reply_markup=keyboard)
+
+
+async def story_option_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query or not query.message or not query.from_user:
+        return
+
+    await query.answer()
+    parts = (query.data or "").split(":")
+    if len(parts) != 3:
+        return
+
+    _, offer_id, option_index_text = parts
+    try:
+        option_index = int(option_index_text)
+    except ValueError:
+        await query.message.reply_text("Ay, patita, ese boton se ha quedado torcido.")
+        return
+
+    if not database.db_available() or not openai_available():
+        await query.message.reply_text(
+            "Ay, mi patita, ahora mismo no puedo abrir el cuaderno de cuentos."
+        )
+        return
+
+    offer = await database.get_story_offer(offer_id)
+    if not offer or offer.get("consumed_at") or offer.get("expires_at") <= datetime.now(timezone.utc):
+        await query.message.reply_text(
+            "Ay, ese cuento se ha quedado antiguo en la repisa. Pideme /cuento y te saco dos nuevos."
+        )
+        return
+
+    if offer["telegram_user_id"] != query.from_user.id:
+        await query.message.reply_text("Ay, este cuento estaba guardado para otra patita.")
+        return
+
+    if await database.daily_story_consumed(query.from_user.id, today_local()):
+        await query.message.reply_text(
+            "Ay, mi patita, hoy ya recibiste tu cuento. Manana tendre otro guardadito."
+        )
+        return
+
+    options = ensure_json_list(offer["options"])
+    if option_index < 0 or option_index >= len(options):
+        await query.message.reply_text("Ay, ese boton ya no apunta a ningun cuento.")
+        return
+
+    if not await database.reserve_story_offer(offer_id):
+        await query.message.reply_text(
+            "Ay, ese boton ya esta siendo atendido. Mimosuga va despacito, pero va."
+        )
+        return
+
+    selected_option = options[option_index]
+    await query.message.reply_text(
+        "Mimosuga se acomoda el chal y abre el cuaderno. Dame un momentito, patita."
+    )
+
+    try:
+        recent = await database.get_recent_story_summaries("Mimosuga")
+        story = await generate_full_story(
+            narrator="Mimosuga",
+            selected_option=selected_option,
+            offered_options=options,
+            recent_summaries=recent,
+        )
+        story_id = await database.create_story(
+            title=story["title"],
+            full_text=story["full_text"],
+            summary=story["summary"],
+            narrator="Mimosuga",
+            selected_option=selected_option.get("title", ""),
+            offered_options=options,
+            characters_used=story.get("characters_used"),
+            locations_used=story.get("locations_used"),
+            new_lore_proposals=story.get("new_lore_proposals"),
+            delivered_to_user_id=query.from_user.id,
+        )
+        story_record = {
+            **story,
+            "id": story_id,
+            "status": "pending",
+            "narrator": "Mimosuga",
+            "created_at": datetime.now(timezone.utc),
+            "new_lore_proposals": story.get("new_lore_proposals") or [],
+        }
+        write_pending_story_markdown(story_record)
+
+        for chunk in split_telegram_text(story["full_text"]):
+            await context.bot.send_chat_action(query.message.chat_id, ChatAction.TYPING)
+            await query.message.reply_text(chunk)
+
+        await database.mark_story_delivered(story_id)
+        consumed = await database.consume_daily_story(query.from_user.id, today_local(), story_id)
+        if not consumed:
+            logger.warning("Cuento %s entregado pero limite diario ya existia", story_id)
+        await notify_admin_story(story_id, story, options, selected_option)
+    except Exception:
+        logger.exception("No se pudo generar o enviar el cuento")
+        await database.release_story_offer(offer_id)
+        await query.message.reply_text(
+            "Ay, mi patita, el cuento se me ha quedado a medias entre las paginas. "
+            "No cuenta como cuento de hoy; lo intentamos otra vez cuando quieras."
+        )
+
+
+async def notify_admin_story(
+    story_id: int,
+    story: dict[str, Any],
+    options: list[dict[str, Any]],
+    selected_option: dict[str, Any],
+) -> None:
+    if not centralita_app:
+        return
+
+    summary = (
+        f"Cuento generado #{story_id}\n"
+        f"Titulo: {story['title']}\n"
+        "Estado: pending\n"
+        f"Opcion elegida: {selected_option.get('title', '')}\n\n"
+        "Opciones ofrecidas:\n"
+        f"- {options[0].get('title', '')}: {options[0].get('teaser', '')}\n"
+        f"- {options[1].get('title', '')}: {options[1].get('teaser', '')}\n\n"
+        f"Resumen: {story['summary']}"
+    )
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("Aprobar", callback_data=f"adminstory:{story_id}:approved"),
+                InlineKeyboardButton("Descartar", callback_data=f"adminstory:{story_id}:rejected"),
+                InlineKeyboardButton("Canon", callback_data=f"adminstory:{story_id}:canon"),
+            ]
+        ]
+    )
+    await centralita_app.bot.send_message(
+        chat_id=admin_chat_id(),
+        text=summary,
+        reply_markup=keyboard,
+    )
+    for chunk in split_telegram_text(story["full_text"]):
+        await centralita_app.bot.send_message(chat_id=admin_chat_id(), text=chunk)
+
+
+async def admin_latest_stories(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_chat or not is_admin(update):
+        return
+    if not database.db_available():
+        await update.effective_chat.send_message("Base de datos no disponible.")
+        return
+
+    stories = await database.get_latest_stories(10)
+    if not stories:
+        await update.effective_chat.send_message("No hay historias generadas.")
+        return
+
+    lines = ["Ultimas historias:", ""]
+    for story in stories:
+        created_at = story["created_at"].astimezone(APP_TIMEZONE).strftime("%d/%m/%Y %H:%M")
+        lines.append(
+            f"{story['id']} - {story['title']} - {created_at} - {story['status']}"
+        )
+    await update.effective_chat.send_message("\n".join(lines))
+
+
+async def admin_view_story(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_chat or not is_admin(update):
+        return
+    if not context.args:
+        await update.effective_chat.send_message("Uso: /admin_ver ID")
+        return
+    story = await get_admin_story_from_args(update, context)
+    if not story:
+        return
+
+    meta = (
+        f"#{story['id']} - {story['title']}\n"
+        f"Estado: {story['status']}\n"
+        f"Narrador: {story['narrator']}\n"
+        f"Resumen: {story['summary']}\n"
+        f"Opcion elegida: {story.get('selected_option') or ''}"
+    )
+    await update.effective_chat.send_message(meta)
+    for chunk in split_telegram_text(story["full_text"]):
+        await update.effective_chat.send_message(chunk)
+
+
+async def get_admin_story_from_args(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> dict[str, Any] | None:
+    if not database.db_available():
+        await update.effective_chat.send_message("Base de datos no disponible.")
+        return None
+    try:
+        story_id = int(context.args[0])
+    except (ValueError, IndexError):
+        await update.effective_chat.send_message("ID no valido.")
+        return None
+    story = await database.get_story(story_id)
+    if not story:
+        await update.effective_chat.send_message("No encuentro esa historia.")
+        return None
+    return story
+
+
+async def admin_update_story_status(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    status: str,
+) -> None:
+    if not update.effective_chat or not is_admin(update):
+        return
+    story = await get_admin_story_from_args(update, context)
+    if not story:
+        return
+    await database.update_story_status(story["id"], status)
+    await update.effective_chat.send_message(f"Historia {story['id']} marcada como {status}.")
+
+
+async def admin_approve_story(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await admin_update_story_status(update, context, "approved")
+
+
+async def admin_reject_story(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await admin_update_story_status(update, context, "rejected")
+
+
+async def admin_canon_story(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await admin_update_story_status(update, context, "canon")
+
+
+async def admin_lore(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_chat or not is_admin(update):
+        return
+    lore = read_core_lore()
+    for chunk in split_telegram_text(lore, limit=3500):
+        await update.effective_chat.send_message(chunk)
+
+
+async def admin_story_status_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query or not query.from_user:
+        return
+    if query.from_user.id != admin_chat_id():
+        await query.answer("Solo el administrador puede revisar cuentos.", show_alert=True)
+        return
+    parts = (query.data or "").split(":")
+    if len(parts) != 3:
+        await query.answer()
+        return
+    _, story_id_text, status = parts
+    if status not in {"approved", "rejected", "canon"}:
+        await query.answer()
+        return
+    try:
+        story_id = int(story_id_text)
+    except ValueError:
+        await query.answer("ID no valido.", show_alert=True)
+        return
+    if not database.db_available():
+        await query.answer("Base de datos no disponible.", show_alert=True)
+        return
+    updated = await database.update_story_status(story_id, status)
+    if updated:
+        await query.answer(f"Historia marcada como {status}.")
+        if query.message:
+            await query.message.reply_text(f"Historia {story_id} marcada como {status}.")
+    else:
+        await query.answer("No encuentro esa historia.", show_alert=True)
 
 
 async def send_as_animal(
@@ -768,6 +1176,13 @@ def build_centralita_app() -> Application:
     app.add_handler(CommandHandler("cancelar", central_cancel_schedule))
     app.add_handler(CommandHandler("pausar_programas", central_pause_schedules))
     app.add_handler(CommandHandler("reanudar_programas", central_resume_schedules))
+    app.add_handler(CommandHandler("admin_ultimos", admin_latest_stories))
+    app.add_handler(CommandHandler("admin_ver", admin_view_story))
+    app.add_handler(CommandHandler("admin_aprobar", admin_approve_story))
+    app.add_handler(CommandHandler("admin_descartar", admin_reject_story))
+    app.add_handler(CommandHandler("admin_canon", admin_canon_story))
+    app.add_handler(CommandHandler("admin_lore", admin_lore))
+    app.add_handler(CallbackQueryHandler(admin_story_status_callback, pattern=r"^adminstory:"))
     for animal_key, animal in ANIMALS.items():
         app.add_handler(
             CommandHandler(
@@ -796,6 +1211,9 @@ def build_animal_app(animal_key: str) -> Application:
             lambda update, context: animal_start(animal_key, update, context),
         )
     )
+    if animal_key == "mimosuga":
+        app.add_handler(CommandHandler("cuento", story_request))
+        app.add_handler(CallbackQueryHandler(story_option_callback, pattern=r"^cuento:"))
     app.add_handler(
         MessageHandler(
             filters.ALL & ~filters.COMMAND,
@@ -834,6 +1252,8 @@ async def main() -> None:
         logger.info("Esperando %s segundos antes de iniciar polling", STARTUP_DELAY_SECONDS)
         await asyncio.sleep(STARTUP_DELAY_SECONDS)
 
+    await database.init_db()
+
     centralita_app = build_centralita_app()
     for animal_key in ANIMALS:
         token_env = ANIMALS[animal_key]["token_env"]
@@ -866,6 +1286,7 @@ async def main() -> None:
         scheduler_task.cancel()
         for app in reversed(apps):
             await stop_app(app)
+        await database.close_db()
 
 
 if __name__ == "__main__":
