@@ -5,7 +5,7 @@ from typing import Any
 
 from openai import AsyncOpenAI
 
-from lore_utils import read_core_lore
+from lore_utils import read_core_lore, read_relevant_character_lore
 
 
 logger = logging.getLogger("control-castora.story_service")
@@ -105,11 +105,19 @@ async def generate_full_story(
     recent_summaries: list[str],
 ) -> dict[str, Any]:
     lore = read_core_lore()
+    character_context = read_relevant_character_lore(
+        json.dumps(selected_option, ensure_ascii=False)
+        + "\n"
+        + json.dumps(offered_options, ensure_ascii=False)
+    )
     prompt = f"""
 Eres el sistema narrativo privado de Mimosuga. Devuelve SOLO JSON valido.
 
 Contexto de lore:
 {lore}
+
+Fichas de personajes relevantes detectadas:
+{character_context}
 
 Narrador actual: {narrator}
 

@@ -22,6 +22,34 @@ def read_core_lore() -> str:
     return f"# Resumen de lore\n\n{resumen}\n\n# Reglas de tono\n\n{reglas}".strip()
 
 
+CHARACTER_LORE_FILES = {
+    "mimosuga": ("Mimosuga", "personajes/mimosuga.md"),
+    "ululon": ("Ululon", "personajes/ululon.md"),
+    "ululón": ("Ululon", "personajes/ululon.md"),
+    "caparablanda": ("Caparablanda", "personajes/caparablanda.md"),
+    "castora celestial": ("Castora Celestial", "personajes/castora-celestial.md"),
+    "osito castori": ("Osito Castori", "personajes/osito-castori.md"),
+    "donetito": ("Donetito", "personajes/donetito.md"),
+}
+
+
+def read_relevant_character_lore(text: str) -> str:
+    lowered = text.lower()
+    sections = []
+    seen_paths = set()
+    for trigger, (display_name, relative_path) in CHARACTER_LORE_FILES.items():
+        if trigger not in lowered or relative_path in seen_paths:
+            continue
+        content = read_lore_file(relative_path)
+        if content:
+            sections.append(f"## {display_name}\n\n{content}")
+            seen_paths.add(relative_path)
+
+    if not sections:
+        return "No se han detectado fichas concretas de personajes para esta opcion."
+    return "\n\n".join(sections)
+
+
 def safe_slug(value: str) -> str:
     allowed = []
     for char in value.lower():
