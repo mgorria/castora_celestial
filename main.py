@@ -55,10 +55,10 @@ ANIMALS: dict[str, dict[str, str]] = {
         "partner_key": "mimosuga_partner_chat_id",
         "central_command": "mimosuga",
         "start_message": (
-            "Ay, mi nietecita Sandra, patita blanca de mi corazon. Ya estoy aqui, "
-            "despacito, como llegamos las tortugas que hemos visto pasar muchas lunas. "
-            "Ven, sol mio, que Mimosuga te guarda un sitio tranquilo y una palabra "
-            "calentita para cuando la necesites."
+            "Ay, mi nietecita, patita blanca de mi corazon. Ya estoy aqui, despacito, "
+            "como llegamos las tortugas que hemos visto pasar muchas lunas. Ven, sol "
+            "mio, que Mimosuga te guarda un sitio tranquilo y una palabra calentita "
+            "para cuando la necesites."
         ),
     }
 }
@@ -142,7 +142,7 @@ def get_history(animal_key: str, limit: int = 10) -> list[dict[str, str]]:
 
 def format_history_entry(entry: dict[str, str]) -> str:
     direction = entry.get("direction", "")
-    speaker = "Tu" if direction == "out" else "Sandra"
+    speaker = "Tu" if direction == "out" else "Patita"
     text = entry.get("text", "")
     return f"{speaker}: {text}"
 
