@@ -12,8 +12,14 @@ Personajes importantes:
 
 - Patita: la destinataria de la magia. Es una patita blanca preciosa, tierna y querida. Nunca se usa su nombre humano en voz de los animales.
 - Mimosuga: tortuga abuela, narradora principal de cuentos cotidianos y calidos.
+- Caparantonio: tortugo mayor del circulo de Mimosuga, solemne con asuntos domesticos y companero de paseos lentos.
+- Plumadulce: criatura suave y ligera que deja notas, plumas y pequenos avisos tiernos.
+- Bambalin: animalito algo teatral que prepara telones diminutos, entradas ceremoniosas y pequenas celebraciones.
 - Caparablanda: figura relacionada con suavidad, refugio y ternura de caparazon flexible.
 - Donetito: presencia pequena, dulce y algo redondita, asociada a desayunos, caprichos y alegrias sencillas.
+- Tia Lironda: liebre anciana, elegantisima y viajera, portadora de recuerdos y caminos antiguos.
+- Senora Migaja: ratoncita mayor del Cafe de las Miguitas, seria con la merienda y generosa con bizcocho y abrazos.
+- Brumilda: ovejita de lana gris azulada que teje mantas magicas con sensaciones de calma y hogar.
 - Osito Castori: osito vinculado al universo Castori, protector, administrativo a su manera y muy abrazable.
 - La Castora Celestial: figura mayor del mito, origen o autoridad magica luminosa.
 - Oficina Castori: oficina de castores burocratico-solemnes que tramita expedientes magicos.

@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Any
 import os
+import re
 
 
 LORE_DIR = Path(__file__).parent / "lore"
@@ -22,28 +23,72 @@ def read_core_lore() -> str:
     return f"# Resumen de lore\n\n{resumen}\n\n# Reglas de tono\n\n{reglas}".strip()
 
 
-CHARACTER_LORE_FILES = {
-    "mimosuga": ("Mimosuga", "personajes/mimosuga.md"),
-    "ululon": ("Ululon", "personajes/ululon.md"),
-    "ululón": ("Ululon", "personajes/ululon.md"),
-    "caparablanda": ("Caparablanda", "personajes/caparablanda.md"),
-    "castora celestial": ("Castora Celestial", "personajes/castora-celestial.md"),
-    "osito castori": ("Osito Castori", "personajes/osito-castori.md"),
-    "donetito": ("Donetito", "personajes/donetito.md"),
-}
+def parse_character_lore_file(path: Path) -> tuple[str, list[str], str]:
+    content = path.read_text(encoding="utf-8")
+    aliases = []
+    title = path.stem.replace("-", " ").title()
+
+    if content.startswith("---"):
+        _, _, rest = content.partition("---")
+        frontmatter, _, body = rest.partition("---")
+        content = body.strip()
+        current_key = None
+        for raw_line in frontmatter.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            if line.startswith("-") and current_key == "aliases":
+                aliases.append(line[1:].strip().strip('"'))
+                continue
+            if ":" not in line:
+                continue
+            key, value = line.split(":", 1)
+            current_key = key.strip()
+            value = value.strip().strip('"')
+            if current_key == "name" and value:
+                title = value
+            elif current_key == "aliases" and value and value != "[]":
+                aliases.extend(item.strip().strip('"') for item in value.split(","))
+
+    heading = re.search(r"^#\s+(.+)$", content, flags=re.MULTILINE)
+    if heading:
+        title = heading.group(1).strip()
+
+    aliases.extend([title, path.stem.replace("-", " ")])
+    aliases = [alias for alias in aliases if alias]
+    return title, aliases, content
+
+
+def discover_character_lore() -> list[dict[str, Any]]:
+    character_dir = LORE_DIR / "personajes"
+    if not character_dir.exists():
+        return []
+    characters = []
+    for path in sorted(character_dir.glob("*.md")):
+        title, aliases, content = parse_character_lore_file(path)
+        characters.append(
+            {
+                "title": title,
+                "aliases": aliases,
+                "content": content,
+                "path": path,
+            }
+        )
+    return characters
 
 
 def read_relevant_character_lore(text: str) -> str:
     lowered = text.lower()
     sections = []
     seen_paths = set()
-    for trigger, (display_name, relative_path) in CHARACTER_LORE_FILES.items():
-        if trigger not in lowered or relative_path in seen_paths:
+    for character in discover_character_lore():
+        path = character["path"]
+        if path in seen_paths:
             continue
-        content = read_lore_file(relative_path)
-        if content:
-            sections.append(f"## {display_name}\n\n{content}")
-            seen_paths.add(relative_path)
+        if not any(alias.lower() in lowered for alias in character["aliases"]):
+            continue
+        sections.append(f"## {character['title']}\n\n{character['content']}")
+        seen_paths.add(path)
 
     if not sections:
         return "No se han detectado fichas concretas de personajes para esta opcion."
