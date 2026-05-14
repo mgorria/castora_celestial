@@ -3,9 +3,11 @@ import json
 import logging
 import os
 import socket
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 from telegram import Update
@@ -31,6 +33,29 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 DATA_FILE = Path(os.getenv("DATA_FILE", "data.json"))
 MAX_HISTORY_PER_ANIMAL = int(os.getenv("MAX_HISTORY_PER_ANIMAL", "50"))
+APP_TIMEZONE = ZoneInfo(os.getenv("APP_TIMEZONE", "Europe/Madrid"))
+SCHEDULER_POLL_SECONDS = int(os.getenv("SCHEDULER_POLL_SECONDS", "30"))
+
+WEEKDAYS = {
+    "lunes": 0,
+    "martes": 1,
+    "miercoles": 2,
+    "miércoles": 2,
+    "jueves": 3,
+    "viernes": 4,
+    "sabado": 5,
+    "sábado": 5,
+    "domingo": 6,
+}
+WEEKDAY_NAMES = {
+    0: "lunes",
+    1: "martes",
+    2: "miercoles",
+    3: "jueves",
+    4: "viernes",
+    5: "sabado",
+    6: "domingo",
+}
 
 TOKEN_CASTORI = os.getenv("TOKEN_CASTORI")
 TOKEN_CENTRALITA = os.getenv("TOKEN_CENTRALITA")
@@ -147,6 +172,39 @@ def format_history_entry(entry: dict[str, str]) -> str:
     return f"{speaker}: {text}"
 
 
+def get_schedules() -> list[dict[str, Any]]:
+    data = load_data()
+    return data.get("schedules", [])
+
+
+def save_schedules(schedules: list[dict[str, Any]]) -> None:
+    data = load_data()
+    data["schedules"] = schedules
+    save_data(data)
+
+
+def parse_schedule_time(value: str) -> tuple[int, int]:
+    hour_text, separator, minute_text = value.partition(":")
+    if separator != ":":
+        raise ValueError("Formato de hora no valido")
+
+    hour = int(hour_text)
+    minute = int(minute_text)
+    if not 0 <= hour <= 23 or not 0 <= minute <= 59:
+        raise ValueError("Hora fuera de rango")
+    return hour, minute
+
+
+def format_schedule(schedule: dict[str, Any]) -> str:
+    animal = ANIMALS.get(schedule["animal_key"], {})
+    display_name = animal.get("display_name", schedule["animal_key"])
+    weekday = WEEKDAY_NAMES.get(schedule["weekday"], str(schedule["weekday"]))
+    return (
+        f"{schedule['id']} - {display_name} - cada {weekday} "
+        f"a las {schedule['time']} - {schedule['text']}"
+    )
+
+
 def is_owner(update: Update) -> bool:
     return bool(update.effective_user and update.effective_user.id == owner_chat_id())
 
@@ -180,6 +238,9 @@ async def central_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "Comandos disponibles:\n"
         f"{animal_commands}\n"
         "/historial <animal> [cantidad]\n"
+        "/programar <animal> <dia> <HH:MM> <mensaje>\n"
+        "/programados\n"
+        "/cancelar <id>\n"
         "/status"
     )
 
@@ -246,6 +307,102 @@ async def central_history(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await update.effective_chat.send_message("\n".join(lines))
 
 
+async def central_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_chat or not is_owner(update):
+        return
+
+    if len(context.args) < 4:
+        await update.effective_chat.send_message(
+            "Uso: /programar <animal> <dia> <HH:MM> <mensaje>\n"
+            "Ejemplo: /programar mimosuga lunes 09:00 Buena semana, patita."
+        )
+        return
+
+    animal_key = context.args[0].lower()
+    if animal_key not in ANIMALS:
+        await update.effective_chat.send_message(
+            "Animal no reconocido. Disponibles: " + ", ".join(sorted(ANIMALS))
+        )
+        return
+
+    weekday_text = context.args[1].lower()
+    if weekday_text not in WEEKDAYS:
+        await update.effective_chat.send_message(
+            "Dia no reconocido. Usa lunes, martes, miercoles, jueves, viernes, "
+            "sabado o domingo."
+        )
+        return
+
+    try:
+        hour, minute = parse_schedule_time(context.args[2])
+    except ValueError:
+        await update.effective_chat.send_message("Hora no valida. Usa formato HH:MM.")
+        return
+
+    text = " ".join(context.args[3:]).strip()
+    if not text:
+        await update.effective_chat.send_message("El mensaje no puede estar vacio.")
+        return
+
+    now = datetime.now(APP_TIMEZONE)
+    weekday = WEEKDAYS[weekday_text]
+    last_sent_date = None
+    if now.weekday() == weekday and (now.hour, now.minute) >= (hour, minute):
+        last_sent_date = now.date().isoformat()
+
+    schedule = {
+        "id": uuid.uuid4().hex[:8],
+        "animal_key": animal_key,
+        "weekday": weekday,
+        "time": f"{hour:02d}:{minute:02d}",
+        "text": text,
+        "last_sent_date": last_sent_date,
+    }
+    schedules = get_schedules()
+    schedules.append(schedule)
+    save_schedules(schedules)
+
+    await update.effective_chat.send_message(
+        "Programacion creada:\n" + format_schedule(schedule)
+    )
+
+
+async def central_schedules(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_chat or not is_owner(update):
+        return
+
+    schedules = get_schedules()
+    if not schedules:
+        await update.effective_chat.send_message("No hay mensajes programados.")
+        return
+
+    lines = ["Mensajes programados:", ""]
+    lines.extend(format_schedule(schedule) for schedule in schedules)
+    await update.effective_chat.send_message("\n".join(lines))
+
+
+async def central_cancel_schedule(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    if not update.effective_chat or not is_owner(update):
+        return
+
+    if not context.args:
+        await update.effective_chat.send_message("Uso: /cancelar <id>")
+        return
+
+    schedule_id = context.args[0]
+    schedules = get_schedules()
+    remaining = [schedule for schedule in schedules if schedule["id"] != schedule_id]
+    if len(remaining) == len(schedules):
+        await update.effective_chat.send_message("No encuentro esa programacion.")
+        return
+
+    save_schedules(remaining)
+    await update.effective_chat.send_message(f"Programacion {schedule_id} cancelada.")
+
+
 async def send_as_animal(
     animal_key: str,
     update: Update,
@@ -282,6 +439,64 @@ async def send_as_animal(
     await update.effective_chat.send_message(
         f"Enviado desde {ANIMALS[animal_key]['display_name']}."
     )
+
+
+async def send_scheduled_message(schedule: dict[str, Any]) -> bool:
+    animal_key = schedule["animal_key"]
+    partner_chat_id = get_partner_chat_id(animal_key)
+    animal_app = animal_apps.get(animal_key)
+    if not partner_chat_id or not animal_app:
+        logger.warning(
+            "No se puede enviar programacion %s: animal sin chat_id o token",
+            schedule["id"],
+        )
+        return False
+
+    text = schedule["text"]
+    await animal_app.bot.send_chat_action(partner_chat_id, ChatAction.TYPING)
+    await animal_app.bot.send_message(chat_id=partner_chat_id, text=text)
+    append_history(animal_key, "out", text)
+
+    if centralita_app:
+        await centralita_app.bot.send_message(
+            chat_id=owner_chat_id(),
+            text=(
+                f"Mensaje programado enviado desde "
+                f"{ANIMALS[animal_key]['display_name']}:\n{text}"
+            ),
+        )
+    return True
+
+
+async def scheduler_loop() -> None:
+    while True:
+        try:
+            now = datetime.now(APP_TIMEZONE)
+            today = now.date().isoformat()
+            schedules = get_schedules()
+            changed = False
+
+            for schedule in schedules:
+                hour, minute = parse_schedule_time(schedule["time"])
+                is_due = (
+                    now.weekday() == schedule["weekday"]
+                    and (now.hour, now.minute) >= (hour, minute)
+                    and schedule.get("last_sent_date") != today
+                )
+                if not is_due:
+                    continue
+
+                sent = await send_scheduled_message(schedule)
+                if sent:
+                    schedule["last_sent_date"] = today
+                    changed = True
+
+            if changed:
+                save_schedules(schedules)
+        except Exception:
+            logger.exception("Error revisando mensajes programados")
+
+        await asyncio.sleep(SCHEDULER_POLL_SECONDS)
 
 
 async def animal_start(
@@ -372,6 +587,9 @@ def build_centralita_app() -> Application:
     app.add_handler(CommandHandler("start", central_start))
     app.add_handler(CommandHandler("status", central_status))
     app.add_handler(CommandHandler("historial", central_history))
+    app.add_handler(CommandHandler("programar", central_schedule))
+    app.add_handler(CommandHandler("programados", central_schedules))
+    app.add_handler(CommandHandler("cancelar", central_cancel_schedule))
     for animal_key, animal in ANIMALS.items():
         app.add_handler(
             CommandHandler(
@@ -451,10 +669,12 @@ async def main() -> None:
         await start_app(app)
 
     logger.info("Centralita y bots animales en marcha")
+    scheduler_task = asyncio.create_task(scheduler_loop())
 
     try:
         await asyncio.Event().wait()
     finally:
+        scheduler_task.cancel()
         for app in reversed(apps):
             await stop_app(app)
 

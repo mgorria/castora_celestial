@@ -67,10 +67,14 @@ Desde tu Telegram, abre **Centralita Magica** y usa:
 /historial castori
 /historial mimosuga
 /historial castori 20
+/programar mimosuga lunes 09:00 Que tengas buena semana, patita.
+/programados
+/cancelar id_de_programacion
 ```
 
 Las respuestas que Sandra envie a Oficina Castori se copiaran automaticamente a tu chat privado con Centralita.
 El historial guarda los ultimos mensajes de cada animal en `data.json`.
+Los mensajes programados se revisan periodicamente y se envian en la zona horaria configurada.
 
 ## Railway
 
@@ -86,6 +90,8 @@ MIMOSUGA_CHAT_ID=chat_id_de_sandra_para_mimosuga
 LOG_LEVEL=INFO
 DATA_FILE=data.json
 MAX_HISTORY_PER_ANIMAL=50
+APP_TIMEZONE=Europe/Madrid
+SCHEDULER_POLL_SECONDS=30
 ```
 
 Si `CASTORI_CHAT_ID` esta configurado, el bot lo usara directamente aunque `data.json` no exista todavia en Railway.
