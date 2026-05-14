@@ -397,6 +397,7 @@ async def central_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "/admin_descartar ID\n"
         "/admin_canon ID\n"
         "/admin_lore\n"
+        "/admin_cuento_prueba [mimosuga]\n"
         "/status"
     )
 
@@ -820,6 +821,54 @@ async def notify_admin_story(
         await centralita_app.bot.send_message(chat_id=admin_chat_id(), text=chunk)
 
 
+async def admin_test_story(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_chat or not is_admin(update):
+        return
+
+    if not openai_available():
+        await update.effective_chat.send_message("OPENAI_API_KEY no esta configurada.")
+        return
+
+    narrator = context.args[0].lower() if context.args else "mimosuga"
+    if narrator != "mimosuga":
+        await update.effective_chat.send_message("De momento solo existe prueba para mimosuga.")
+        return
+
+    await update.effective_chat.send_message(
+        "Generando cuento de prueba de Mimosuga. No se guardara ni consumira limites."
+    )
+
+    try:
+        recent = []
+        if database.db_available():
+            recent = await database.get_recent_story_summaries("Mimosuga")
+        options = await generate_story_options(narrator="Mimosuga", recent_summaries=recent)
+        selected_option = options[0]
+        story = await generate_full_story(
+            narrator="Mimosuga",
+            selected_option=selected_option,
+            offered_options=options,
+            recent_summaries=recent,
+        )
+    except Exception:
+        logger.exception("No se pudo generar cuento de prueba")
+        await update.effective_chat.send_message("No se pudo generar el cuento de prueba.")
+        return
+
+    meta = (
+        "Cuento de prueba generado. No guardado, no canon, no entregado a Patita.\n\n"
+        "Opciones generadas:\n"
+        f"- {options[0].get('title', '')}: {options[0].get('teaser', '')}\n"
+        f"- {options[1].get('title', '')}: {options[1].get('teaser', '')}\n\n"
+        f"Opcion usada: {selected_option.get('title', '')}\n"
+        f"Titulo: {story['title']}\n"
+        f"Resumen: {story['summary']}"
+    )
+    await update.effective_chat.send_message(meta)
+    for chunk in split_telegram_text(story["full_text"]):
+        await update.effective_chat.send_message(chunk)
+
+
 async def admin_latest_stories(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_chat or not is_admin(update):
         return
@@ -1182,6 +1231,7 @@ def build_centralita_app() -> Application:
     app.add_handler(CommandHandler("admin_descartar", admin_reject_story))
     app.add_handler(CommandHandler("admin_canon", admin_canon_story))
     app.add_handler(CommandHandler("admin_lore", admin_lore))
+    app.add_handler(CommandHandler("admin_cuento_prueba", admin_test_story))
     app.add_handler(CallbackQueryHandler(admin_story_status_callback, pattern=r"^adminstory:"))
     for animal_key, animal in ANIMALS.items():
         app.add_handler(

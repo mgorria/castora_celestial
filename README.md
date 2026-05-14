@@ -106,6 +106,7 @@ Comandos privados de administrador en **Centralita Magica**:
 /admin_descartar ID
 /admin_canon ID
 /admin_lore
+/admin_cuento_prueba mimosuga
 ```
 
 El lore editable vive en:
