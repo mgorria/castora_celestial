@@ -101,6 +101,7 @@ ANIMALS: dict[str, dict[str, str]] = {
 animal_apps: dict[str, Application] = {}
 centralita_app: Application | None = None
 lock_socket: socket.socket | None = None
+admin_test_story_offers: dict[str, dict[str, Any]] = {}
 
 
 def require_env(name: str) -> str:
@@ -835,7 +836,7 @@ async def admin_test_story(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     await update.effective_chat.send_message(
-        "Generando cuento de prueba de Mimosuga. No se guardara ni consumira limites."
+        "Generando opciones de prueba de Mimosuga. No se guardara ni consumira limites."
     )
 
     try:
@@ -843,19 +844,93 @@ async def admin_test_story(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         if database.db_available():
             recent = await database.get_recent_story_summaries("Mimosuga")
         options = await generate_story_options(narrator="Mimosuga", recent_summaries=recent)
-        selected_option = options[0]
-        story = await generate_full_story(
-            narrator="Mimosuga",
-            selected_option=selected_option,
-            offered_options=options,
-            recent_summaries=recent,
-        )
     except Exception as exc:
-        logger.exception("No se pudo generar cuento de prueba")
+        logger.exception("No se pudieron generar opciones de prueba")
         detail = str(exc)
         if len(detail) > 1200:
             detail = detail[:1200] + "..."
         await update.effective_chat.send_message(
+            "No se pudieron generar opciones de prueba.\n\n"
+            f"Detalle tecnico para admin:\n{type(exc).__name__}: {detail}"
+        )
+        return
+
+    offer_id = uuid.uuid4().hex[:8]
+    admin_test_story_offers[offer_id] = {
+        "options": options,
+        "recent": recent,
+        "created_at": datetime.now(timezone.utc),
+    }
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    options[0].get("title", "Opcion 1"),
+                    callback_data=f"adminteststory:{offer_id}:0",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    options[1].get("title", "Opcion 2"),
+                    callback_data=f"adminteststory:{offer_id}:1",
+                )
+            ],
+        ]
+    )
+    await update.effective_chat.send_message(
+        "Elige una opcion de prueba. Solo se generara para ti.\n\n"
+        f"1. {options[0].get('title', '')}\n{options[0].get('teaser', '')}\n\n"
+        f"2. {options[1].get('title', '')}\n{options[1].get('teaser', '')}",
+        reply_markup=keyboard,
+    )
+
+
+async def admin_test_story_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query or not query.message or not query.from_user:
+        return
+    if query.from_user.id != admin_chat_id():
+        await query.answer("Solo el administrador puede generar pruebas.", show_alert=True)
+        return
+
+    await query.answer()
+    parts = (query.data or "").split(":")
+    if len(parts) != 3:
+        return
+
+    _, offer_id, option_index_text = parts
+    offer = admin_test_story_offers.pop(offer_id, None)
+    if not offer:
+        await query.message.reply_text(
+            "Esta prueba ya no esta disponible. Pide otra con /admin_cuento_prueba mimosuga."
+        )
+        return
+
+    try:
+        option_index = int(option_index_text)
+        options = offer["options"]
+        selected_option = options[option_index]
+    except (ValueError, IndexError):
+        await query.message.reply_text("Esa opcion de prueba no es valida.")
+        return
+
+    await query.message.reply_text(
+        "Generando cuento de prueba con la opcion elegida. No se guardara ni consumira limites."
+    )
+
+    try:
+        story = await generate_full_story(
+            narrator="Mimosuga",
+            selected_option=selected_option,
+            offered_options=options,
+            recent_summaries=offer["recent"],
+        )
+    except Exception as exc:
+        logger.exception("No se pudo generar cuento de prueba elegido")
+        detail = str(exc)
+        if len(detail) > 1200:
+            detail = detail[:1200] + "..."
+        await query.message.reply_text(
             "No se pudo generar el cuento de prueba.\n\n"
             f"Detalle tecnico para admin:\n{type(exc).__name__}: {detail}"
         )
@@ -863,16 +938,13 @@ async def admin_test_story(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     meta = (
         "Cuento de prueba generado. No guardado, no canon, no entregado a Patita.\n\n"
-        "Opciones generadas:\n"
-        f"- {options[0].get('title', '')}: {options[0].get('teaser', '')}\n"
-        f"- {options[1].get('title', '')}: {options[1].get('teaser', '')}\n\n"
         f"Opcion usada: {selected_option.get('title', '')}\n"
         f"Titulo: {story['title']}\n"
         f"Resumen: {story['summary']}"
     )
-    await update.effective_chat.send_message(meta)
+    await query.message.reply_text(meta)
     for chunk in split_telegram_text(story["full_text"]):
-        await update.effective_chat.send_message(chunk)
+        await query.message.reply_text(chunk)
 
 
 async def admin_latest_stories(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1238,6 +1310,7 @@ def build_centralita_app() -> Application:
     app.add_handler(CommandHandler("admin_canon", admin_canon_story))
     app.add_handler(CommandHandler("admin_lore", admin_lore))
     app.add_handler(CommandHandler("admin_cuento_prueba", admin_test_story))
+    app.add_handler(CallbackQueryHandler(admin_test_story_callback, pattern=r"^adminteststory:"))
     app.add_handler(CallbackQueryHandler(admin_story_status_callback, pattern=r"^adminstory:"))
     for animal_key, animal in ANIMALS.items():
         app.add_handler(
