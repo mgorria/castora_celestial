@@ -41,11 +41,21 @@ def _extract_json(text: str) -> dict[str, Any]:
 
 
 async def _generate_json(prompt: str) -> dict[str, Any]:
-    response = await _client().responses.create(
-        model=OPENAI_MODEL,
-        input=prompt,
-        text={"format": {"type": "json_object"}},
-    )
+    try:
+        response = await _client().responses.create(
+            model=OPENAI_MODEL,
+            input=prompt,
+            text={"format": {"type": "json_object"}},
+        )
+    except Exception as exc:
+        logger.exception("Error llamando a OpenAI con modelo %s", OPENAI_MODEL)
+        raise StoryGenerationError(
+            f"Error llamando a OpenAI con modelo {OPENAI_MODEL}: {exc}"
+        ) from exc
+
+    if not response.output_text:
+        logger.error("OpenAI devolvio una respuesta sin output_text: %s", response)
+        raise StoryGenerationError("OpenAI devolvio una respuesta vacia")
     return _extract_json(response.output_text)
 
 

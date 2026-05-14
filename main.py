@@ -850,9 +850,15 @@ async def admin_test_story(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             offered_options=options,
             recent_summaries=recent,
         )
-    except Exception:
+    except Exception as exc:
         logger.exception("No se pudo generar cuento de prueba")
-        await update.effective_chat.send_message("No se pudo generar el cuento de prueba.")
+        detail = str(exc)
+        if len(detail) > 1200:
+            detail = detail[:1200] + "..."
+        await update.effective_chat.send_message(
+            "No se pudo generar el cuento de prueba.\n\n"
+            f"Detalle tecnico para admin:\n{type(exc).__name__}: {detail}"
+        )
         return
 
     meta = (
