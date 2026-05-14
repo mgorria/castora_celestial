@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import signal
 import socket
 import uuid
 from datetime import date, datetime, timezone
@@ -40,6 +41,7 @@ DATA_FILE = Path(os.getenv("DATA_FILE", str(DEFAULT_DATA_FILE)))
 MAX_HISTORY_PER_ANIMAL = int(os.getenv("MAX_HISTORY_PER_ANIMAL", "50"))
 APP_TIMEZONE = ZoneInfo(os.getenv("APP_TIMEZONE", "Europe/Madrid"))
 SCHEDULER_POLL_SECONDS = int(os.getenv("SCHEDULER_POLL_SECONDS", "30"))
+STARTUP_DELAY_SECONDS = int(os.getenv("STARTUP_DELAY_SECONDS", "8"))
 
 WEEKDAYS = {
     "lunes": 0,
@@ -828,6 +830,10 @@ async def main() -> None:
     _ = owner_chat_id()
     DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
 
+    if STARTUP_DELAY_SECONDS > 0:
+        logger.info("Esperando %s segundos antes de iniciar polling", STARTUP_DELAY_SECONDS)
+        await asyncio.sleep(STARTUP_DELAY_SECONDS)
+
     centralita_app = build_centralita_app()
     for animal_key in ANIMALS:
         token_env = ANIMALS[animal_key]["token_env"]
@@ -846,9 +852,16 @@ async def main() -> None:
 
     logger.info("Centralita y bots animales en marcha")
     scheduler_task = asyncio.create_task(scheduler_loop())
+    stop_event = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, stop_event.set)
+        except NotImplementedError:
+            pass
 
     try:
-        await asyncio.Event().wait()
+        await stop_event.wait()
     finally:
         scheduler_task.cancel()
         for app in reversed(apps):

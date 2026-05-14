@@ -96,6 +96,7 @@ DATA_FILE=data.json
 MAX_HISTORY_PER_ANIMAL=50
 APP_TIMEZONE=Europe/Madrid
 SCHEDULER_POLL_SECONDS=30
+STARTUP_DELAY_SECONDS=8
 ```
 
 Si `CASTORI_CHAT_ID` esta configurado, el bot lo usara directamente aunque `data.json` no exista todavia en Railway.
