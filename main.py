@@ -68,10 +68,6 @@ ANIMALS: dict[str, dict[str, str]] = {
         "chat_id_env": "CASTORI_CHAT_ID",
         "partner_key": "castori_partner_chat_id",
         "central_command": "castori",
-        "start_message": (
-            "La Oficina Castori acusa recibo de su comparecencia inicial. "
-            "El expediente queda abierto y bajo custodia administrativa."
-        ),
     },
     "mimosuga": {
         "display_name": "Mimosuga",
@@ -79,12 +75,6 @@ ANIMALS: dict[str, dict[str, str]] = {
         "chat_id_env": "MIMOSUGA_CHAT_ID",
         "partner_key": "mimosuga_partner_chat_id",
         "central_command": "mimosuga",
-        "start_message": (
-            "Ay, mi nietecita, patita blanca de mi corazon. Ya estoy aqui, despacito, "
-            "como llegamos las tortugas que hemos visto pasar muchas lunas. Ven, sol "
-            "mio, que Mimosuga te guarda un sitio tranquilo y una palabra calentita "
-            "para cuando la necesites."
-        ),
     }
 }
 
@@ -660,13 +650,11 @@ async def animal_start(
 
     if already_started:
         logger.info(
-            "%s recibio /start repetido de chat_id %s; no se reenvia saludo",
+            "%s recibio /start repetido de chat_id %s",
             ANIMALS[animal_key]["display_name"],
             chat_id,
         )
         return
-
-    await update.effective_chat.send_message(ANIMALS[animal_key]["start_message"])
 
     if not centralita_app:
         raise RuntimeError("Centralita no inicializada")
@@ -675,7 +663,9 @@ async def animal_start(
         chat_id=owner_chat_id(),
         text=(
             f"{ANIMALS[animal_key]['display_name']} ha capturado un chat_id: "
-            f"{chat_id}"
+            f"{chat_id}\n"
+            f"{ANIMALS[animal_key]['display_name']} ya esta operativo. "
+            f"Puedes saludar con /{ANIMALS[animal_key]['central_command']} <mensaje>."
         ),
     )
 
