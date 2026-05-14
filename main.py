@@ -43,6 +43,22 @@ ANIMALS: dict[str, dict[str, str]] = {
         "chat_id_env": "CASTORI_CHAT_ID",
         "partner_key": "castori_partner_chat_id",
         "central_command": "castori",
+        "start_message": (
+            "La Oficina Castori acusa recibo de su comparecencia inicial. "
+            "El expediente queda abierto y bajo custodia administrativa."
+        ),
+    },
+    "mimosuga": {
+        "display_name": "Mimosuga",
+        "token_env": "TOKEN_MIMOSUGA",
+        "chat_id_env": "MIMOSUGA_CHAT_ID",
+        "partner_key": "mimosuga_partner_chat_id",
+        "central_command": "mimosuga",
+        "start_message": (
+            "Ay, mi niña Sandra. Ya estoy aqui, despacito, como llegamos las tortugas "
+            "que hemos visto pasar muchas lunas. Ven, que Mimosuga te guarda un sitio "
+            "tranquilo y una palabra calentita para cuando la necesites."
+        ),
     }
 }
 
@@ -154,11 +170,15 @@ async def central_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if not update.effective_chat or not is_owner(update):
         return
 
+    animal_commands = "\n".join(
+        f"/{animal['central_command']} <mensaje>"
+        for animal in ANIMALS.values()
+    )
     await update.effective_chat.send_message(
         "Centralita Magica operativa.\n\n"
         "Comandos disponibles:\n"
-        "/castori <mensaje>\n"
-        "/historial castori [cantidad]\n"
+        f"{animal_commands}\n"
+        "/historial <animal> [cantidad]\n"
         "/status"
     )
 
@@ -169,15 +189,21 @@ async def central_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     lines = ["Estado de la Centralita Magica:"]
     for animal_key, animal in ANIMALS.items():
-        partner_chat_id = get_partner_chat_id(animal_key)
-        status = "vinculado" if partner_chat_id else "pendiente de /start"
+        if not os.getenv(animal["token_env"]):
+            status = f"pendiente de token ({animal['token_env']})"
+        else:
+            partner_chat_id = get_partner_chat_id(animal_key)
+            status = "vinculado" if partner_chat_id else "pendiente de /start"
         lines.append(f"- {animal['display_name']}: {status}")
 
     await update.effective_chat.send_message("\n".join(lines))
 
 
-async def central_castori(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await send_as_animal("castori", update, context)
+def make_central_animal_handler(animal_key: str):
+    async def handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await send_as_animal(animal_key, update, context)
+
+    return handler
 
 
 async def central_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -241,7 +267,14 @@ async def send_as_animal(
         )
         return
 
-    animal_app = animal_apps[animal_key]
+    animal_app = animal_apps.get(animal_key)
+    if not animal_app:
+        await update.effective_chat.send_message(
+            f"{ANIMALS[animal_key]['display_name']} todavia no tiene token configurado "
+            f"en {ANIMALS[animal_key]['token_env']}."
+        )
+        return
+
     await animal_app.bot.send_chat_action(partner_chat_id, ChatAction.TYPING)
     await animal_app.bot.send_message(chat_id=partner_chat_id, text=text)
     append_history(animal_key, "out", text)
@@ -261,10 +294,7 @@ async def animal_start(
     chat_id = update.effective_chat.id
     set_partner_chat_id(animal_key, chat_id)
 
-    await update.effective_chat.send_message(
-        "La Oficina Castori acusa recibo de su comparecencia inicial. "
-        "El expediente queda abierto y bajo custodia administrativa."
-    )
+    await update.effective_chat.send_message(ANIMALS[animal_key]["start_message"])
 
     if not centralita_app:
         raise RuntimeError("Centralita no inicializada")
@@ -341,7 +371,13 @@ def build_centralita_app() -> Application:
     app.add_handler(CommandHandler("start", central_start))
     app.add_handler(CommandHandler("status", central_status))
     app.add_handler(CommandHandler("historial", central_history))
-    app.add_handler(CommandHandler("castori", central_castori))
+    for animal_key, animal in ANIMALS.items():
+        app.add_handler(
+            CommandHandler(
+                animal["central_command"],
+                make_central_animal_handler(animal_key),
+            )
+        )
     app.add_error_handler(error_handler)
     return app
 
@@ -399,7 +435,15 @@ async def main() -> None:
 
     centralita_app = build_centralita_app()
     for animal_key in ANIMALS:
-        animal_apps[animal_key] = build_animal_app(animal_key)
+        token_env = ANIMALS[animal_key]["token_env"]
+        if os.getenv(token_env):
+            animal_apps[animal_key] = build_animal_app(animal_key)
+        else:
+            logger.warning(
+                "%s no se inicia porque falta %s",
+                ANIMALS[animal_key]["display_name"],
+                token_env,
+            )
 
     apps = [centralita_app, *animal_apps.values()]
     for app in apps:
