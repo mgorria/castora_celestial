@@ -139,6 +139,7 @@ OPENAI_API_KEY=tu_api_key_openai
 OPENAI_MODEL=gpt-5.2
 TELEGRAM_ADMIN_ID=tu_chat_id
 SANDRA_TELEGRAM_ID=chat_id_de_sandra
+PENDING_STORIES_DIR=/app/data/lore/historias/pendientes
 ```
 
 Si `CASTORI_CHAT_ID` esta configurado, el bot lo usara directamente aunque `data.json` no exista todavia en Railway.

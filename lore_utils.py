@@ -1,9 +1,12 @@
 from pathlib import Path
 from typing import Any
+import os
 
 
 LORE_DIR = Path(__file__).parent / "lore"
-PENDING_STORIES_DIR = LORE_DIR / "historias" / "pendientes"
+PENDING_STORIES_DIR = Path(
+    os.getenv("PENDING_STORIES_DIR", str(LORE_DIR / "historias" / "pendientes"))
+)
 
 
 def read_lore_file(relative_path: str) -> str:
