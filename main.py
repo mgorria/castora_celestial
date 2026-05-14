@@ -55,9 +55,10 @@ ANIMALS: dict[str, dict[str, str]] = {
         "partner_key": "mimosuga_partner_chat_id",
         "central_command": "mimosuga",
         "start_message": (
-            "Ay, mi niña Sandra. Ya estoy aqui, despacito, como llegamos las tortugas "
-            "que hemos visto pasar muchas lunas. Ven, que Mimosuga te guarda un sitio "
-            "tranquilo y una palabra calentita para cuando la necesites."
+            "Ay, mi nietecita Sandra, patita blanca de mi corazon. Ya estoy aqui, "
+            "despacito, como llegamos las tortugas que hemos visto pasar muchas lunas. "
+            "Ven, sol mio, que Mimosuga te guarda un sitio tranquilo y una palabra "
+            "calentita para cuando la necesites."
         ),
     }
 }
