@@ -31,7 +31,12 @@ logging.basicConfig(
 logger = logging.getLogger("control-castora")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
-DATA_FILE = Path(os.getenv("DATA_FILE", "data.json"))
+DEFAULT_DATA_FILE = (
+    Path(os.getenv("RAILWAY_VOLUME_MOUNT_PATH")) / "data.json"
+    if os.getenv("RAILWAY_VOLUME_MOUNT_PATH")
+    else Path("data.json")
+)
+DATA_FILE = Path(os.getenv("DATA_FILE", str(DEFAULT_DATA_FILE)))
 MAX_HISTORY_PER_ANIMAL = int(os.getenv("MAX_HISTORY_PER_ANIMAL", "50"))
 APP_TIMEZONE = ZoneInfo(os.getenv("APP_TIMEZONE", "Europe/Madrid"))
 SCHEDULER_POLL_SECONDS = int(os.getenv("SCHEDULER_POLL_SECONDS", "30"))

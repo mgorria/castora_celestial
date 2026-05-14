@@ -100,6 +100,14 @@ SCHEDULER_POLL_SECONDS=30
 
 Si `CASTORI_CHAT_ID` esta configurado, el bot lo usara directamente aunque `data.json` no exista todavia en Railway.
 
+Para persistencia en Railway, crea un Volume montado en `/app/data` y configura:
+
+```env
+DATA_FILE=/app/data/data.json
+```
+
+Si Railway expone `RAILWAY_VOLUME_MOUNT_PATH`, el bot tambien puede usar automaticamente `data.json` dentro del volumen.
+
 Railway usara el `Procfile`:
 
 ```Procfile
