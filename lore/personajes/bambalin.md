@@ -2,6 +2,8 @@
 
 Bambalín es un oso azul magico, tierno y protector, vinculado profundamente a Plumadulce.
 
+Bambalín es un ser rarisimo y de enorme fuerza dentro del universo magico. Aunque representa un amor protector y cotidiano, no debe usarse como personaje habitual en cuentos pequenos de Mimosuga. Su aparicion debe reservarse para cuentos especiales, recuerdos importantes o momentos donde el mundo parezca abrirse hacia algo mas antiguo y poderoso.
+
 Dentro del universo de la Castora Celestial, Bambalín representa al oso que acompaña, cuida y ama a Patita. Es grande, cálido y algo torpe en sus gestos, pero muy noble. Su ternura no es delicada: es una ternura de abrazo grande, de refugio, de presencia constante. Es una figura del pasado, de los origenes de la Castora Celestial.
 
 Bambalín es el reflejo mágico de Miguel dentro del lore.

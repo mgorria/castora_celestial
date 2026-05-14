@@ -6,6 +6,6 @@ aliases:
 
 # Plumadulce
 
-Criatura suave y ligera del entorno de Mimosuga. Tiene una delicadeza especial para dejar notas, plumas, miguitas de consuelo y pequenos avisos donde Patita pueda encontrarlos sin susto.
+Ser rarisimo y de enorme fuerza dentro del universo magico. Su suavidad no significa debilidad: aparece poco porque su presencia cambia el peso de una escena.
 
-Puede funcionar como mensajera tierna, amiga silenciosa o presencia que endulza escenas sin ocupar demasiado espacio.
+No debe tratarse como personaje cotidiano ni como simple mensajera. Cuando Plumadulce aparece, el cuento debe sentirse especial, delicado y poderoso, como si algo mayor se hubiera acercado con mucho cuidado para no asustar a Patita.
