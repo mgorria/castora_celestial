@@ -8,6 +8,9 @@ LORE_DIR = Path(__file__).parent / "lore"
 PENDING_STORIES_DIR = Path(
     os.getenv("PENDING_STORIES_DIR", str(LORE_DIR / "historias" / "pendientes"))
 )
+RECENT_STORY_MEMORY_PATH = Path(
+    os.getenv("RECENT_STORY_MEMORY_PATH", str(LORE_DIR / "historias" / "memoria-reciente.md"))
+)
 
 
 def read_lore_file(relative_path: str) -> str:
@@ -21,6 +24,12 @@ def read_core_lore() -> str:
     resumen = read_lore_file("resumen-para-ia.md")
     reglas = read_lore_file("reglas-de-tono.md")
     return f"# Resumen de lore\n\n{resumen}\n\n# Reglas de tono\n\n{reglas}".strip()
+
+
+def read_recent_story_memory() -> str:
+    if not RECENT_STORY_MEMORY_PATH.exists():
+        return "No hay memoria reciente en Markdown."
+    return RECENT_STORY_MEMORY_PATH.read_text(encoding="utf-8")
 
 
 def parse_character_lore_file(path: Path) -> tuple[str, list[str], str]:
@@ -134,3 +143,40 @@ def write_pending_story_markdown(story: dict[str, Any]) -> Path:
     )
     path.write_text(content, encoding="utf-8")
     return path
+
+
+def write_recent_story_memory_markdown(stories: list[dict[str, Any]]) -> Path:
+    RECENT_STORY_MEMORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "# Memoria reciente de cuentos",
+        "",
+        "Este archivo resume los ultimos cuentos entregados para evitar repeticiones.",
+        "No es canon por si mismo; es memoria operativa para la IA.",
+        "",
+    ]
+    if not stories:
+        lines.append("No hay cuentos recientes registrados.")
+    for story in stories:
+        characters = story.get("characters_used") or []
+        locations = story.get("locations_used") or []
+        if not isinstance(characters, list):
+            characters = []
+        if not isinstance(locations, list):
+            locations = []
+        created_at = story.get("created_at")
+        created_text = created_at.date().isoformat() if hasattr(created_at, "date") else ""
+        lines.extend(
+            [
+                f"## {story.get('title', 'Sin titulo')}",
+                "",
+                f"- ID: {story.get('id', '')}",
+                f"- Fecha: {created_text}",
+                f"- Opcion elegida: {story.get('selected_option') or ''}",
+                f"- Personajes: {', '.join(str(item) for item in characters) or 'No registrados'}",
+                f"- Lugares: {', '.join(str(item) for item in locations) or 'No registrados'}",
+                f"- Resumen: {story.get('summary', '')}",
+                "",
+            ]
+        )
+    RECENT_STORY_MEMORY_PATH.write_text("\n".join(lines), encoding="utf-8")
+    return RECENT_STORY_MEMORY_PATH

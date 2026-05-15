@@ -302,3 +302,20 @@ async def get_recent_story_summaries(narrator: str, limit: int = 5) -> list[str]
         limit,
     )
     return [f"{row['title']}: {row['summary']}" for row in rows]
+
+
+async def get_recent_story_memories(narrator: str, limit: int = 8) -> list[dict[str, Any]]:
+    db = require_pool()
+    rows = await db.fetch(
+        """
+        select id, title, summary, selected_option, offered_options, characters_used,
+               locations_used, created_at
+        from stories
+        where narrator = $1
+        order by created_at desc
+        limit $2
+        """,
+        narrator,
+        limit,
+    )
+    return [dict(row) for row in rows]

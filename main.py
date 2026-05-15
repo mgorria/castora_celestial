@@ -25,7 +25,11 @@ from telegram.ext import (
 )
 
 import database
-from lore_utils import read_core_lore, write_pending_story_markdown
+from lore_utils import (
+    read_core_lore,
+    write_pending_story_markdown,
+    write_recent_story_memory_markdown,
+)
 from story_service import (
     StoryGenerationError,
     generate_full_story,
@@ -168,6 +172,18 @@ def ensure_json_list(value: Any) -> list[Any]:
             return []
         return parsed if isinstance(parsed, list) else []
     return []
+
+
+async def get_recent_story_memory(narrator: str = "Mimosuga", limit: int = 8) -> list[dict[str, Any]]:
+    if not database.db_available():
+        return []
+    try:
+        memories = await database.get_recent_story_memories(narrator, limit)
+        write_recent_story_memory_markdown(memories)
+        return memories
+    except Exception:
+        logger.exception("No se pudo cargar memoria reciente de cuentos")
+        return []
 
 
 def load_data() -> dict[str, Any]:
@@ -398,6 +414,7 @@ async def central_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "/admin_descartar ID\n"
         "/admin_canon ID\n"
         "/admin_lore\n"
+        "/admin_memoria_cuentos\n"
         "/admin_cuento_prueba [mimosuga]\n"
         "/status"
     )
@@ -645,7 +662,7 @@ async def story_request(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     await context.bot.send_chat_action(update.effective_chat.id, ChatAction.TYPING)
     try:
-        recent = await database.get_recent_story_summaries("Mimosuga")
+        recent = await get_recent_story_memory("Mimosuga")
         options = await generate_story_options(narrator="Mimosuga", recent_summaries=recent)
         offer_id = await database.create_story_offer(user_id, "Mimosuga", options)
     except Exception:
@@ -738,7 +755,7 @@ async def story_option_callback(update: Update, context: ContextTypes.DEFAULT_TY
     )
 
     try:
-        recent = await database.get_recent_story_summaries("Mimosuga")
+        recent = await get_recent_story_memory("Mimosuga")
         story = await generate_full_story(
             narrator="Mimosuga",
             selected_option=selected_option,
@@ -773,6 +790,7 @@ async def story_option_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
         await database.mark_story_delivered(story_id)
         consumed = await database.consume_daily_story(query.from_user.id, today_local(), story_id)
+        await get_recent_story_memory("Mimosuga")
         if not consumed:
             logger.warning("Cuento %s entregado pero limite diario ya existia", story_id)
         await notify_admin_story(story_id, story, options, selected_option)
@@ -840,9 +858,7 @@ async def admin_test_story(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     )
 
     try:
-        recent = []
-        if database.db_available():
-            recent = await database.get_recent_story_summaries("Mimosuga")
+        recent = await get_recent_story_memory("Mimosuga")
         options = await generate_story_options(narrator="Mimosuga", recent_summaries=recent)
     except Exception as exc:
         logger.exception("No se pudieron generar opciones de prueba")
@@ -919,11 +935,12 @@ async def admin_test_story_callback(update: Update, context: ContextTypes.DEFAUL
     )
 
     try:
+        recent = await get_recent_story_memory("Mimosuga")
         story = await generate_full_story(
             narrator="Mimosuga",
             selected_option=selected_option,
             offered_options=options,
-            recent_summaries=offer["recent"],
+            recent_summaries=recent or offer["recent"],
         )
     except Exception as exc:
         logger.exception("No se pudo generar cuento de prueba elegido")
@@ -1040,6 +1057,30 @@ async def admin_lore(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         return
     lore = read_core_lore()
     for chunk in split_telegram_text(lore, limit=3500):
+        await update.effective_chat.send_message(chunk)
+
+
+async def admin_story_memory(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_chat or not is_admin(update):
+        return
+    memories = await get_recent_story_memory("Mimosuga")
+    if not memories:
+        await update.effective_chat.send_message("No hay memoria reciente de cuentos.")
+        return
+    lines = ["Memoria reciente de cuentos:", ""]
+    for story in memories:
+        characters = story.get("characters_used") or []
+        if not isinstance(characters, list):
+            characters = []
+        lines.extend(
+            [
+                f"#{story.get('id')} - {story.get('title')}",
+                f"Personajes: {', '.join(map(str, characters)) or 'No registrados'}",
+                f"Resumen: {story.get('summary', '')}",
+                "",
+            ]
+        )
+    for chunk in split_telegram_text("\n".join(lines), limit=3500):
         await update.effective_chat.send_message(chunk)
 
 
@@ -1309,6 +1350,7 @@ def build_centralita_app() -> Application:
     app.add_handler(CommandHandler("admin_descartar", admin_reject_story))
     app.add_handler(CommandHandler("admin_canon", admin_canon_story))
     app.add_handler(CommandHandler("admin_lore", admin_lore))
+    app.add_handler(CommandHandler("admin_memoria_cuentos", admin_story_memory))
     app.add_handler(CommandHandler("admin_cuento_prueba", admin_test_story))
     app.add_handler(CallbackQueryHandler(admin_test_story_callback, pattern=r"^adminteststory:"))
     app.add_handler(CallbackQueryHandler(admin_story_status_callback, pattern=r"^adminstory:"))

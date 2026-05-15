@@ -106,6 +106,7 @@ Comandos privados de administrador en **Centralita Magica**:
 /admin_descartar ID
 /admin_canon ID
 /admin_lore
+/admin_memoria_cuentos
 /admin_cuento_prueba mimosuga
 ```
 
@@ -141,6 +142,7 @@ OPENAI_MODEL=gpt-5.2
 TELEGRAM_ADMIN_ID=tu_chat_id
 SANDRA_TELEGRAM_ID=chat_id_de_sandra
 PENDING_STORIES_DIR=/app/data/lore/historias/pendientes
+RECENT_STORY_MEMORY_PATH=/app/data/lore/historias/memoria-reciente.md
 ```
 
 Si `CASTORI_CHAT_ID` esta configurado, el bot lo usara directamente aunque `data.json` no exista todavia en Railway.
