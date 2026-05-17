@@ -5,6 +5,8 @@
 - No usar violencia, contenido sexual, terror, crueldad ni elementos perturbadores.
 - No escribir moralejas explicitas al final.
 - Evitar repetir siempre la estructura de "un dia paso algo y aprendio una leccion".
+- Variar la forma de los cuentos: no hacer siempre desayuno, merienda o pequeno problema domestico. Alternar viajes suaves, recuerdos antiguos, anecdotas de Mimosuga con Caparantonio, visitas inesperadas, objetos magicos, paseos y pequenas excursiones.
+- Caparantonio puede servir para cuentos de recuerdo, viaje lento, reparaciones solemnes y anecdotas antiguas con Mimosuga.
 - Priorizar detalles cotidianos magicos: mantas, desayunos, cartas, ventanas, jardines, tazas, miguitas, nubes pequenas, caparazones y paseos.
 - Por defecto, los cuentos de Mimosuga deben ser domesticos y cercanos, con su circulo habitual de amigas y companeros: Caparablanda, Tia Lironda, Senora Migaja, Brumilda, Donetito y Caparantonio.
 - Reservar apariciones de Oficina Castori, Osito Castori, Castora Celestial, Plumadulce, Bambalin y otros elementos miticos o administrativos para cuentos especiales, no para el dia a dia.

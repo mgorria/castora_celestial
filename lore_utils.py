@@ -172,6 +172,7 @@ def write_recent_story_memory_markdown(stories: list[dict[str, Any]]) -> Path:
                 f"- ID: {story.get('id', '')}",
                 f"- Fecha: {created_text}",
                 f"- Opcion elegida: {story.get('selected_option') or ''}",
+                f"- Tipo: {selected_story_type(story)}",
                 f"- Personajes: {', '.join(str(item) for item in characters) or 'No registrados'}",
                 f"- Lugares: {', '.join(str(item) for item in locations) or 'No registrados'}",
                 f"- Resumen: {story.get('summary', '')}",
@@ -180,3 +181,13 @@ def write_recent_story_memory_markdown(stories: list[dict[str, Any]]) -> Path:
         )
     RECENT_STORY_MEMORY_PATH.write_text("\n".join(lines), encoding="utf-8")
     return RECENT_STORY_MEMORY_PATH
+
+
+def selected_story_type(story: dict[str, Any]) -> str:
+    selected_option = story.get("selected_option")
+    offered_options = story.get("offered_options") or []
+    if isinstance(offered_options, list):
+        for option in offered_options:
+            if isinstance(option, dict) and option.get("title") == selected_option:
+                return str(option.get("story_type") or "No registrado")
+    return "No registrado"

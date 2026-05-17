@@ -816,10 +816,11 @@ async def notify_admin_story(
         f"Cuento generado #{story_id}\n"
         f"Titulo: {story['title']}\n"
         "Estado: pending\n"
-        f"Opcion elegida: {selected_option.get('title', '')}\n\n"
+        f"Opcion elegida: {selected_option.get('title', '')}\n"
+        f"Tipo: {story.get('story_type', selected_option.get('story_type', ''))}\n\n"
         "Opciones ofrecidas:\n"
-        f"- {options[0].get('title', '')}: {options[0].get('teaser', '')}\n"
-        f"- {options[1].get('title', '')}: {options[1].get('teaser', '')}\n\n"
+        f"- {options[0].get('title', '')} ({options[0].get('story_type', '')}): {options[0].get('teaser', '')}\n"
+        f"- {options[1].get('title', '')} ({options[1].get('story_type', '')}): {options[1].get('teaser', '')}\n\n"
         f"Resumen: {story['summary']}"
     )
     keyboard = InlineKeyboardMarkup(
@@ -956,6 +957,7 @@ async def admin_test_story_callback(update: Update, context: ContextTypes.DEFAUL
     meta = (
         "Cuento de prueba generado. No guardado, no canon, no entregado a Patita.\n\n"
         f"Opcion usada: {selected_option.get('title', '')}\n"
+        f"Tipo: {story.get('story_type', selected_option.get('story_type', ''))}\n"
         f"Titulo: {story['title']}\n"
         f"Resumen: {story['summary']}"
     )
