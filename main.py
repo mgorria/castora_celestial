@@ -33,6 +33,7 @@ from lore_utils import (
 from story_service import (
     StoryGenerationError,
     generate_full_story,
+    generate_soft_mimosuga_reply,
     generate_story_options,
     openai_available,
 )
@@ -106,6 +107,12 @@ animal_apps: dict[str, Application] = {}
 centralita_app: Application | None = None
 lock_socket: socket.socket | None = None
 admin_test_story_offers: dict[str, dict[str, Any]] = {}
+
+AUTO_REPLY_DEFAULTS = {
+    "mimosuga": {
+        "enabled": False,
+    }
+}
 
 
 def require_env(name: str) -> str:
@@ -302,6 +309,21 @@ def set_schedules_paused(paused: bool) -> None:
     save_data(data)
 
 
+def auto_reply_enabled(animal_key: str) -> bool:
+    defaults = AUTO_REPLY_DEFAULTS.get(animal_key, {})
+    data = load_data()
+    settings = data.get("auto_replies", {}).get(animal_key, {})
+    return bool(settings.get("enabled", defaults.get("enabled", False)))
+
+
+def set_auto_reply_enabled(animal_key: str, enabled: bool) -> None:
+    data = load_data()
+    auto_replies = data.setdefault("auto_replies", {})
+    animal_settings = auto_replies.setdefault(animal_key, {})
+    animal_settings["enabled"] = enabled
+    save_data(data)
+
+
 def mark_schedule_before_send(schedule_id: str, today: str) -> dict[str, Any] | None:
     schedules = get_schedules()
     for schedule in schedules:
@@ -416,6 +438,7 @@ async def central_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "/admin_lore\n"
         "/admin_memoria_cuentos\n"
         "/admin_cuento_prueba [mimosuga]\n"
+        "/mimosuga_auto <on|off|status>\n"
         "/status"
     )
 
@@ -432,6 +455,8 @@ async def central_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             partner_chat_id = get_partner_chat_id(animal_key)
             status = "vinculado" if partner_chat_id else "pendiente de /start"
         lines.append(f"- {animal['display_name']}: {status}")
+    auto_status = "encendida" if auto_reply_enabled("mimosuga") else "apagada"
+    lines.append(f"- Respuestas suaves de Mimosuga: {auto_status} (con revision previa)")
 
     await update.effective_chat.send_message("\n".join(lines))
 
@@ -629,6 +654,45 @@ async def central_resume_schedules(
 
     set_schedules_paused(False)
     await update.effective_chat.send_message("Programaciones reanudadas.")
+
+
+async def central_mimosuga_auto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_chat or not is_owner(update):
+        return
+
+    if not context.args:
+        status = "encendidas" if auto_reply_enabled("mimosuga") else "apagadas"
+        await update.effective_chat.send_message(
+            f"Respuestas suaves de Mimosuga: {status}.\n"
+            "Uso: /mimosuga_auto on, /mimosuga_auto off o /mimosuga_auto status"
+        )
+        return
+
+    action = context.args[0].lower()
+    if action in {"on", "activar", "encender"}:
+        set_auto_reply_enabled("mimosuga", True)
+        await update.effective_chat.send_message(
+            "Respuestas suaves de Mimosuga encendidas en modo revision previa. "
+            "Patita no recibira nada sin que tu pulses Enviar."
+        )
+        return
+
+    if action in {"off", "desactivar", "apagar"}:
+        set_auto_reply_enabled("mimosuga", False)
+        await update.effective_chat.send_message("Respuestas suaves de Mimosuga apagadas.")
+        return
+
+    if action in {"status", "estado"}:
+        status = "encendidas" if auto_reply_enabled("mimosuga") else "apagadas"
+        await update.effective_chat.send_message(
+            f"Respuestas suaves de Mimosuga: {status}.\n"
+            "Modo actual: revision previa obligatoria."
+        )
+        return
+
+    await update.effective_chat.send_message(
+        "Uso: /mimosuga_auto on, /mimosuga_auto off o /mimosuga_auto status"
+    )
 
 
 async def story_request(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1118,6 +1182,82 @@ async def admin_story_status_callback(update: Update, context: ContextTypes.DEFA
         await query.answer("No encuentro esa historia.", show_alert=True)
 
 
+async def auto_reply_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query or not query.message or not query.from_user:
+        return
+    if query.from_user.id != owner_chat_id():
+        await query.answer("Solo Miguel puede revisar respuestas.", show_alert=True)
+        return
+
+    await query.answer()
+    parts = (query.data or "").split(":")
+    if len(parts) != 3:
+        return
+
+    _, draft_id_text, action = parts
+    try:
+        draft_id = int(draft_id_text)
+    except ValueError:
+        await query.message.reply_text("Borrador no valido.")
+        return
+
+    if not database.db_available():
+        await query.message.reply_text("Base de datos no disponible.")
+        return
+
+    if action == "reject":
+        rejected = await database.reject_auto_reply_draft(draft_id, query.from_user.id)
+        if rejected:
+            await query.message.reply_text(f"Respuesta suave #{draft_id} descartada.")
+        else:
+            draft = await database.get_auto_reply_draft(draft_id)
+            status = draft.get("status") if draft else "no encontrada"
+            await query.message.reply_text(
+                f"No se pudo descartar la respuesta #{draft_id}. Estado actual: {status}."
+            )
+        return
+
+    if action != "send":
+        return
+
+    draft = await database.reserve_auto_reply_draft(draft_id, query.from_user.id)
+    if not draft:
+        current = await database.get_auto_reply_draft(draft_id)
+        status = current.get("status") if current else "no encontrada"
+        await query.message.reply_text(
+            f"Esa respuesta ya no esta pendiente. Estado actual: {status}."
+        )
+        return
+
+    animal_key = draft["animal_key"]
+    animal_app = animal_apps.get(animal_key)
+    partner_chat_id = get_partner_chat_id(animal_key)
+    if not animal_app or not partner_chat_id:
+        await database.release_auto_reply_draft(draft_id)
+        await query.message.reply_text(
+            f"No puedo enviar la respuesta #{draft_id}: "
+            f"{ANIMALS[animal_key]['display_name']} no esta vinculado."
+        )
+        return
+
+    try:
+        await animal_app.bot.send_chat_action(partner_chat_id, ChatAction.TYPING)
+        await animal_app.bot.send_message(
+            chat_id=partner_chat_id,
+            text=draft["proposed_text"],
+        )
+        append_history(animal_key, "out", draft["proposed_text"])
+        await database.mark_auto_reply_draft_sent(draft_id)
+        await query.message.reply_text(f"Respuesta suave #{draft_id} enviada por Mimosuga.")
+    except Exception:
+        logger.exception("No se pudo enviar respuesta automatica aprobada")
+        await database.release_auto_reply_draft(draft_id)
+        await query.message.reply_text(
+            f"No se pudo enviar la respuesta #{draft_id}. Revisa logs antes de intentarlo de nuevo."
+        )
+
+
 async def send_as_animal(
     animal_key: str,
     update: Update,
@@ -1307,6 +1447,7 @@ async def animal_message(
     if text:
         append_history(animal_key, "in", text)
         await centralita_app.bot.send_message(chat_id=owner_chat_id(), text=text)
+        await maybe_create_auto_reply_draft(animal_key, update, text)
     else:
         await centralita_app.bot.send_message(
             chat_id=owner_chat_id(),
@@ -1315,6 +1456,88 @@ async def animal_message(
                 "Para revisarlo, abre temporalmente el bot del animal correspondiente."
             ),
         )
+
+
+async def maybe_create_auto_reply_draft(
+    animal_key: str,
+    update: Update,
+    incoming_text: str,
+) -> None:
+    if animal_key != "mimosuga" or not auto_reply_enabled("mimosuga"):
+        return
+    if not update.effective_chat or not centralita_app:
+        return
+    if not database.db_available():
+        await centralita_app.bot.send_message(
+            chat_id=owner_chat_id(),
+            text="Auto Mimosuga esta encendido, pero la base de datos no esta disponible.",
+        )
+        return
+    if not openai_available():
+        await centralita_app.bot.send_message(
+            chat_id=owner_chat_id(),
+            text="Auto Mimosuga esta encendido, pero OPENAI_API_KEY no esta configurada.",
+        )
+        return
+
+    try:
+        recent_history = get_history("mimosuga", 12)
+        draft = await generate_soft_mimosuga_reply(
+            incoming_text=incoming_text,
+            recent_history=recent_history,
+        )
+    except Exception as exc:
+        logger.exception("No se pudo generar borrador automatico de Mimosuga")
+        detail = str(exc)
+        if len(detail) > 600:
+            detail = detail[:600] + "..."
+        await centralita_app.bot.send_message(
+            chat_id=owner_chat_id(),
+            text=(
+                "No se pudo preparar respuesta suave de Mimosuga.\n\n"
+                f"{type(exc).__name__}: {detail}"
+            ),
+        )
+        return
+
+    if not draft.get("should_reply"):
+        await centralita_app.bot.send_message(
+            chat_id=owner_chat_id(),
+            text=(
+                "Auto Mimosuga recomienda no responder sola a este mensaje.\n"
+                f"Motivo: {draft.get('reason') or 'mensaje no trivial'}"
+            ),
+        )
+        return
+
+    proposed_text = str(draft.get("reply", "")).strip()
+    if not proposed_text:
+        return
+
+    draft_id = await database.create_auto_reply_draft(
+        animal_key="mimosuga",
+        incoming_chat_id=update.effective_chat.id,
+        incoming_text=incoming_text,
+        proposed_text=proposed_text,
+        reason=str(draft.get("reason") or ""),
+    )
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("Enviar", callback_data=f"autoreply:{draft_id}:send"),
+                InlineKeyboardButton("Descartar", callback_data=f"autoreply:{draft_id}:reject"),
+            ]
+        ]
+    )
+    await centralita_app.bot.send_message(
+        chat_id=owner_chat_id(),
+        text=(
+            f"Respuesta suave propuesta por Mimosuga #{draft_id}\n"
+            f"Motivo: {draft.get('reason') or 'charla ligera'}\n\n"
+            f"{proposed_text}"
+        ),
+        reply_markup=keyboard,
+    )
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1346,6 +1569,7 @@ def build_centralita_app() -> Application:
     app.add_handler(CommandHandler("cancelar", central_cancel_schedule))
     app.add_handler(CommandHandler("pausar_programas", central_pause_schedules))
     app.add_handler(CommandHandler("reanudar_programas", central_resume_schedules))
+    app.add_handler(CommandHandler("mimosuga_auto", central_mimosuga_auto))
     app.add_handler(CommandHandler("admin_ultimos", admin_latest_stories))
     app.add_handler(CommandHandler("admin_ver", admin_view_story))
     app.add_handler(CommandHandler("admin_aprobar", admin_approve_story))
@@ -1356,6 +1580,7 @@ def build_centralita_app() -> Application:
     app.add_handler(CommandHandler("admin_cuento_prueba", admin_test_story))
     app.add_handler(CallbackQueryHandler(admin_test_story_callback, pattern=r"^adminteststory:"))
     app.add_handler(CallbackQueryHandler(admin_story_status_callback, pattern=r"^adminstory:"))
+    app.add_handler(CallbackQueryHandler(auto_reply_callback, pattern=r"^autoreply:"))
     for animal_key, animal in ANIMALS.items():
         app.add_handler(
             CommandHandler(

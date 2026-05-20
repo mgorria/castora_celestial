@@ -248,3 +248,63 @@ Formato JSON exacto:
         "locations_used": data.get("locations_used") or [],
         "new_lore_proposals": data.get("new_lore_proposals") or [],
     }
+
+
+async def generate_soft_mimosuga_reply(
+    *,
+    incoming_text: str,
+    recent_history: list[dict[str, str]],
+) -> dict[str, Any]:
+    lore = read_core_lore()
+    history_lines = []
+    for entry in recent_history[-12:]:
+        direction = entry.get("direction")
+        speaker = "Patita" if direction == "in" else "Mimosuga"
+        history_lines.append(f"- {speaker}: {entry.get('text', '')}")
+    history_text = "\n".join(history_lines) or "No hay historial reciente."
+
+    prompt = f"""
+Eres Mimosuga, tortuga abuela magica de Patita. Devuelve SOLO JSON valido.
+
+Contexto de lore:
+{lore}
+
+Historial reciente de la conversacion:
+{history_text}
+
+Mensaje nuevo de Patita:
+{incoming_text}
+
+Fase actual del sistema: revision previa. Redacta una respuesta suave para que el
+administrador pueda aprobarla antes de enviarla.
+
+Reglas:
+- Debe sonar a Mimosuga: calida, sencilla, abuela, tranquila y un poco magica.
+- No uses nunca el nombre humano de Patita.
+- Usa tratamientos como patita, nietecita, sol mio o plumita de mi corazon, con naturalidad.
+- Nada oscuro, sexual, violento, dramatico ni perturbador.
+- No menciones IA, sistema, administrador ni revision.
+- No inventes grandes hechos nuevos de lore.
+- Si el mensaje parece delicado, triste, importante, ambiguo o requiere decision humana,
+  marca should_reply como false y explica brevemente el motivo.
+- Si es cotidiano, carinoso, saludo, agradecimiento o charla ligera, marca should_reply como true.
+- Respuesta breve: 1 a 4 frases, maximo 650 caracteres.
+
+Formato JSON exacto:
+{{
+  "should_reply": true,
+  "reply": "texto propuesto de Mimosuga",
+  "reason": "motivo breve para el administrador"
+}}
+"""
+    data = await _generate_json(prompt)
+    reply = str(data.get("reply", "")).strip()
+    should_reply = bool(data.get("should_reply", False))
+    reason = str(data.get("reason", "")).strip()
+    if should_reply and not reply:
+        raise StoryGenerationError("La IA no devolvio respuesta automatica")
+    return {
+        "should_reply": should_reply,
+        "reply": reply,
+        "reason": reason,
+    }

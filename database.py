@@ -89,6 +89,20 @@ async def migrate() -> None:
                 expires_at timestamptz not null,
                 consumed_at timestamptz
             );
+
+            create table if not exists auto_reply_drafts (
+                id bigserial primary key,
+                animal_key text not null,
+                incoming_chat_id bigint not null,
+                incoming_text text not null,
+                proposed_text text not null,
+                status text not null default 'pending',
+                reason text,
+                created_at timestamptz not null default now(),
+                reviewed_at timestamptz,
+                sent_at timestamptz,
+                admin_user_id bigint
+            );
             """
         )
 
@@ -319,3 +333,92 @@ async def get_recent_story_memories(narrator: str, limit: int = 8) -> list[dict[
         limit,
     )
     return [dict(row) for row in rows]
+
+
+async def create_auto_reply_draft(
+    *,
+    animal_key: str,
+    incoming_chat_id: int,
+    incoming_text: str,
+    proposed_text: str,
+    reason: str | None = None,
+) -> int:
+    db = require_pool()
+    draft_id = await db.fetchval(
+        """
+        insert into auto_reply_drafts (
+            animal_key, incoming_chat_id, incoming_text, proposed_text, reason
+        )
+        values ($1, $2, $3, $4, $5)
+        returning id
+        """,
+        animal_key,
+        incoming_chat_id,
+        incoming_text,
+        proposed_text,
+        reason,
+    )
+    return int(draft_id)
+
+
+async def get_auto_reply_draft(draft_id: int) -> dict[str, Any] | None:
+    db = require_pool()
+    row = await db.fetchrow(
+        "select * from auto_reply_drafts where id = $1",
+        draft_id,
+    )
+    return dict(row) if row else None
+
+
+async def reserve_auto_reply_draft(draft_id: int, admin_user_id: int) -> dict[str, Any] | None:
+    db = require_pool()
+    row = await db.fetchrow(
+        """
+        update auto_reply_drafts
+        set status = 'sending',
+            reviewed_at = now(),
+            admin_user_id = $2
+        where id = $1 and status = 'pending'
+        returning *
+        """,
+        draft_id,
+        admin_user_id,
+    )
+    return dict(row) if row else None
+
+
+async def mark_auto_reply_draft_sent(draft_id: int) -> None:
+    db = require_pool()
+    await db.execute(
+        """
+        update auto_reply_drafts
+        set status = 'sent',
+            sent_at = now()
+        where id = $1
+        """,
+        draft_id,
+    )
+
+
+async def release_auto_reply_draft(draft_id: int) -> None:
+    db = require_pool()
+    await db.execute(
+        "update auto_reply_drafts set status = 'pending' where id = $1 and status = 'sending'",
+        draft_id,
+    )
+
+
+async def reject_auto_reply_draft(draft_id: int, admin_user_id: int) -> bool:
+    db = require_pool()
+    result = await db.execute(
+        """
+        update auto_reply_drafts
+        set status = 'rejected',
+            reviewed_at = now(),
+            admin_user_id = $2
+        where id = $1 and status = 'pending'
+        """,
+        draft_id,
+        admin_user_id,
+    )
+    return result.endswith("1")

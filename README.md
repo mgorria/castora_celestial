@@ -108,6 +108,9 @@ Comandos privados de administrador en **Centralita Magica**:
 /admin_lore
 /admin_memoria_cuentos
 /admin_cuento_prueba mimosuga
+/mimosuga_auto status
+/mimosuga_auto on
+/mimosuga_auto off
 ```
 
 El lore editable vive en:
@@ -118,6 +121,24 @@ lore/reglas-de-tono.md
 lore/personajes/
 lore/historias/
 ```
+
+## Respuestas suaves de Mimosuga
+
+Mimosuga puede preparar borradores automaticos de respuesta cuando Patita le escriba.
+En esta primera fase no envia nada sola: el administrador recibe la propuesta en
+**Centralita Magica** y decide con botones si la envia o la descarta.
+
+Comandos privados:
+
+```text
+/mimosuga_auto on
+/mimosuga_auto off
+/mimosuga_auto status
+```
+
+Cuando esta encendido, cada mensaje textual que llegue a Mimosuga genera una propuesta
+breve si la IA lo considera una charla ligera. Si el mensaje parece delicado o no trivial,
+la Centralita avisa al administrador y no propone una respuesta automatica.
 
 ## Railway
 
@@ -167,6 +188,7 @@ Al arrancar, el bot crea automaticamente las tablas necesarias si `DATABASE_URL`
 - `stories`
 - `daily_limits`
 - `story_offers`
+- `auto_reply_drafts`
 
 ## Nota de seguridad
 
