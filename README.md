@@ -137,8 +137,16 @@ Comandos privados:
 ```
 
 Cuando esta encendido, cada mensaje textual que llegue a Mimosuga genera una propuesta
-breve si la IA lo considera una charla ligera. Si el mensaje parece delicado o no trivial,
-la Centralita avisa al administrador y no propone una respuesta automatica.
+breve si la IA lo considera una charla ligera. Para que no responda frase por frase,
+el bot espera unos segundos antes de redactar: si Patita envia varios mensajes seguidos,
+los agrupa y prepara una sola respuesta para todo el bloque. Si el mensaje parece delicado
+o no trivial, la Centralita avisa al administrador y no propone una respuesta automatica.
+
+La espera de agrupacion se puede ajustar con:
+
+```env
+AUTO_REPLY_IDLE_SECONDS=90
+```
 
 ## Railway
 
@@ -157,6 +165,7 @@ MAX_HISTORY_PER_ANIMAL=50
 APP_TIMEZONE=Europe/Madrid
 SCHEDULER_POLL_SECONDS=30
 STARTUP_DELAY_SECONDS=8
+AUTO_REPLY_IDLE_SECONDS=90
 DATABASE_URL=postgresql://...
 OPENAI_API_KEY=tu_api_key_openai
 OPENAI_MODEL=gpt-5.2

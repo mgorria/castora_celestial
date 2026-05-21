@@ -58,6 +58,7 @@ MAX_HISTORY_PER_ANIMAL = int(os.getenv("MAX_HISTORY_PER_ANIMAL", "50"))
 APP_TIMEZONE = ZoneInfo(os.getenv("APP_TIMEZONE", "Europe/Madrid"))
 SCHEDULER_POLL_SECONDS = int(os.getenv("SCHEDULER_POLL_SECONDS", "30"))
 STARTUP_DELAY_SECONDS = int(os.getenv("STARTUP_DELAY_SECONDS", "8"))
+AUTO_REPLY_IDLE_SECONDS = int(os.getenv("AUTO_REPLY_IDLE_SECONDS", "90"))
 
 WEEKDAYS = {
     "lunes": 0,
@@ -107,6 +108,8 @@ animal_apps: dict[str, Application] = {}
 centralita_app: Application | None = None
 lock_socket: socket.socket | None = None
 admin_test_story_offers: dict[str, dict[str, Any]] = {}
+auto_reply_buffers: dict[str, dict[str, Any]] = {}
+auto_reply_tasks: dict[str, asyncio.Task] = {}
 
 AUTO_REPLY_DEFAULTS = {
     "mimosuga": {
@@ -278,6 +281,53 @@ def get_history(animal_key: str, limit: int = 10) -> list[dict[str, str]]:
     data = load_data()
     history = data.get("history", {}).get(animal_key, [])
     return history[-limit:]
+
+
+def history_local_datetime(entry: dict[str, str]) -> datetime | None:
+    raw_value = entry.get("at")
+    if not raw_value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw_value)
+    except ValueError:
+        return None
+    if not parsed.tzinfo:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(APP_TIMEZONE)
+
+
+def get_mimosuga_day_context() -> dict[str, Any]:
+    history = get_history("mimosuga", MAX_HISTORY_PER_ANIMAL)
+    today = today_local()
+    previous_dates = sorted(
+        {
+            local_dt.date()
+            for entry in history
+            if (local_dt := history_local_datetime(entry)) and local_dt.date() < today
+        },
+        reverse=True,
+    )
+    previous_date = previous_dates[0] if previous_dates else None
+
+    today_entries: list[dict[str, str]] = []
+    previous_entries: list[dict[str, str]] = []
+    for entry in history:
+        local_dt = history_local_datetime(entry)
+        if not local_dt:
+            continue
+        if local_dt.date() == today:
+            today_entries.append(entry)
+        elif previous_date and local_dt.date() == previous_date:
+            previous_entries.append(entry)
+
+    return {
+        "is_first_message_today": not any(
+            entry.get("direction") == "in" for entry in today_entries
+        ),
+        "today_entries": today_entries,
+        "previous_day_entries": previous_entries,
+        "previous_date": previous_date.isoformat() if previous_date else "",
+    }
 
 
 def format_history_entry(entry: dict[str, str]) -> str:
@@ -456,7 +506,14 @@ async def central_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             status = "vinculado" if partner_chat_id else "pendiente de /start"
         lines.append(f"- {animal['display_name']}: {status}")
     auto_status = "encendida" if auto_reply_enabled("mimosuga") else "apagada"
-    lines.append(f"- Respuestas suaves de Mimosuga: {auto_status} (con revision previa)")
+    pending_batches = sum(
+        1 for key, task in auto_reply_tasks.items()
+        if key.startswith("mimosuga:") and not task.done()
+    )
+    lines.append(
+        f"- Respuestas suaves de Mimosuga: {auto_status} "
+        f"(revision previa, espera {AUTO_REPLY_IDLE_SECONDS}s, lotes pendientes: {pending_batches})"
+    )
 
     await update.effective_chat.send_message("\n".join(lines))
 
@@ -684,9 +741,15 @@ async def central_mimosuga_auto(update: Update, context: ContextTypes.DEFAULT_TY
 
     if action in {"status", "estado"}:
         status = "encendidas" if auto_reply_enabled("mimosuga") else "apagadas"
+        pending_batches = sum(
+            1 for key, task in auto_reply_tasks.items()
+            if key.startswith("mimosuga:") and not task.done()
+        )
         await update.effective_chat.send_message(
             f"Respuestas suaves de Mimosuga: {status}.\n"
-            "Modo actual: revision previa obligatoria."
+            "Modo actual: revision previa obligatoria.\n"
+            f"Espera para agrupar mensajes: {AUTO_REPLY_IDLE_SECONDS} segundos.\n"
+            f"Lotes de mensajes esperando: {pending_batches}."
         )
         return
 
@@ -1445,9 +1508,10 @@ async def animal_message(
         text=f"Respuesta recibida en {ANIMALS[animal_key]['display_name']} de {sender}:",
     )
     if text:
+        day_context = get_mimosuga_day_context() if animal_key == "mimosuga" else None
         append_history(animal_key, "in", text)
         await centralita_app.bot.send_message(chat_id=owner_chat_id(), text=text)
-        await maybe_create_auto_reply_draft(animal_key, update, text)
+        await queue_auto_reply_draft(animal_key, update, text, day_context)
     else:
         await centralita_app.bot.send_message(
             chat_id=owner_chat_id(),
@@ -1458,10 +1522,11 @@ async def animal_message(
         )
 
 
-async def maybe_create_auto_reply_draft(
+async def queue_auto_reply_draft(
     animal_key: str,
     update: Update,
     incoming_text: str,
+    day_context: dict[str, Any] | None,
 ) -> None:
     if animal_key != "mimosuga" or not auto_reply_enabled("mimosuga"):
         return
@@ -1480,11 +1545,71 @@ async def maybe_create_auto_reply_draft(
         )
         return
 
+    buffer_key = f"{animal_key}:{update.effective_chat.id}"
+    was_new_buffer = buffer_key not in auto_reply_buffers
+    if was_new_buffer:
+        auto_reply_buffers[buffer_key] = {
+            "animal_key": animal_key,
+            "chat_id": update.effective_chat.id,
+            "messages": [],
+            "first_message_today": bool(day_context and day_context.get("is_first_message_today")),
+            "started_at": datetime.now(timezone.utc),
+        }
+    buffer = auto_reply_buffers[buffer_key]
+    buffer["messages"].append(incoming_text)
+    if day_context and day_context.get("is_first_message_today"):
+        buffer["first_message_today"] = True
+
+    existing_task = auto_reply_tasks.get(buffer_key)
+    if existing_task and not existing_task.done():
+        existing_task.cancel()
+    auto_reply_tasks[buffer_key] = asyncio.create_task(process_auto_reply_buffer_after_idle(buffer_key))
+
+    await centralita_app.bot.send_message(
+        chat_id=owner_chat_id(),
+        text=(
+            (
+                "Auto Mimosuga abre un lote y esperara "
+                if was_new_buffer
+                else "Auto Mimosuga suma este mensaje al lote y vuelve a esperar "
+            )
+            + f"{AUTO_REPLY_IDLE_SECONDS} segundos antes de proponer una sola respuesta."
+        ),
+    )
+
+
+async def process_auto_reply_buffer_after_idle(buffer_key: str) -> None:
     try:
-        recent_history = get_history("mimosuga", 12)
+        await asyncio.sleep(AUTO_REPLY_IDLE_SECONDS)
+        await process_auto_reply_buffer(buffer_key)
+    except asyncio.CancelledError:
+        return
+
+
+async def process_auto_reply_buffer(buffer_key: str) -> None:
+    buffer = auto_reply_buffers.pop(buffer_key, None)
+    auto_reply_tasks.pop(buffer_key, None)
+    if not buffer or not centralita_app:
+        return
+    if not auto_reply_enabled("mimosuga"):
+        return
+    if not database.db_available() or not openai_available():
+        return
+
+    messages = [str(message).strip() for message in buffer.get("messages", []) if str(message).strip()]
+    if not messages:
+        return
+
+    try:
+        day_context = get_mimosuga_day_context()
+        recent_history = get_history("mimosuga", 20)
         draft = await generate_soft_mimosuga_reply(
-            incoming_text=incoming_text,
+            incoming_messages=messages,
             recent_history=recent_history,
+            today_history=day_context["today_entries"],
+            previous_day_history=day_context["previous_day_entries"],
+            previous_date=day_context["previous_date"],
+            is_first_message_today=bool(buffer.get("first_message_today")),
         )
     except Exception as exc:
         logger.exception("No se pudo generar borrador automatico de Mimosuga")
@@ -1514,9 +1639,10 @@ async def maybe_create_auto_reply_draft(
     if not proposed_text:
         return
 
+    incoming_text = "\n".join(f"- {message}" for message in messages)
     draft_id = await database.create_auto_reply_draft(
         animal_key="mimosuga",
-        incoming_chat_id=update.effective_chat.id,
+        incoming_chat_id=int(buffer["chat_id"]),
         incoming_text=incoming_text,
         proposed_text=proposed_text,
         reason=str(draft.get("reason") or ""),
@@ -1534,6 +1660,9 @@ async def maybe_create_auto_reply_draft(
         text=(
             f"Respuesta suave propuesta por Mimosuga #{draft_id}\n"
             f"Motivo: {draft.get('reason') or 'charla ligera'}\n\n"
+            "Mensajes agrupados de Patita:\n"
+            f"{incoming_text}\n\n"
+            "Propuesta:\n"
             f"{proposed_text}"
         ),
         reply_markup=keyboard,

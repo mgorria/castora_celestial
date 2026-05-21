@@ -252,16 +252,33 @@ Formato JSON exacto:
 
 async def generate_soft_mimosuga_reply(
     *,
-    incoming_text: str,
+    incoming_messages: list[str],
     recent_history: list[dict[str, str]],
+    today_history: list[dict[str, str]],
+    previous_day_history: list[dict[str, str]],
+    previous_date: str,
+    is_first_message_today: bool,
 ) -> dict[str, Any]:
     lore = read_core_lore()
+
+    def _format_history(entries: list[dict[str, str]], limit: int = 20) -> str:
+        lines = []
+        for entry in entries[-limit:]:
+            direction = entry.get("direction")
+            speaker = "Patita" if direction == "in" else "Mimosuga"
+            lines.append(f"- {speaker}: {entry.get('text', '')}")
+        return "\n".join(lines) or "No hay mensajes registrados."
+
     history_lines = []
-    for entry in recent_history[-12:]:
+    for entry in recent_history[-20:]:
         direction = entry.get("direction")
         speaker = "Patita" if direction == "in" else "Mimosuga"
         history_lines.append(f"- {speaker}: {entry.get('text', '')}")
     history_text = "\n".join(history_lines) or "No hay historial reciente."
+    incoming_text = "\n".join(f"- {message}" for message in incoming_messages)
+    today_text = _format_history(today_history)
+    previous_day_text = _format_history(previous_day_history)
+    first_text = "si" if is_first_message_today else "no"
 
     prompt = f"""
 Eres Mimosuga, tortuga abuela magica de Patita. Devuelve SOLO JSON valido.
@@ -272,7 +289,15 @@ Contexto de lore:
 Historial reciente de la conversacion:
 {history_text}
 
-Mensaje nuevo de Patita:
+Es el primer bloque de mensajes de Patita de hoy: {first_text}
+
+Conversacion de hoy:
+{today_text}
+
+Conversacion del ultimo dia anterior registrado ({previous_date or "sin fecha anterior"}):
+{previous_day_text}
+
+Bloque nuevo de mensajes de Patita, agrupados porque los envio seguidos:
 {incoming_text}
 
 Fase actual del sistema: revision previa. Redacta una respuesta suave para que el
@@ -282,6 +307,13 @@ Reglas:
 - Debe sonar a Mimosuga: calida, sencilla, abuela, tranquila y un poco magica.
 - No uses nunca el nombre humano de Patita.
 - Usa tratamientos como patita, nietecita, sol mio o plumita de mi corazon, con naturalidad.
+- Responde al conjunto del bloque nuevo, no mensaje por mensaje.
+- Si Patita envio varias frases cortas, integralo en una unica respuesta natural.
+- Ten en cuenta si es el primer mensaje de hoy: si lo es, puedes saludar con suavidad;
+  si no lo es, continua la conversacion sin reiniciar ni saludar como si empezara de cero.
+- Ten en cuenta lo ocurrido hoy y el ultimo dia anterior para no contradecirte ni repetir
+  la misma respuesta.
+- No hagas cuatro respuestas intercambiables. Debe avanzar la conversacion con continuidad.
 - Nada oscuro, sexual, violento, dramatico ni perturbador.
 - No menciones IA, sistema, administrador ni revision.
 - No inventes grandes hechos nuevos de lore.
