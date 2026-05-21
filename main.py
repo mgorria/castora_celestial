@@ -5,7 +5,7 @@ import os
 import signal
 import socket
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -442,6 +442,54 @@ def format_schedule(schedule: dict[str, Any]) -> str:
     return f"{schedule['id']} - {display_name} - {when} - {schedule['text']}"
 
 
+def next_schedule_time(schedule: dict[str, Any], now: datetime) -> datetime | None:
+    try:
+        hour, minute = parse_schedule_time(schedule["time"])
+    except (KeyError, ValueError):
+        return None
+
+    if schedule.get("kind", "weekly") == "weekly":
+        weekday = int(schedule["weekday"])
+        days_ahead = (weekday - now.weekday()) % 7
+        candidate = datetime(
+            now.year,
+            now.month,
+            now.day,
+            hour,
+            minute,
+            tzinfo=APP_TIMEZONE,
+        ) + timedelta(days=days_ahead)
+        if candidate <= now:
+            candidate += timedelta(days=7)
+        return candidate
+
+    if schedule.get("sent") or schedule.get("sending"):
+        return None
+    try:
+        scheduled_date = date.fromisoformat(schedule["date"])
+    except (KeyError, ValueError):
+        return None
+    return datetime(
+        scheduled_date.year,
+        scheduled_date.month,
+        scheduled_date.day,
+        hour,
+        minute,
+        tzinfo=APP_TIMEZONE,
+    )
+
+
+def format_short_schedule(schedule: dict[str, Any], when: datetime) -> str:
+    display_name = ANIMALS.get(schedule.get("animal_key"), {}).get(
+        "display_name",
+        str(schedule.get("animal_key", "animal")),
+    )
+    text = str(schedule.get("text", ""))
+    if len(text) > 70:
+        text = text[:67] + "..."
+    return f"{when.strftime('%d/%m %H:%M')} - {display_name}: {text}"
+
+
 def is_owner(update: Update) -> bool:
     return bool(update.effective_user and update.effective_user.id == owner_chat_id())
 
@@ -497,7 +545,13 @@ async def central_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if not update.effective_chat or not is_owner(update):
         return
 
-    lines = ["Estado de la Centralita Magica:"]
+    now = datetime.now(APP_TIMEZONE)
+    lines = [
+        "Estado general de Control Castori",
+        f"Hora local: {now.strftime('%d/%m/%Y %H:%M')}",
+        "",
+        "Bots:",
+    ]
     for animal_key, animal in ANIMALS.items():
         if not os.getenv(animal["token_env"]):
             status = f"pendiente de token ({animal['token_env']})"
@@ -505,15 +559,68 @@ async def central_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             partner_chat_id = get_partner_chat_id(animal_key)
             status = "vinculado" if partner_chat_id else "pendiente de /start"
         lines.append(f"- {animal['display_name']}: {status}")
+
+    lines.append("")
+    lines.append("Sistema:")
+    lines.append(f"- Railway/worker: activo si estas recibiendo este mensaje")
+    lines.append(f"- Base de datos: {'conectada' if database.db_available() else 'no disponible'}")
+    lines.append(f"- OpenAI: {'configurado' if openai_available() else 'no configurado'}")
+    lines.append(f"- Archivo de estado: {DATA_FILE}")
+
+    schedules = get_schedules()
+    active_schedules = [
+        schedule for schedule in schedules
+        if schedule.get("kind", "weekly") == "weekly" or not schedule.get("sent")
+    ]
+    upcoming = []
+    for schedule in active_schedules:
+        when = next_schedule_time(schedule, now)
+        if when:
+            upcoming.append((when, schedule))
+    upcoming.sort(key=lambda item: item[0])
+    lines.append("")
+    lines.append("Programaciones:")
+    lines.append(f"- Estado: {'pausadas' if schedules_paused() else 'activas'}")
+    lines.append(f"- Activas: {len(active_schedules)}")
+    if upcoming:
+        lines.append("- Proximas:")
+        for when, schedule in upcoming[:3]:
+            lines.append(f"  {format_short_schedule(schedule, when)}")
+    else:
+        lines.append("- Proximas: ninguna")
+
     auto_status = "encendida" if auto_reply_enabled("mimosuga") else "apagada"
     pending_batches = sum(
         1 for key, task in auto_reply_tasks.items()
         if key.startswith("mimosuga:") and not task.done()
     )
-    lines.append(
-        f"- Respuestas suaves de Mimosuga: {auto_status} "
-        f"(revision previa, espera {AUTO_REPLY_IDLE_SECONDS}s, lotes pendientes: {pending_batches})"
-    )
+    lines.append("")
+    lines.append("Mimosuga automatica:")
+    lines.append(f"- Respuestas suaves: {auto_status}")
+    lines.append(f"- Modo: revision previa obligatoria")
+    lines.append(f"- Espera para agrupar mensajes: {AUTO_REPLY_IDLE_SECONDS} segundos")
+    lines.append(f"- Lotes esperando: {pending_batches}")
+
+    lines.append("")
+    lines.append("Cuentos y lore:")
+    if database.db_available():
+        try:
+            counts = await database.get_system_status_counts()
+            lines.append(f"- Historias totales: {counts.get('stories_total', 0)}")
+            lines.append(f"- Historias pendientes: {counts.get('stories_pending', 0)}")
+            lines.append(f"- Historias canon: {counts.get('stories_canon', 0)}")
+            lines.append(f"- Opciones de cuento activas: {counts.get('active_story_offers', 0)}")
+            lines.append(f"- Respuestas suaves pendientes de revisar: {counts.get('auto_reply_pending', 0)}")
+        except Exception:
+            logger.exception("No se pudieron cargar contadores de estado")
+            lines.append("- Contadores de base de datos: error al consultar")
+    else:
+        lines.append("- Base de datos no disponible; cuentos desactivados")
+
+    lines.append(f"- Cuento diario: se renueva a las 00:00 ({APP_TIMEZONE.key})")
+    lines.append("")
+    lines.append("Comandos utiles:")
+    lines.append("- /programados, /historial mimosuga 10, /admin_ultimos, /mimosuga_auto on|off")
 
     await update.effective_chat.send_message("\n".join(lines))
 

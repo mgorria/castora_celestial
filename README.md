@@ -73,12 +73,15 @@ Desde tu Telegram, abre **Centralita Magica** y usa:
 /cancelar id_de_programacion
 /pausar_programas
 /reanudar_programas
+/status
 ```
 
 Las respuestas que Sandra envie a Oficina Castori se copiaran automaticamente a tu chat privado con Centralita.
 El historial guarda los ultimos mensajes de cada animal en `data.json`.
 Los mensajes programados pueden ser semanales o de una fecha exacta, se revisan periodicamente y se envian en la zona horaria configurada.
 Si algo raro ocurre, `/pausar_programas` detiene los envios programados hasta usar `/reanudar_programas`.
+`/status` muestra el estado general: bots vinculados, Railway/worker, base de datos,
+OpenAI, programaciones, respuestas suaves de Mimosuga, cuentos y comandos utiles.
 
 ## Cuentos y lore
 

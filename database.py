@@ -422,3 +422,19 @@ async def reject_auto_reply_draft(draft_id: int, admin_user_id: int) -> bool:
         admin_user_id,
     )
     return result.endswith("1")
+
+
+async def get_system_status_counts() -> dict[str, Any]:
+    db = require_pool()
+    row = await db.fetchrow(
+        """
+        select
+            (select count(*) from stories) as stories_total,
+            (select count(*) from stories where status = 'pending') as stories_pending,
+            (select count(*) from stories where status = 'canon') as stories_canon,
+            (select count(*) from story_offers where consumed_at is null and expires_at > now()) as active_story_offers,
+            (select count(*) from auto_reply_drafts where status = 'pending') as auto_reply_pending,
+            (select count(*) from auto_reply_drafts where status = 'sent') as auto_reply_sent
+        """
+    )
+    return dict(row) if row else {}
