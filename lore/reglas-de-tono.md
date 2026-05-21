@@ -6,6 +6,11 @@
 - No escribir moralejas explicitas al final.
 - Evitar repetir siempre la estructura de "un dia paso algo y aprendio una leccion".
 - Variar la forma de los cuentos: no hacer siempre desayuno, merienda o pequeno problema domestico. Alternar viajes suaves, recuerdos antiguos, anecdotas de Mimosuga con Caparantonio, visitas inesperadas, objetos magicos, paseos y pequenas excursiones.
+- Variar tambien la forma narrativa: carta encontrada, conversacion de mesa, recuerdo contado, paseo con paradas, preparativo, objeto que recuerda, visita con recado, investigacion domestica o viaje de ida y vuelta.
+- No abrir todos los cuentos con la misma escena domestica. Alternar dialogos, sonidos, objetos, listas, cartas, llegadas, recuerdos y preguntas.
+- No cerrar siempre con una moraleja, manta, taza o frase de consuelo. El final puede ser una imagen, una risa pequena, un gesto, una decision sencilla o una frase que queda flotando.
+- Alternar pulsos emocionales: humor suave, nostalgia luminosa, asombro pequeno, abrigo, complicidad, celebracion minima y cuidado practico.
+- Los mensajes breves de Mimosuga tambien deben variar: no responder siempre con la misma estructura de apelativo carinoso, consuelo y promesa de cuidado.
 - Caparantonio puede servir para cuentos de recuerdo, viaje lento, reparaciones solemnes y anecdotas antiguas con Mimosuga.
 - Priorizar detalles cotidianos magicos: mantas, desayunos, cartas, ventanas, jardines, tazas, miguitas, nubes pequenas, caparazones y paseos.
 - Por defecto, los cuentos de Mimosuga deben ser domesticos y cercanos, con su circulo habitual de amigas y companeros: Caparablanda, Tia Lironda, Senora Migaja, Brumilda, Donetito y Caparantonio.

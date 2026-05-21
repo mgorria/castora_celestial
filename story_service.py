@@ -23,6 +23,43 @@ Tipos de cuento que conviene rotar:
 - paseo_con_donetito: Donetito investiga algo pequeno, pero no debe usarse si ya aparecio recientemente.
 """
 
+STORY_SHAPE_GUIDE = """
+Formas narrativas que conviene rotar:
+- escena_unica: una escena pequena, casi teatral, con principio y final en el mismo lugar.
+- carta_encontrada: la historia nace de una carta, nota, sobre, receta, lista o papel doblado.
+- recuerdo_contado: Mimosuga recuerda algo de hace muchos anos y lo cuenta con calma.
+- paseo_con_paradas: la historia avanza por tres paradas o lugares pequenos.
+- visita_y_recado: alguien llega con un recado concreto que transforma suavemente el dia.
+- investigacion_domestica: se investiga un misterio minimo sin convertirlo en aventura grande.
+- preparativo: los personajes preparan algo para Patita o para otro ser querido.
+- objeto_que_recuerda: un objeto domestico guarda una sensacion, recuerdo o pequeno secreto.
+- conversacion_de_mesa: el cuento es sobre una charla entre personajes, con humor y ternura.
+- viaje_de_ida_y_vuelta: salida breve, descubrimiento suave y regreso a casa.
+"""
+
+EMOTIONAL_TONE_GUIDE = """
+Pulsos emocionales que conviene alternar:
+- abrigo: consuelo tranquilo, manta, descanso.
+- humor_suave: pequena comicidad domestica, sin chiste forzado.
+- asombro_pequeno: magia cotidiana que sorprende sin grandilocuencia.
+- nostalgia_luminosa: recuerdo antiguo sin tristeza pesada.
+- complicidad: Mimosuga habla como quien comparte un secreto pequeno con Patita.
+- celebracion_minima: alegria por algo muy sencillo.
+- cuidado_practico: ternura en forma de tarea concreta, ordenar, preparar, acompanar.
+"""
+
+REPLY_STYLE_GUIDE = """
+Modos de respuesta breve que conviene rotar:
+- saludo_calido: solo si es primer mensaje del dia.
+- respuesta_directa: contesta sin adornar demasiado.
+- pregunta_suave: termina con una pregunta pequena y natural.
+- mini_anecdota: una frase de Mimosuga recordando algo domestico, sin cuento largo.
+- cuidado_practico: propone descanso, comida, abrigo o calma de forma sencilla.
+- humor_tierno: una observacion ligera, no chiste repetido.
+- continuidad: retoma algo dicho antes hoy o ayer.
+- acompanamiento_silencioso: valida y acompana sin intentar arreglarlo todo.
+"""
+
 
 class StoryGenerationError(RuntimeError):
     pass
@@ -86,6 +123,8 @@ def _recent_text(recent_summaries: list[Any]) -> str:
                     if isinstance(option, dict) and option.get("title") == selected_option:
                         option_meta = (
                             f"| tipo: {option.get('story_type', '')} "
+                            f"| forma: {option.get('narrative_shape', '')} "
+                            f"| pulso: {option.get('emotional_tone', '')} "
                             f"| personajes principales: {', '.join(map(str, option.get('primary_characters') or []))}"
                         )
                         break
@@ -129,21 +168,28 @@ magicas. Nada oscuro, violento, sexual o perturbador. No menciones IA ni tecnolo
 
 {STORY_TYPE_GUIDE}
 
+{STORY_SHAPE_GUIDE}
+
+{EMOTIONAL_TONE_GUIDE}
+
 Reglas anti-repeticion:
 - Las dos opciones deben ser claramente distintas entre si.
-- No repitas personajes, estructura, conflicto domestico ni objeto central de los ultimos cuentos.
+- No repitas personajes, forma narrativa, pulso emocional, conflicto domestico, apertura ni objeto central de los ultimos cuentos.
 - No propongas el mismo tipo de cuento que se haya usado en los ultimos 2 cuentos.
+- No propongas la misma forma narrativa que se haya usado en los ultimos 2 cuentos.
 - Una de las opciones debe abrir variedad estructural: viaje suave, anecdota antigua, visita inesperada u objeto magico. No hagas siempre cuento de merienda/desayuno.
+- Evita opciones que empiecen con "un dia", "aquella manana", "Mimosuga estaba" o una merienda/desayuno si ya se han usado recientemente.
 - Si en los ultimos cuentos salieron Caparablanda, Donetito u Osito Castori, evita usarlos ahora salvo que sea imprescindible.
 - Osito Castori, Oficina Castori, Castora Celestial, Plumadulce y Bambalin son apariciones especiales, no recursos cotidianos.
 - Para cuentos cotidianos prefiere rotar entre Tia Lironda, Senora Migaja, Brumilda, Caparantonio, Caparablanda y Donetito, sin repetir siempre los mismos.
 - Incluye con frecuencia viajes suaves y anecdotas antiguas de Mimosuga con Caparantonio, sin convertirlo siempre en aventura epica.
+- Una opcion debe ser de movimiento, memoria o recado; la otra debe ser de objeto, conversacion o preparativo.
 
 Formato JSON exacto:
 {{
   "options": [
-    {{"title": "titulo breve", "teaser": "descripcion tierna de 1 frase", "story_type": "uno de los tipos listados", "primary_characters": ["personaje"]}},
-    {{"title": "titulo breve", "teaser": "descripcion tierna de 1 frase", "story_type": "otro tipo distinto", "primary_characters": ["personaje"]}}
+    {{"title": "titulo breve", "teaser": "descripcion tierna de 1 frase", "story_type": "uno de los tipos listados", "narrative_shape": "una forma listada", "emotional_tone": "un pulso listado", "primary_characters": ["personaje"]}},
+    {{"title": "titulo breve", "teaser": "descripcion tierna de 1 frase", "story_type": "otro tipo distinto", "narrative_shape": "otra forma distinta", "emotional_tone": "otro pulso distinto", "primary_characters": ["personaje"]}}
   ]
 }}
 """
@@ -156,6 +202,8 @@ Formato JSON exacto:
             "title": str(option.get("title", "")).strip(),
             "teaser": str(option.get("teaser", "")).strip(),
             "story_type": str(option.get("story_type", "")).strip(),
+            "narrative_shape": str(option.get("narrative_shape", "")).strip(),
+            "emotional_tone": str(option.get("emotional_tone", "")).strip(),
             "primary_characters": option.get("primary_characters") or [],
         }
         for option in options
@@ -201,6 +249,10 @@ Memoria reciente en Markdown:
 
 {STORY_TYPE_GUIDE}
 
+{STORY_SHAPE_GUIDE}
+
+{EMOTIONAL_TONE_GUIDE}
+
 Escribe un cuento completo para Patita contado por Mimosuga. Reglas:
 - Tono calido, intimo, tierno y narrativo.
 - Debe parecer que Mimosuga se lo cuenta directamente a Patita.
@@ -209,12 +261,16 @@ Escribe un cuento completo para Patita contado por Mimosuga. Reglas:
 - No menciones que eres IA.
 - No uses moraleja explicita.
 - No repitas siempre la misma estructura.
+- No abras siempre con una rutina de manana, desayuno, merienda, Mimosuga colocandose el chal o "habia una vez".
+- Elige una apertura distinta: una frase de dialogo, una carta, un sonido, una lista, un recuerdo, un objeto, una pregunta, una llegada o una imagen concreta.
+- Cambia el ritmo: algunos cuentos pueden ser mas dialogados, otros mas de paseo, otros de recuerdo, otros de preparativo.
 - Preferir detalles cotidianos magicos: desayunos, mantas, cartas, paseos,
   meriendas, ventanas, pequenas visitas, Brumilda, Senora Migaja, Tia Lironda,
   Caparantonio y sucesos tiernos.
 - No repitas la estructura, personajes principales, objeto magico central ni situacion
   domestica de los ultimos cuentos.
 - Respeta el story_type de la opcion elegida y haz que se note en la estructura.
+- Respeta narrative_shape y emotional_tone de la opcion elegida; deben notarse en la forma del cuento, no solo en el resumen.
 - Si la opcion elegida es viaje_suave, debe haber desplazamiento real: camino, estacion, mercado, puente, senda o lugar nuevo.
 - Si la opcion elegida es anecdota_antigua, debe sentirse como recuerdo de Mimosuga, con Caparantonio o Tia Lironda si encaja.
 - Si la opcion elegida es objeto_magico, el objeto debe ser el centro narrativo y no solo decoracion.
@@ -230,6 +286,8 @@ Formato JSON exacto:
   "full_text": "cuento completo",
   "summary": "resumen breve para memoria interna",
   "story_type": "tipo usado",
+  "narrative_shape": "forma narrativa usada",
+  "emotional_tone": "pulso emocional usado",
   "characters_used": ["personaje"],
   "locations_used": ["lugar"],
   "new_lore_proposals": ["elemento nuevo si aparece"]
@@ -244,6 +302,8 @@ Formato JSON exacto:
         "full_text": str(data["full_text"]).strip(),
         "summary": str(data["summary"]).strip(),
         "story_type": str(data.get("story_type", selected_option.get("story_type", ""))).strip(),
+        "narrative_shape": str(data.get("narrative_shape", selected_option.get("narrative_shape", ""))).strip(),
+        "emotional_tone": str(data.get("emotional_tone", selected_option.get("emotional_tone", ""))).strip(),
         "characters_used": data.get("characters_used") or [],
         "locations_used": data.get("locations_used") or [],
         "new_lore_proposals": data.get("new_lore_proposals") or [],
@@ -314,6 +374,11 @@ Reglas:
 - Ten en cuenta lo ocurrido hoy y el ultimo dia anterior para no contradecirte ni repetir
   la misma respuesta.
 - No hagas cuatro respuestas intercambiables. Debe avanzar la conversacion con continuidad.
+- No repitas siempre la formula "ay, mi patita..." + frase de consuelo + promesa de manta.
+- Varia la cadencia: a veces una respuesta directa, a veces una pregunta pequena, a veces una mini anecdota, a veces humor tierno.
+- No uses mas de un apelativo carinoso por respuesta salvo que sea muy natural.
+- Si ya saludo hoy, no vuelvas a saludar como si fuera el primer contacto.
+- Evita terminar siempre con "aqui estoy", "te guardo..." o "mi manta..." si ya aparecio recientemente.
 - Nada oscuro, sexual, violento, dramatico ni perturbador.
 - No menciones IA, sistema, administrador ni revision.
 - No inventes grandes hechos nuevos de lore.
@@ -322,10 +387,13 @@ Reglas:
 - Si es cotidiano, carinoso, saludo, agradecimiento o charla ligera, marca should_reply como true.
 - Respuesta breve: 1 a 4 frases, maximo 650 caracteres.
 
+{REPLY_STYLE_GUIDE}
+
 Formato JSON exacto:
 {{
   "should_reply": true,
   "reply": "texto propuesto de Mimosuga",
+  "reply_style": "uno de los modos listados",
   "reason": "motivo breve para el administrador"
 }}
 """
@@ -338,5 +406,6 @@ Formato JSON exacto:
     return {
         "should_reply": should_reply,
         "reply": reply,
+        "reply_style": str(data.get("reply_style", "")).strip(),
         "reason": reason,
     }
