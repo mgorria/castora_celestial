@@ -23,7 +23,12 @@ def read_lore_file(relative_path: str) -> str:
 def read_core_lore() -> str:
     resumen = read_lore_file("resumen-para-ia.md")
     reglas = read_lore_file("reglas-de-tono.md")
-    return f"# Resumen de lore\n\n{resumen}\n\n# Reglas de tono\n\n{reglas}".strip()
+    continuidad = read_lore_file("continuidad-canonica.md")
+    return (
+        f"# Resumen de lore\n\n{resumen}\n\n"
+        f"# Continuidad canonica\n\n{continuidad}\n\n"
+        f"# Reglas de tono\n\n{reglas}"
+    ).strip()
 
 
 def read_recent_story_memory() -> str:

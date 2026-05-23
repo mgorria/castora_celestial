@@ -193,6 +193,10 @@ Reglas anti-repeticion:
 - No propongas la misma forma narrativa que se haya usado en los ultimos 2 cuentos.
 - Al menos una opcion debe ser memoria_de_vida, consejo_de_abuela, caparantonio_intimo,
   confesion_tierna o relato_en_primera_persona si esos registros no han aparecido recientemente.
+- Las historias fundacionales y de origen, como "como conoci a Caparantonio", son hechos
+  unicos. No las propongas si ya aparecen en la continuidad canonica o en la memoria reciente.
+- Si propones una historia de origen todavia no fijada, debe sentirse como ocasion especial
+  y el teaser debe dejar claro que se va a contar una version importante, no una anecdota cualquiera.
 - Una de las opciones debe abrir variedad estructural: vida de Mimosuga, viaje suave, anecdota antigua,
   visita inesperada u objeto magico. No hagas siempre cuento de merienda/desayuno.
 - Evita opciones que empiecen con "un dia", "aquella manana", "Mimosuga estaba" o una merienda/desayuno si ya se han usado recientemente.
@@ -294,6 +298,12 @@ intima. Reglas:
   reparto entrando y saliendo.
 - Si la opcion elegida pide "como conoci a Caparantonio", cuenta el encuentro desde lo
   que Mimosuga vio, penso y sintio. No lo resumas como una anecdota plana.
+- Si la opcion elegida fija un hecho unico de continuidad, como el primer encuentro con
+  Caparantonio, no contradigas la continuidad canonica. Si no existe version canonica,
+  escribe una version concreta, estable y facil de resumir, y marca ese hecho en
+  new_lore_proposals para revision.
+- No inventes dos versiones posibles de un mismo origen dentro del cuento. Elige una
+  version clara y coherente.
 - En un consejo de abuela, empieza desde una vivencia concreta de Mimosuga y termina con
   una idea util para Patita, breve y carinosa, sin sermonear.
 - Preferir detalles cotidianos magicos: desayunos, mantas, cartas, paseos,

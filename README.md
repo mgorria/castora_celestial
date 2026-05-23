@@ -120,10 +120,15 @@ El lore editable vive en:
 
 ```text
 lore/resumen-para-ia.md
+lore/continuidad-canonica.md
 lore/reglas-de-tono.md
 lore/personajes/
 lore/historias/
 ```
+
+`lore/continuidad-canonica.md` sirve para fijar hechos que solo deben ocurrir una vez,
+como el primer encuentro de Mimosuga y Caparantonio. Cuando una historia de origen te
+guste, resume ahi la version canonica para que futuras historias no la contradigan.
 
 ## Respuestas suaves de Mimosuga
 
