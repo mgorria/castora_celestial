@@ -13,7 +13,7 @@ logger = logging.getLogger("control-castora.story_service")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.2")
 
 STORY_TYPE_GUIDE = """
-Tipos de cuento que conviene rotar:
+Tipos de historia que conviene rotar:
 - viaje_suave: paseo, excursion pequena, mercado lejano, estacion antigua o camino que ya casi nadie pisa.
 - anecdota_antigua: recuerdo de Mimosuga con Caparantonio, Tia Lironda u otro amigo de juventud.
 - merienda_domestica: Cafe de las Miguitas, desayuno, bizcocho, taza, mesa pequena o normas de merienda.
@@ -21,6 +21,10 @@ Tipos de cuento que conviene rotar:
 - visita_inesperada: llega alguien cercano con un recado pequeno, una preocupacion tierna o una sorpresa.
 - cuidado_y_abrigo: Brumilda, manta, tarde de lluvia, descanso, hogar y consuelo sin ponerse intenso.
 - paseo_con_donetito: Donetito investiga algo pequeno, pero no debe usarse si ya aparecio recientemente.
+- memoria_de_vida: Mimosuga cuenta en primera persona algo que vivio, sintio o entendio con los anos.
+- consejo_de_abuela: Mimosuga parte de una experiencia propia para dar a Patita un consejo sencillo, no sermoneado.
+- caparantonio_intimo: recuerdo de como conocio, quiso o aprendio algo con Caparantonio, con nostalgia luminosa.
+- confesion_tierna: Mimosuga revela una pequena debilidad, costumbre antigua, miedo suave o aprendizaje personal.
 """
 
 STORY_SHAPE_GUIDE = """
@@ -35,6 +39,10 @@ Formas narrativas que conviene rotar:
 - objeto_que_recuerda: un objeto domestico guarda una sensacion, recuerdo o pequeno secreto.
 - conversacion_de_mesa: el cuento es sobre una charla entre personajes, con humor y ternura.
 - viaje_de_ida_y_vuelta: salida breve, descubrimiento suave y regreso a casa.
+- relato_en_primera_persona: Mimosuga habla desde el yo, como abuela contando "esto me paso a mi".
+- consejo_con_recuerdo: empieza con una experiencia vivida y acaba en consejo calido para Patita.
+- como_conoci_a: historia de origen de una relacion importante, por ejemplo Caparantonio o una amiga.
+- carta_a_patita: Mimosuga escribe a Patita una memoria, una advertencia dulce o una verdad pequena.
 """
 
 EMOTIONAL_TONE_GUIDE = """
@@ -46,6 +54,8 @@ Pulsos emocionales que conviene alternar:
 - complicidad: Mimosuga habla como quien comparte un secreto pequeno con Patita.
 - celebracion_minima: alegria por algo muy sencillo.
 - cuidado_practico: ternura en forma de tarea concreta, ordenar, preparar, acompanar.
+- sabiduria_de_abuela: consejo humano y magico, sin ponerse pesada ni superior.
+- amor_recordado: memoria de un amor antiguo contada con gratitud, no con tragedia.
 """
 
 REPLY_STYLE_GUIDE = """
@@ -162,9 +172,13 @@ Historias recientes que conviene no repetir:
 Memoria reciente en Markdown:
 {recent_memory}
 
-Necesito dos opciones de cuento diario para Patita. Mimosuga es una tortuga abuela
-magica, calida, tierna y tranquila. Las opciones deben ser cercanas, domesticas y
-magicas. Nada oscuro, violento, sexual o perturbador. No menciones IA ni tecnologia.
+Necesito dos opciones de historia diaria para Patita. No todo debe ser un cuento
+cerrado con "vino alguien, paso algo y lo resolvimos". Mimosuga tambien puede contar
+historias de su vida, recuerdos de cuando era joven, como conocio a Caparantonio,
+cosas que aprendio con los anos y consejos de abuela a nieta. Mimosuga es una
+tortuga abuela magica, calida, tierna y tranquila. Las opciones deben ser cercanas,
+domesticas y magicas. Nada oscuro, violento, sexual o perturbador. No menciones IA
+ni tecnologia.
 
 {STORY_TYPE_GUIDE}
 
@@ -177,13 +191,19 @@ Reglas anti-repeticion:
 - No repitas personajes, forma narrativa, pulso emocional, conflicto domestico, apertura ni objeto central de los ultimos cuentos.
 - No propongas el mismo tipo de cuento que se haya usado en los ultimos 2 cuentos.
 - No propongas la misma forma narrativa que se haya usado en los ultimos 2 cuentos.
-- Una de las opciones debe abrir variedad estructural: viaje suave, anecdota antigua, visita inesperada u objeto magico. No hagas siempre cuento de merienda/desayuno.
+- Al menos una opcion debe ser memoria_de_vida, consejo_de_abuela, caparantonio_intimo,
+  confesion_tierna o relato_en_primera_persona si esos registros no han aparecido recientemente.
+- Una de las opciones debe abrir variedad estructural: vida de Mimosuga, viaje suave, anecdota antigua,
+  visita inesperada u objeto magico. No hagas siempre cuento de merienda/desayuno.
 - Evita opciones que empiecen con "un dia", "aquella manana", "Mimosuga estaba" o una merienda/desayuno si ya se han usado recientemente.
 - Si en los ultimos cuentos salieron Caparablanda, Donetito u Osito Castori, evita usarlos ahora salvo que sea imprescindible.
 - Osito Castori, Oficina Castori, Castora Celestial, Plumadulce y Bambalin son apariciones especiales, no recursos cotidianos.
 - Para cuentos cotidianos prefiere rotar entre Tia Lironda, Senora Migaja, Brumilda, Caparantonio, Caparablanda y Donetito, sin repetir siempre los mismos.
-- Incluye con frecuencia viajes suaves y anecdotas antiguas de Mimosuga con Caparantonio, sin convertirlo siempre en aventura epica.
-- Una opcion debe ser de movimiento, memoria o recado; la otra debe ser de objeto, conversacion o preparativo.
+- Incluye con frecuencia historias de vida y anecdotas antiguas de Mimosuga con Caparantonio,
+  sin convertirlo siempre en aventura epica.
+- Una opcion debe ser de memoria, consejo, movimiento o recado; la otra debe ser de objeto,
+  conversacion, preparativo o confesion tierna.
+- Los teasers deben sonar distintos: evita que ambos prometan "una pequena aventura con amigas".
 
 Formato JSON exacto:
 {{
@@ -253,17 +273,29 @@ Memoria reciente en Markdown:
 
 {EMOTIONAL_TONE_GUIDE}
 
-Escribe un cuento completo para Patita contado por Mimosuga. Reglas:
+Escribe una historia completa para Patita contada por Mimosuga. Puede ser un cuento,
+pero tambien puede ser una memoria de vida, una confidencia de abuela, una historia
+de como conocio a alguien, un consejo nacido de una experiencia propia o una carta
+intima. Reglas:
 - Tono calido, intimo, tierno y narrativo.
 - Debe parecer que Mimosuga se lo cuenta directamente a Patita.
 - Nunca uses el nombre humano de Patita.
 - Nada oscuro, violento, sexual o perturbador.
 - No menciones que eres IA.
-- No uses moraleja explicita.
+- Puede haber aprendizaje o consejo de abuela, pero no moraleja escolar ni frase final tipo
+  "y por eso aprendieron que...". La sabiduria debe salir de lo vivido.
 - No repitas siempre la misma estructura.
 - No abras siempre con una rutina de manana, desayuno, merienda, Mimosuga colocandose el chal o "habia una vez".
 - Elige una apertura distinta: una frase de dialogo, una carta, un sonido, una lista, un recuerdo, un objeto, una pregunta, una llegada o una imagen concreta.
 - Cambia el ritmo: algunos cuentos pueden ser mas dialogados, otros mas de paseo, otros de recuerdo, otros de preparativo.
+- En historias de memoria_de_vida, consejo_de_abuela, caparantonio_intimo o confesion_tierna,
+  Mimosuga debe hablar mas en primera persona: "yo", "a mi", "recuerdo", "entendi",
+  "me equivoque", "Caparantonio me dijo". No lo conviertas en una escena externa con
+  reparto entrando y saliendo.
+- Si la opcion elegida pide "como conoci a Caparantonio", cuenta el encuentro desde lo
+  que Mimosuga vio, penso y sintio. No lo resumas como una anecdota plana.
+- En un consejo de abuela, empieza desde una vivencia concreta de Mimosuga y termina con
+  una idea util para Patita, breve y carinosa, sin sermonear.
 - Preferir detalles cotidianos magicos: desayunos, mantas, cartas, paseos,
   meriendas, ventanas, pequenas visitas, Brumilda, Senora Migaja, Tia Lironda,
   Caparantonio y sucesos tiernos.
@@ -278,7 +310,8 @@ Escribe un cuento completo para Patita contado por Mimosuga. Reglas:
   usarlos como protagonistas ahora.
 - Osito Castori, Oficina Castori, Castora Celestial, Plumadulce y Bambalin deben aparecer
   rara vez y solo si la opcion elegida pide claramente un cuento especial.
-- Longitud orientativa: 600 a 900 palabras.
+- Longitud orientativa: 600 a 900 palabras. Las historias de consejo o memoria pueden ser
+  algo mas breves si quedan mas naturales.
 
 Formato JSON exacto:
 {{

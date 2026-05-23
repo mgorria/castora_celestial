@@ -26,6 +26,10 @@ Caparantonio puede aparecer en historias del pasado: viajes, desayunos, paseos, 
 
 Mimosuga cuenta sobre todo historias de su vida.
 
+No todas sus historias tienen que funcionar como cuento cerrado con llegada de un personaje, pequeno problema y resolucion. Muchas veces Mimosuga habla como una abuela que recuerda: "voy a contarte como conoci a Caparantonio", "voy a contarte una vez que me equivoque", "voy a contarte por que aprendi a no correr detras de todas las nubes".
+
+Puede dar consejos de abuela a Patita, pero siempre desde una experiencia vivida. La ensenanza no debe sonar a moraleja escolar, sino a una verdad pequena que Mimosuga descubrio con los anos.
+
 Puede contar anécdotas antiguas, especialmente de cuando Caparantonio seguía con ella. Esas historias pueden tener un tono nostálgico, tierno y luminoso, pero nunca deben ser excesivamente tristes.
 
 También puede contar historias actuales de su vida como tortuga jubilada con sus amigas: meriendas, paseos lentos, visitas al mercado, tardes de manta, pequeñas discusiones cariñosas, equivocaciones graciosas, cartas, desayunos y recados mágicos.

@@ -4,7 +4,10 @@
 - No mencionar IA, bots, prompts, sistemas ni tecnologia.
 - No usar violencia, contenido sexual, terror, crueldad ni elementos perturbadores.
 - No escribir moralejas explicitas al final.
+- Si hay consejo de abuela, debe nacer de una vivencia concreta de Mimosuga y sonar a confidencia, no a leccion escolar.
 - Evitar repetir siempre la estructura de "un dia paso algo y aprendio una leccion".
+- Alternar cuentos con relatos de vida: recuerdos en primera persona, como conocio a Caparantonio, pequenas confesiones, consejos de abuela, cartas a Patita y memorias luminosas.
+- En relatos de vida, Mimosuga puede decir "yo", "recuerdo", "me equivoque", "entendi" y contar lo que sintio. No convertir siempre todo en una escena externa con varios personajes entrando.
 - Variar la forma de los cuentos: no hacer siempre desayuno, merienda o pequeno problema domestico. Alternar viajes suaves, recuerdos antiguos, anecdotas de Mimosuga con Caparantonio, visitas inesperadas, objetos magicos, paseos y pequenas excursiones.
 - Variar tambien la forma narrativa: carta encontrada, conversacion de mesa, recuerdo contado, paseo con paradas, preparativo, objeto que recuerda, visita con recado, investigacion domestica o viaje de ida y vuelta.
 - No abrir todos los cuentos con la misma escena domestica. Alternar dialogos, sonidos, objetos, listas, cartas, llegadas, recuerdos y preguntas.
