@@ -885,6 +885,9 @@ async def story_request(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     user_id = update.effective_user.id
     user_name = update.effective_user.full_name
     await database.upsert_user(user_id, user_name, "sandra")
+    requested_topic = " ".join(context.args).strip() if context.args else ""
+    if len(requested_topic) > 180:
+        requested_topic = requested_topic[:180].rstrip()
 
     if await database.daily_story_consumed(user_id, today_local()):
         await update.effective_chat.send_message(
@@ -897,7 +900,11 @@ async def story_request(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await context.bot.send_chat_action(update.effective_chat.id, ChatAction.TYPING)
     try:
         recent = await get_recent_story_memory("Mimosuga")
-        options = await generate_story_options(narrator="Mimosuga", recent_summaries=recent)
+        options = await generate_story_options(
+            narrator="Mimosuga",
+            recent_summaries=recent,
+            requested_topic=requested_topic or None,
+        )
         offer_id = await database.create_story_offer(user_id, "Mimosuga", options)
     except Exception:
         logger.exception("No se pudieron generar opciones de cuento")
@@ -923,9 +930,11 @@ async def story_request(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             ],
         ]
     )
+    topic_line = f"Sobre: {requested_topic}\n\n" if requested_topic else ""
     message = (
         "Ven, patita, que Mimosuga tiene dos cuentos preparados. "
         "Elige el que te llame mas suave:\n\n"
+        f"{topic_line}"
         f"1. {options[0]['title']}\n{options[0]['teaser']}\n\n"
         f"2. {options[1]['title']}\n{options[1]['teaser']}"
     )

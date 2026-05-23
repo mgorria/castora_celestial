@@ -89,12 +89,15 @@ Mimosuga puede ofrecer un cuento diario con:
 
 ```text
 /cuento
+/cuento historia de Caparantonio
+/cuento algo sobre una carta antigua
 ```
 
 El flujo es:
 
 1. Mimosuga comprueba si Patita ya recibio cuento hoy.
 2. Si no lo recibio, genera dos opciones basadas en `lore/resumen-para-ia.md`.
+   Si Patita escribe algo despues de `/cuento`, lo usa como tema orientativo.
 3. Patita elige una opcion con botones.
 4. Mimosuga genera y envia el cuento completo.
 5. Solo despues de enviarlo se consume el limite diario.

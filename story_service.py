@@ -155,9 +155,21 @@ async def generate_story_options(
     *,
     narrator: str,
     recent_summaries: list[Any],
+    requested_topic: str | None = None,
 ) -> list[dict[str, str]]:
     lore = read_core_lore()
     recent_memory = read_recent_story_memory()
+    topic_text = requested_topic.strip() if requested_topic else ""
+    topic_instruction = (
+        "Patita ha pedido un tema concreto para la historia:\n"
+        f"{topic_text}\n\n"
+        "Las dos opciones deben responder a ese tema, pero sin contradecir continuidad "
+        "canonica ni repetir historias recientes. Si el tema pide un origen unico ya "
+        "fijado o repetido, ofrece una continuacion, recuerdo lateral o consejo relacionado "
+        "en vez de reinventar el hecho."
+        if topic_text
+        else "Patita no ha pedido tema concreto; ofrece dos opciones variadas."
+    )
     prompt = f"""
 Eres el sistema narrativo privado de Mimosuga. Devuelve SOLO JSON valido.
 
@@ -171,6 +183,9 @@ Historias recientes que conviene no repetir:
 
 Memoria reciente en Markdown:
 {recent_memory}
+
+Tema solicitado:
+{topic_instruction}
 
 Necesito dos opciones de historia diaria para Patita. No todo debe ser un cuento
 cerrado con "vino alguien, paso algo y lo resolvimos". Mimosuga tambien puede contar
@@ -208,6 +223,10 @@ Reglas anti-repeticion:
 - Una opcion debe ser de memoria, consejo, movimiento o recado; la otra debe ser de objeto,
   conversacion, preparativo o confesion tierna.
 - Los teasers deben sonar distintos: evita que ambos prometan "una pequena aventura con amigas".
+- Si hay tema solicitado, no lo ignores. Las dos opciones deben estar conectadas con el
+  tema, pero una puede abordarlo de forma directa y la otra de forma lateral o emocional.
+- Si el tema solicitado es demasiado amplio, convierte el tema en una escena concreta o
+  memoria concreta de Mimosuga.
 
 Formato JSON exacto:
 {{
