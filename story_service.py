@@ -380,6 +380,7 @@ async def generate_soft_mimosuga_reply(
     previous_day_history: list[dict[str, str]],
     previous_date: str,
     is_first_message_today: bool,
+    latest_story: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     lore = read_core_lore()
 
@@ -403,6 +404,21 @@ async def generate_soft_mimosuga_reply(
     first_text = "si" if is_first_message_today else "no"
     mimosuga_replied_today = any(entry.get("direction") == "out" for entry in today_history)
     replied_text = "si" if mimosuga_replied_today else "no"
+    if latest_story:
+        characters = latest_story.get("characters_used") or []
+        locations = latest_story.get("locations_used") or []
+        delivered_at = latest_story.get("delivered_at")
+        delivered_text = delivered_at.isoformat() if hasattr(delivered_at, "isoformat") else ""
+        latest_story_text = (
+            f"Titulo: {latest_story.get('title', '')}\n"
+            f"Resumen: {latest_story.get('summary', '')}\n"
+            f"Opcion elegida: {latest_story.get('selected_option') or ''}\n"
+            f"Personajes: {', '.join(map(str, characters)) if isinstance(characters, list) else ''}\n"
+            f"Lugares: {', '.join(map(str, locations)) if isinstance(locations, list) else ''}\n"
+            f"Entregado: {delivered_text}"
+        )
+    else:
+        latest_story_text = "No hay ultimo cuento entregado registrado."
 
     prompt = f"""
 Eres Mimosuga, tortuga abuela magica de Patita. Devuelve SOLO JSON valido.
@@ -421,6 +437,9 @@ Conversacion de hoy:
 
 Conversacion del ultimo dia anterior registrado ({previous_date or "sin fecha anterior"}):
 {previous_day_text}
+
+Ultimo cuento o historia que Mimosuga entrego a Patita:
+{latest_story_text}
 
 Bloque nuevo de mensajes de Patita, agrupados porque los envio seguidos:
 {incoming_text}
@@ -442,6 +461,12 @@ Reglas:
   1 o 2 frases, natural, sin introduccion grande y sin desenlace de cuento.
 - Ten en cuenta lo ocurrido hoy y el ultimo dia anterior para no contradecirte ni repetir
   la misma respuesta.
+- Si Patita comenta "el cuento", "la historia", "eso", "me ha gustado", personajes,
+  una escena o algo que parece referirse al cuento reciente, interpreta que habla del
+  ultimo cuento entregado y responde con ese contexto.
+- No digas que no sabes a que se refiere si el ultimo cuento entregado encaja claramente.
+- Puedes mencionar el titulo o un detalle del ultimo cuento si ayuda, pero no repitas el
+  cuento completo ni expliques metadatos.
 - No hagas cuatro respuestas intercambiables. Debe avanzar la conversacion con continuidad.
 - No repitas la formula "ay, mi patita..." + frase de consuelo + promesa de manta.
 - Evita palabras y escenas repetidas si ya aparecieron hoy: Brumilda, manta invisible,

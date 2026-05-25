@@ -335,6 +335,29 @@ async def get_recent_story_memories(narrator: str, limit: int = 8) -> list[dict[
     return [dict(row) for row in rows]
 
 
+async def get_latest_delivered_story(
+    *,
+    narrator: str,
+    telegram_user_id: int,
+) -> dict[str, Any] | None:
+    db = require_pool()
+    row = await db.fetchrow(
+        """
+        select id, title, summary, selected_option, offered_options, characters_used,
+               locations_used, new_lore_proposals, created_at, delivered_at
+        from stories
+        where narrator = $1
+          and delivered_to_user_id = $2
+          and delivered_at is not null
+        order by delivered_at desc
+        limit 1
+        """,
+        narrator,
+        telegram_user_id,
+    )
+    return dict(row) if row else None
+
+
 async def create_auto_reply_draft(
     *,
     animal_key: str,

@@ -1032,6 +1032,11 @@ async def story_option_callback(update: Update, context: ContextTypes.DEFAULT_TY
             await query.message.reply_text(chunk)
 
         await database.mark_story_delivered(story_id)
+        append_history(
+            "mimosuga",
+            "out",
+            f"[Cuento entregado #{story_id}] {story['title']}: {story['summary']}",
+        )
         consumed = await database.consume_daily_story(query.from_user.id, today_local(), story_id)
         await get_recent_story_memory("Mimosuga")
         if not consumed:
@@ -1723,6 +1728,10 @@ async def process_auto_reply_buffer(buffer_key: str) -> None:
     try:
         day_context = get_mimosuga_day_context()
         recent_history = get_history("mimosuga", 20)
+        latest_story = await database.get_latest_delivered_story(
+            narrator="Mimosuga",
+            telegram_user_id=int(buffer["chat_id"]),
+        )
         draft = await generate_soft_mimosuga_reply(
             incoming_messages=messages,
             recent_history=recent_history,
@@ -1730,6 +1739,7 @@ async def process_auto_reply_buffer(buffer_key: str) -> None:
             previous_day_history=day_context["previous_day_entries"],
             previous_date=day_context["previous_date"],
             is_first_message_today=bool(buffer.get("first_message_today")),
+            latest_story=latest_story,
         )
     except Exception as exc:
         logger.exception("No se pudo generar borrador automatico de Mimosuga")
