@@ -114,6 +114,7 @@ auto_reply_tasks: dict[str, asyncio.Task] = {}
 AUTO_REPLY_DEFAULTS = {
     "mimosuga": {
         "enabled": False,
+        "mode": "review",
     }
 }
 
@@ -374,6 +375,24 @@ def set_auto_reply_enabled(animal_key: str, enabled: bool) -> None:
     save_data(data)
 
 
+def auto_reply_mode(animal_key: str) -> str:
+    defaults = AUTO_REPLY_DEFAULTS.get(animal_key, {})
+    data = load_data()
+    settings = data.get("auto_replies", {}).get(animal_key, {})
+    mode = str(settings.get("mode", defaults.get("mode", "review"))).lower()
+    return mode if mode in {"review", "auto"} else "review"
+
+
+def set_auto_reply_mode(animal_key: str, mode: str) -> None:
+    if mode not in {"review", "auto"}:
+        raise ValueError("Modo de auto-respuesta no valido")
+    data = load_data()
+    auto_replies = data.setdefault("auto_replies", {})
+    animal_settings = auto_replies.setdefault(animal_key, {})
+    animal_settings["mode"] = mode
+    save_data(data)
+
+
 def mark_schedule_before_send(schedule_id: str, today: str) -> dict[str, Any] | None:
     schedules = get_schedules()
     for schedule in schedules:
@@ -597,7 +616,8 @@ async def central_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     lines.append("")
     lines.append("Mimosuga automatica:")
     lines.append(f"- Respuestas suaves: {auto_status}")
-    lines.append(f"- Modo: revision previa obligatoria")
+    mode_text = "envio automatico" if auto_reply_mode("mimosuga") == "auto" else "revision previa"
+    lines.append(f"- Modo: {mode_text}")
     lines.append(f"- Espera para agrupar mensajes: {AUTO_REPLY_IDLE_SECONDS} segundos")
     lines.append(f"- Lotes esperando: {pending_batches}")
 
@@ -620,7 +640,7 @@ async def central_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     lines.append(f"- Cuento diario: se renueva a las 00:00 ({APP_TIMEZONE.key})")
     lines.append("")
     lines.append("Comandos utiles:")
-    lines.append("- /programados, /historial mimosuga 10, /admin_ultimos, /mimosuga_auto on|off")
+    lines.append("- /programados, /historial mimosuga 10, /admin_ultimos, /mimosuga_auto on|auto|off")
 
     await update.effective_chat.send_message("\n".join(lines))
 
@@ -826,18 +846,41 @@ async def central_mimosuga_auto(update: Update, context: ContextTypes.DEFAULT_TY
 
     if not context.args:
         status = "encendidas" if auto_reply_enabled("mimosuga") else "apagadas"
+        mode_text = "auto" if auto_reply_mode("mimosuga") == "auto" else "revision"
         await update.effective_chat.send_message(
             f"Respuestas suaves de Mimosuga: {status}.\n"
-            "Uso: /mimosuga_auto on, /mimosuga_auto off o /mimosuga_auto status"
+            f"Modo: {mode_text}.\n"
+            "Uso: /mimosuga_auto on, /mimosuga_auto auto, /mimosuga_auto revision, "
+            "/mimosuga_auto off o /mimosuga_auto status"
         )
         return
 
     action = context.args[0].lower()
     if action in {"on", "activar", "encender"}:
         set_auto_reply_enabled("mimosuga", True)
+        set_auto_reply_mode("mimosuga", "review")
         await update.effective_chat.send_message(
             "Respuestas suaves de Mimosuga encendidas en modo revision previa. "
             "Patita no recibira nada sin que tu pulses Enviar."
+        )
+        return
+
+    if action in {"auto", "automatico", "automatica"}:
+        set_auto_reply_enabled("mimosuga", True)
+        set_auto_reply_mode("mimosuga", "auto")
+        await update.effective_chat.send_message(
+            "Respuestas suaves de Mimosuga encendidas en modo automatico. "
+            "Si la IA considera que el mensaje es trivial, Mimosuga respondera sola; "
+            "si lo ve delicado o importante, te avisara sin enviar nada."
+        )
+        return
+
+    if action in {"revision", "revisar", "manual"}:
+        set_auto_reply_enabled("mimosuga", True)
+        set_auto_reply_mode("mimosuga", "review")
+        await update.effective_chat.send_message(
+            "Respuestas suaves de Mimosuga en modo revision previa. "
+            "Recibiras propuesta con botones antes de enviar."
         )
         return
 
@@ -848,20 +891,22 @@ async def central_mimosuga_auto(update: Update, context: ContextTypes.DEFAULT_TY
 
     if action in {"status", "estado"}:
         status = "encendidas" if auto_reply_enabled("mimosuga") else "apagadas"
+        mode_text = "envio automatico" if auto_reply_mode("mimosuga") == "auto" else "revision previa"
         pending_batches = sum(
             1 for key, task in auto_reply_tasks.items()
             if key.startswith("mimosuga:") and not task.done()
         )
         await update.effective_chat.send_message(
             f"Respuestas suaves de Mimosuga: {status}.\n"
-            "Modo actual: revision previa obligatoria.\n"
+            f"Modo actual: {mode_text}.\n"
             f"Espera para agrupar mensajes: {AUTO_REPLY_IDLE_SECONDS} segundos.\n"
             f"Lotes de mensajes esperando: {pending_batches}."
         )
         return
 
     await update.effective_chat.send_message(
-        "Uso: /mimosuga_auto on, /mimosuga_auto off o /mimosuga_auto status"
+        "Uso: /mimosuga_auto on, /mimosuga_auto auto, /mimosuga_auto revision, "
+        "/mimosuga_auto off o /mimosuga_auto status"
     )
 
 
@@ -1409,25 +1454,27 @@ async def auto_reply_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     if action != "send":
         return
 
-    draft = await database.reserve_auto_reply_draft(draft_id, query.from_user.id)
+    sent, message = await send_auto_reply_draft(draft_id, query.from_user.id)
+    await query.message.reply_text(message)
+
+
+async def send_auto_reply_draft(draft_id: int, admin_user_id: int) -> tuple[bool, str]:
+    draft = await database.reserve_auto_reply_draft(draft_id, admin_user_id)
     if not draft:
         current = await database.get_auto_reply_draft(draft_id)
         status = current.get("status") if current else "no encontrada"
-        await query.message.reply_text(
-            f"Esa respuesta ya no esta pendiente. Estado actual: {status}."
-        )
-        return
+        return False, f"Esa respuesta ya no esta pendiente. Estado actual: {status}."
 
     animal_key = draft["animal_key"]
     animal_app = animal_apps.get(animal_key)
     partner_chat_id = get_partner_chat_id(animal_key)
     if not animal_app or not partner_chat_id:
         await database.release_auto_reply_draft(draft_id)
-        await query.message.reply_text(
+        return (
+            False,
             f"No puedo enviar la respuesta #{draft_id}: "
-            f"{ANIMALS[animal_key]['display_name']} no esta vinculado."
+            f"{ANIMALS[animal_key]['display_name']} no esta vinculado.",
         )
-        return
 
     try:
         await animal_app.bot.send_chat_action(partner_chat_id, ChatAction.TYPING)
@@ -1437,12 +1484,13 @@ async def auto_reply_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         append_history(animal_key, "out", draft["proposed_text"])
         await database.mark_auto_reply_draft_sent(draft_id)
-        await query.message.reply_text(f"Respuesta suave #{draft_id} enviada por Mimosuga.")
+        return True, f"Respuesta suave #{draft_id} enviada por Mimosuga."
     except Exception:
         logger.exception("No se pudo enviar respuesta automatica aprobada")
         await database.release_auto_reply_draft(draft_id)
-        await query.message.reply_text(
-            f"No se pudo enviar la respuesta #{draft_id}. Revisa logs antes de intentarlo de nuevo."
+        return (
+            False,
+            f"No se pudo enviar la respuesta #{draft_id}. Revisa logs antes de intentarlo de nuevo.",
         )
 
 
@@ -1785,17 +1833,37 @@ async def process_auto_reply_buffer(buffer_key: str) -> None:
             ]
         ]
     )
+    admin_message = (
+        f"Respuesta suave propuesta por Mimosuga #{draft_id}\n"
+        f"Motivo: {draft.get('reason') or 'charla ligera'}\n\n"
+        f"Modo: {draft.get('reply_style') or 'no indicado'}\n\n"
+        "Mensajes agrupados de Patita:\n"
+        f"{incoming_text}\n\n"
+        "Propuesta:\n"
+        f"{proposed_text}"
+    )
+
+    if auto_reply_mode("mimosuga") == "auto":
+        sent, result_message = await send_auto_reply_draft(draft_id, owner_chat_id())
+        await centralita_app.bot.send_message(
+            chat_id=owner_chat_id(),
+            text=(
+                f"Auto Mimosuga #{draft_id}: {result_message}\n\n"
+                f"Motivo: {draft.get('reason') or 'charla ligera'}\n"
+                f"Modo: {draft.get('reply_style') or 'no indicado'}\n\n"
+                "Mensajes agrupados de Patita:\n"
+                f"{incoming_text}\n\n"
+                "Respuesta enviada:\n"
+                f"{proposed_text}"
+                if sent
+                else admin_message + f"\n\nResultado: {result_message}"
+            ),
+        )
+        return
+
     await centralita_app.bot.send_message(
         chat_id=owner_chat_id(),
-        text=(
-            f"Respuesta suave propuesta por Mimosuga #{draft_id}\n"
-            f"Motivo: {draft.get('reason') or 'charla ligera'}\n\n"
-            f"Modo: {draft.get('reply_style') or 'no indicado'}\n\n"
-            "Mensajes agrupados de Patita:\n"
-            f"{incoming_text}\n\n"
-            "Propuesta:\n"
-            f"{proposed_text}"
-        ),
+        text=admin_message,
         reply_markup=keyboard,
     )
 

@@ -116,6 +116,8 @@ Comandos privados de administrador en **Centralita Magica**:
 /admin_cuento_prueba mimosuga
 /mimosuga_auto status
 /mimosuga_auto on
+/mimosuga_auto auto
+/mimosuga_auto revision
 /mimosuga_auto off
 ```
 
@@ -136,16 +138,23 @@ guste, resume ahi la version canonica para que futuras historias no la contradig
 ## Respuestas suaves de Mimosuga
 
 Mimosuga puede preparar borradores automaticos de respuesta cuando Patita le escriba.
-En esta primera fase no envia nada sola: el administrador recibe la propuesta en
-**Centralita Magica** y decide con botones si la envia o la descarta.
+Puede funcionar en modo revision o en modo automatico. En modo revision, el administrador
+recibe la propuesta en **Centralita Magica** y decide con botones si la envia o la descarta.
+En modo automatico, Mimosuga envia sola las respuestas que la IA considera charla ligera;
+si el mensaje parece delicado, importante o ambiguo, avisa al administrador y no envia nada.
 
 Comandos privados:
 
 ```text
 /mimosuga_auto on
+/mimosuga_auto auto
+/mimosuga_auto revision
 /mimosuga_auto off
 /mimosuga_auto status
 ```
+
+`/mimosuga_auto on` activa el modo revision. Para activar envio automatico hay que usar
+explicitamente `/mimosuga_auto auto`.
 
 Cuando esta encendido, cada mensaje textual que llegue a Mimosuga genera una propuesta
 breve si la IA lo considera una charla ligera. Para que no responda frase por frase,
