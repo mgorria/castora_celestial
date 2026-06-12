@@ -1886,12 +1886,22 @@ async def process_court_buffer(buffer_key: str) -> None:
         )
         await centralita_app.bot.send_message(
             chat_id=owner_chat_id(),
-            text=f"La Corte ha dictado sentencia en la causa #{case['id']}.\nVeredicto: {verdict}",
+            text=(
+                f"La Corte ha dictado sentencia en la causa #{case['id']}.\n"
+                f"Veredicto: {verdict}\n"
+                f"Condena: {sentence_text}\n\n"
+                "Mensaje enviado por la Corte a Patita:\n"
+                f"{reply}"
+            ),
         )
     else:
         await centralita_app.bot.send_message(
             chat_id=owner_chat_id(),
-            text=f"La Corte ha respondido en la causa #{case['id']} y mantiene la causa abierta.",
+            text=(
+                f"La Corte ha respondido en la causa #{case['id']} y mantiene la causa abierta.\n\n"
+                "Mensaje enviado por la Corte a Patita:\n"
+                f"{reply}"
+            ),
         )
 
 
@@ -1938,17 +1948,14 @@ async def queue_auto_reply_draft(
         existing_task.cancel()
     auto_reply_tasks[buffer_key] = asyncio.create_task(process_auto_reply_buffer_after_idle(buffer_key))
 
-    await centralita_app.bot.send_message(
-        chat_id=owner_chat_id(),
-        text=(
-            (
+    if was_new_buffer:
+        await centralita_app.bot.send_message(
+            chat_id=owner_chat_id(),
+            text=(
                 "Auto Mimosuga abre un lote y esperara "
-                if was_new_buffer
-                else "Auto Mimosuga suma este mensaje al lote y vuelve a esperar "
-            )
-            + f"{AUTO_REPLY_IDLE_SECONDS} segundos antes de proponer una sola respuesta."
-        ),
-    )
+                f"{AUTO_REPLY_IDLE_SECONDS} segundos antes de proponer una sola respuesta."
+            ),
+        )
 
 
 async def process_auto_reply_buffer_after_idle(buffer_key: str) -> None:
