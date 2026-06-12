@@ -1875,6 +1875,7 @@ async def process_court_buffer(buffer_key: str) -> None:
     await court_app.bot.send_message(chat_id=chat_id, text=reply)
     append_history("corte", "out", reply)
     await database.add_court_message(case["id"], "court", reply)
+    allegations_text = "\n".join(f"- {message}" for message in new_messages) or "- Sin alegaciones registradas"
 
     if decision["status"] == "sentence":
         verdict = decision.get("verdict") or "culpabilidad con atenuantes de moneria"
@@ -1888,6 +1889,9 @@ async def process_court_buffer(buffer_key: str) -> None:
             chat_id=owner_chat_id(),
             text=(
                 f"La Corte ha dictado sentencia en la causa #{case['id']}.\n"
+                f"Acusacion: {case['accusation']}\n\n"
+                "Alegaciones de Patita:\n"
+                f"{allegations_text}\n\n"
                 f"Veredicto: {verdict}\n"
                 f"Condena: {sentence_text}\n\n"
                 "Mensaje enviado por la Corte a Patita:\n"
@@ -1898,7 +1902,10 @@ async def process_court_buffer(buffer_key: str) -> None:
         await centralita_app.bot.send_message(
             chat_id=owner_chat_id(),
             text=(
-                f"La Corte ha respondido en la causa #{case['id']} y mantiene la causa abierta.\n\n"
+                f"La Corte ha pausado la causa #{case['id']} por prudencia.\n"
+                f"Acusacion: {case['accusation']}\n\n"
+                "Alegaciones de Patita:\n"
+                f"{allegations_text}\n\n"
                 "Mensaje enviado por la Corte a Patita:\n"
                 f"{reply}"
             ),

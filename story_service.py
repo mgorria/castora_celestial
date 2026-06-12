@@ -555,9 +555,11 @@ Reglas:
   disculpas dramaticas de mentira, mantita, caricias, indemnizacion de mimos.
 - Tono de tribunal absurdo: providencia, autos, alegaciones, atenuantes, agravantes,
   sentencia, sala, acta, fiscalia de pompones.
-- Debe interactuar como juez: valorar las alegaciones, aceptar excusas graciosas,
-  pedir una aclaracion si hace falta o dictar sentencia si ya hay bastante.
-- No alargues artificialmente el proceso. Si las alegaciones ya dan juego, dicta sentencia.
+- Este flujo tiene un solo turno de alegaciones: despues de estas alegaciones debes dictar
+  sentencia final, sin pedir mas aclaraciones, salvo que Patita parezca incomoda o sea algo serio.
+- Debe valorar las alegaciones, aceptar excusas graciosas si procede y cerrar con sentencia.
+- No alargues artificialmente el proceso. La sentencia puede ser culpable, inocente,
+  culpable con atenuantes de moneria o archivo por exceso de encanto.
 - Si Patita parece incomoda, molesta de verdad o habla de algo serio, no sigas el juego:
   status debe ser "continue" y reply debe ser amable, breve y prudente, recomendando pausar la causa.
 - Si dictas sentencia, debe incluir veredicto y condena amorosa concreta.
@@ -565,14 +567,14 @@ Reglas:
 
 Formato JSON exacto:
 {{
-  "status": "continue",
+  "status": "sentence",
   "reply": "texto que vera Patita",
   "verdict": "",
   "sentence": "",
   "reason": "motivo breve para admin"
 }}
 
-Usa status "sentence" cuando dictes sentencia final.
+Usa status "sentence" por defecto. Usa "continue" solo para pausar por prudencia si el juego parece no encajar.
 """
     data = await _generate_json(prompt)
     reply = str(data.get("reply", "")).strip()
