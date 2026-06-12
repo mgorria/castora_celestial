@@ -103,6 +103,26 @@ async def migrate() -> None:
                 sent_at timestamptz,
                 admin_user_id bigint
             );
+
+            create table if not exists court_cases (
+                id bigserial primary key,
+                chat_id bigint not null,
+                accusation text not null,
+                status text not null default 'active',
+                verdict text,
+                sentence_text text,
+                created_at timestamptz not null default now(),
+                sentenced_at timestamptz,
+                closed_at timestamptz
+            );
+
+            create table if not exists court_messages (
+                id bigserial primary key,
+                case_id bigint not null references court_cases(id),
+                sender text not null,
+                text text not null,
+                created_at timestamptz not null default now()
+            );
             """
         )
 
@@ -457,7 +477,122 @@ async def get_system_status_counts() -> dict[str, Any]:
             (select count(*) from stories where status = 'canon') as stories_canon,
             (select count(*) from story_offers where consumed_at is null and expires_at > now()) as active_story_offers,
             (select count(*) from auto_reply_drafts where status = 'pending') as auto_reply_pending,
-            (select count(*) from auto_reply_drafts where status = 'sent') as auto_reply_sent
+            (select count(*) from auto_reply_drafts where status = 'sent') as auto_reply_sent,
+            (select count(*) from court_cases where status = 'active') as court_cases_active
         """
     )
     return dict(row) if row else {}
+
+
+async def create_court_case(*, chat_id: int, accusation: str) -> int:
+    db = require_pool()
+    async with db.acquire() as conn:
+        async with conn.transaction():
+            existing = await conn.fetchval(
+                """
+                select id from court_cases
+                where chat_id = $1 and status = 'active'
+                order by created_at desc
+                limit 1
+                """,
+                chat_id,
+            )
+            if existing:
+                raise RuntimeError(f"Ya existe una causa activa: {existing}")
+            case_id = await conn.fetchval(
+                """
+                insert into court_cases (chat_id, accusation)
+                values ($1, $2)
+                returning id
+                """,
+                chat_id,
+                accusation,
+            )
+            await conn.execute(
+                """
+                insert into court_messages (case_id, sender, text)
+                values ($1, 'admin', $2)
+                """,
+                case_id,
+                accusation,
+            )
+    return int(case_id)
+
+
+async def get_active_court_case(chat_id: int) -> dict[str, Any] | None:
+    db = require_pool()
+    row = await db.fetchrow(
+        """
+        select * from court_cases
+        where chat_id = $1 and status = 'active'
+        order by created_at desc
+        limit 1
+        """,
+        chat_id,
+    )
+    return dict(row) if row else None
+
+
+async def get_latest_court_case(chat_id: int) -> dict[str, Any] | None:
+    db = require_pool()
+    row = await db.fetchrow(
+        """
+        select * from court_cases
+        where chat_id = $1
+        order by created_at desc
+        limit 1
+        """,
+        chat_id,
+    )
+    return dict(row) if row else None
+
+
+async def add_court_message(case_id: int, sender: str, text: str) -> None:
+    db = require_pool()
+    await db.execute(
+        """
+        insert into court_messages (case_id, sender, text)
+        values ($1, $2, $3)
+        """,
+        case_id,
+        sender,
+        text,
+    )
+
+
+async def get_court_messages(case_id: int, limit: int = 30) -> list[dict[str, Any]]:
+    db = require_pool()
+    rows = await db.fetch(
+        """
+        select sender, text, created_at
+        from court_messages
+        where case_id = $1
+        order by created_at desc
+        limit $2
+        """,
+        case_id,
+        limit,
+    )
+    return [dict(row) for row in reversed(rows)]
+
+
+async def sentence_court_case(
+    *,
+    case_id: int,
+    verdict: str,
+    sentence_text: str,
+) -> None:
+    db = require_pool()
+    await db.execute(
+        """
+        update court_cases
+        set status = 'sentenced',
+            verdict = $2,
+            sentence_text = $3,
+            sentenced_at = now()
+        where id = $1 and status = 'active'
+        """,
+        case_id,
+        verdict,
+        sentence_text,
+    )

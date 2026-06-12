@@ -510,3 +510,81 @@ Formato JSON exacto:
         "reply_style": str(data.get("reply_style", "")).strip(),
         "reason": reason,
     }
+
+
+async def generate_court_reply(
+    *,
+    accusation: str,
+    messages: list[dict[str, Any]],
+    new_allegations: list[str],
+) -> dict[str, Any]:
+    history_lines = []
+    for item in messages[-24:]:
+        sender = item.get("sender", "")
+        if sender == "admin":
+            label = "Acusacion"
+        elif sender == "patita":
+            label = "Alegaciones de Patita"
+        elif sender == "court":
+            label = "Corte"
+        else:
+            label = str(sender)
+        history_lines.append(f"- {label}: {item.get('text', '')}")
+    history_text = "\n".join(history_lines) or "No hay historial de causa."
+    new_text = "\n".join(f"- {text}" for text in new_allegations) or "No hay alegaciones nuevas."
+
+    prompt = f"""
+Eres la Corte de Pompones y Plumas, un tribunal magico de broma, pomposo,
+ridiculamente solemne y muy carinoso. Devuelve SOLO JSON valido.
+
+Caso abierto:
+{accusation}
+
+Historial de la causa:
+{history_text}
+
+Alegaciones nuevas de Patita:
+{new_text}
+
+Reglas:
+- Nunca uses el nombre humano de Patita. Llamala Patita, acusada, parte plumifera,
+  compareciente o similares.
+- Esto es un juego romantico y tierno. Nada de castigos reales, humillantes, sexuales,
+  agresivos, manipuladores ni desagradables.
+- Los "castigos" deben ser cuquis: abrazos, besos reglamentarios, sofa, modo amor,
+  disculpas dramaticas de mentira, mantita, caricias, indemnizacion de mimos.
+- Tono de tribunal absurdo: providencia, autos, alegaciones, atenuantes, agravantes,
+  sentencia, sala, acta, fiscalia de pompones.
+- Debe interactuar como juez: valorar las alegaciones, aceptar excusas graciosas,
+  pedir una aclaracion si hace falta o dictar sentencia si ya hay bastante.
+- No alargues artificialmente el proceso. Si las alegaciones ya dan juego, dicta sentencia.
+- Si Patita parece incomoda, molesta de verdad o habla de algo serio, no sigas el juego:
+  status debe ser "continue" y reply debe ser amable, breve y prudente, recomendando pausar la causa.
+- Si dictas sentencia, debe incluir veredicto y condena amorosa concreta.
+- Maximo 900 caracteres.
+
+Formato JSON exacto:
+{{
+  "status": "continue",
+  "reply": "texto que vera Patita",
+  "verdict": "",
+  "sentence": "",
+  "reason": "motivo breve para admin"
+}}
+
+Usa status "sentence" cuando dictes sentencia final.
+"""
+    data = await _generate_json(prompt)
+    reply = str(data.get("reply", "")).strip()
+    if not reply:
+        raise StoryGenerationError("La Corte no devolvio respuesta")
+    status = str(data.get("status", "continue")).strip().lower()
+    if status not in {"continue", "sentence"}:
+        status = "continue"
+    return {
+        "status": status,
+        "reply": reply,
+        "verdict": str(data.get("verdict", "")).strip(),
+        "sentence": str(data.get("sentence", "")).strip(),
+        "reason": str(data.get("reason", "")).strip(),
+    }

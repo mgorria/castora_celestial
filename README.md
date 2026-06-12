@@ -6,6 +6,7 @@ El proyecto ejecuta varios bots en el mismo proceso:
 
 - **Oficina Castori**, el bot visible para Sandra.
 - **Mimosuga**, una tortuguita muy mayor y entrañable, figura de abuela para Sandra.
+- **Corte de Pompones y Plumas**, tribunal carinoso para juicios de broma.
 - **Centralita Magica**, el bot privado desde el que se envian mensajes y se reciben respuestas.
 
 La estructura esta preparada para anadir mas animales en el futuro mediante el diccionario `ANIMALS` de `main.py`.
@@ -16,11 +17,13 @@ La estructura esta preparada para anadir mas animales en el futuro mediante el d
 - Tokens de BotFather:
   - `TOKEN_CASTORI`
   - `TOKEN_MIMOSUGA`
+  - `TOKEN_CORTE`
   - `TOKEN_CENTRALITA`
 - Tu chat id personal de Telegram:
   - `MI_CHAT_ID`
   - `CASTORI_CHAT_ID` si ya se conoce el chat id de Sandra.
   - `MIMOSUGA_CHAT_ID` si ya se conoce el chat id de Sandra para Mimosuga.
+  - `CORTE_CHAT_ID` si ya se conoce el chat id de Sandra para la Corte.
 
 ## Configuracion local
 
@@ -29,10 +32,12 @@ Crea un archivo `.env` en la raiz del proyecto con este contenido:
 ```env
 TOKEN_CASTORI=token_real_de_oficina_castori
 TOKEN_MIMOSUGA=token_real_de_mimosuga
+TOKEN_CORTE=token_real_de_corte
 TOKEN_CENTRALITA=token_real_de_centralita_magica
 MI_CHAT_ID=tu_chat_id
 CASTORI_CHAT_ID=
 MIMOSUGA_CHAT_ID=
+CORTE_CHAT_ID=
 LOG_LEVEL=INFO
 DATA_FILE=data.json
 MAX_HISTORY_PER_ANIMAL=50
@@ -64,9 +69,12 @@ Desde tu Telegram, abre **Centralita Magica** y usa:
 /status
 /castori texto que quieres enviar
 /mimosuga texto que quieres enviar
+/corte texto que quieres enviar
 /historial castori
 /historial mimosuga
 /historial castori 20
+/acusar Patita cruzo el pasillo sin entregar beso reglamentario.
+/caso_estado
 /programar mimosuga lunes 09:00 Que tengas buena semana, patita.
 /programar mimosuga 21/06/2026 16:00 Tengo algo que contarte, sol mio.
 /programados
@@ -168,6 +176,25 @@ La espera de agrupacion se puede ajustar con:
 AUTO_REPLY_IDLE_SECONDS=90
 ```
 
+## Corte de Pompones y Plumas
+
+La Corte permite abrir juicios de broma desde **Centralita Magica**:
+
+```text
+/acusar Patita cruzo el pasillo sin entregar beso reglamentario.
+```
+
+Patita recibe una acusacion formal desde el bot de la Corte. Sus alegaciones se agrupan
+durante `AUTO_REPLY_IDLE_SECONDS` segundos, igual que Mimosuga, y la IA responde como juez.
+Si ya hay suficientes alegaciones, dicta sentencia con condenas carinosas: abrazos, besos
+reglamentarios, sofa, modo amor o indemnizacion de mimos.
+
+Para consultar la ultima causa:
+
+```text
+/caso_estado
+```
+
 ## Railway
 
 En Railway, conecta el repositorio de GitHub y configura estas variables:
@@ -175,10 +202,12 @@ En Railway, conecta el repositorio de GitHub y configura estas variables:
 ```env
 TOKEN_CASTORI=token_real_de_oficina_castori
 TOKEN_MIMOSUGA=token_real_de_mimosuga
+TOKEN_CORTE=token_real_de_corte
 TOKEN_CENTRALITA=token_real_de_centralita_magica
 MI_CHAT_ID=tu_chat_id
 CASTORI_CHAT_ID=chat_id_de_sandra
 MIMOSUGA_CHAT_ID=chat_id_de_sandra_para_mimosuga
+CORTE_CHAT_ID=chat_id_de_sandra_para_corte
 LOG_LEVEL=INFO
 DATA_FILE=data.json
 MAX_HISTORY_PER_ANIMAL=50
@@ -218,6 +247,8 @@ Al arrancar, el bot crea automaticamente las tablas necesarias si `DATABASE_URL`
 - `daily_limits`
 - `story_offers`
 - `auto_reply_drafts`
+- `court_cases`
+- `court_messages`
 
 ## Nota de seguridad
 
