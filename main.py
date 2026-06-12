@@ -566,6 +566,7 @@ async def central_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "/admin_memoria_cuentos\n"
         "/admin_cuento_prueba [mimosuga]\n"
         "/acusar <hechos>\n"
+        "/alegar <texto>\n"
         "/caso_estado\n"
         "/mimosuga_auto <on|off|status>\n"
         "/status"
@@ -950,6 +951,7 @@ async def central_accuse(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         case_id = await database.create_court_case(
             chat_id=partner_chat_id,
             accusation=accusation,
+            accuser="admin",
         )
     except Exception as exc:
         await update.effective_chat.send_message(str(exc))
@@ -968,6 +970,42 @@ async def central_accuse(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await court_app.bot.send_message(chat_id=partner_chat_id, text=text)
     append_history("corte", "out", text)
     await update.effective_chat.send_message(f"Causa #{case_id} enviada a la Corte.")
+
+
+async def central_court_plead(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_chat or not is_owner(update):
+        return
+    if not database.db_available() or not openai_available():
+        await update.effective_chat.send_message("La Corte necesita base de datos y OpenAI configurados.")
+        return
+
+    text = " ".join(context.args).strip()
+    if not text:
+        await update.effective_chat.send_message(
+            "Uso: /alegar <texto>\n"
+            "Ejemplo: /alegar Niego los hechos y solicito atenuante por estar haciendo cafe."
+        )
+        return
+
+    partner_chat_id = get_partner_chat_id("corte")
+    if not partner_chat_id:
+        await update.effective_chat.send_message("La Corte no esta vinculada.")
+        return
+
+    case = await database.get_active_court_case(partner_chat_id)
+    if not case:
+        await update.effective_chat.send_message("No hay proceso abierto en la Corte.")
+        return
+
+    await queue_court_submission(
+        chat_id=partner_chat_id,
+        sender="admin",
+        incoming_text=text,
+    )
+    await update.effective_chat.send_message(
+        "Alegacion presentada ante la Corte. "
+        f"La Sala esperara {AUTO_REPLY_IDLE_SECONDS} segundos antes de dictar sentencia."
+    )
 
 
 async def central_court_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -994,6 +1032,61 @@ async def central_court_status(update: Update, context: ContextTypes.DEFAULT_TYP
     if case.get("sentence_text"):
         lines.append(f"Sentencia: {case['sentence_text']}")
     await update.effective_chat.send_message("\n".join(lines))
+
+
+async def court_user_accuse(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_chat:
+        return
+    partner_chat_id = get_partner_chat_id("corte")
+    if partner_chat_id and update.effective_chat.id != partner_chat_id:
+        return
+    if not database.db_available() or not openai_available():
+        await update.effective_chat.send_message(
+            "La Corte no encuentra ahora mismo sus sellos oficiales. Intente presentar denuncia mas tarde."
+        )
+        return
+
+    accusation = " ".join(context.args).strip()
+    if not accusation:
+        await update.effective_chat.send_message(
+            "Para presentar denuncia formal, use:\n/acusar hechos del caso"
+        )
+        return
+
+    try:
+        case_id = await database.create_court_case(
+            chat_id=update.effective_chat.id,
+            accusation=accusation,
+            accuser="patita",
+        )
+    except Exception:
+        await update.effective_chat.send_message(
+            "La Corte informa que ya consta un proceso abierto. "
+            "No se admiten dos expedientes encima de la misma mesa con pompones."
+        )
+        return
+
+    text = (
+        "DENUNCIA ADMITIDA A TRAMITE\n\n"
+        f"Causa #{case_id}\n\n"
+        "La Corte de Pompones y Plumas admite la denuncia presentada por Patita "
+        "y concede a Miguel turno de alegaciones.\n\n"
+        "La Sala queda con las plumas levantadas y el sello preparado."
+    )
+    await update.effective_chat.send_message(text)
+    append_history("corte", "in", f"[Denuncia de Patita] {accusation}")
+    append_history("corte", "out", text)
+
+    if centralita_app:
+        await centralita_app.bot.send_message(
+            chat_id=owner_chat_id(),
+            text=(
+                f"Patita ha abierto causa #{case_id} en la Corte.\n"
+                f"Acusacion: {accusation}\n\n"
+                "Puedes presentar alegaciones con:\n"
+                "/alegar <texto>"
+            ),
+        )
 
 
 async def story_request(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1770,7 +1863,7 @@ async def animal_message(
         if animal_key == "corte":
             append_history(animal_key, "in", text)
             await centralita_app.bot.send_message(chat_id=owner_chat_id(), text=text)
-            await queue_court_allegation(update, text)
+            await queue_court_allegation(update, context, text)
             return
 
         day_context = get_mimosuga_day_context() if animal_key == "mimosuga" else None
@@ -1787,7 +1880,11 @@ async def animal_message(
         )
 
 
-async def queue_court_allegation(update: Update, incoming_text: str) -> None:
+async def queue_court_allegation(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    incoming_text: str,
+) -> None:
     if not update.effective_chat or not centralita_app:
         return
     if not database.db_available() or not openai_available():
@@ -1799,23 +1896,51 @@ async def queue_court_allegation(update: Update, incoming_text: str) -> None:
 
     case = await database.get_active_court_case(update.effective_chat.id)
     if not case:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=(
+                "La Corte informa, con sello provisional, que no consta ningun proceso "
+                "abierto en este momento. Para presentar denuncia formal use /acusar."
+            ),
+        )
         await centralita_app.bot.send_message(
             chat_id=owner_chat_id(),
             text="La Corte recibio un mensaje, pero no hay causa activa.",
         )
         return
 
-    await database.add_court_message(case["id"], "patita", incoming_text)
-    buffer_key = f"corte:{update.effective_chat.id}"
+    await queue_court_submission(
+        chat_id=update.effective_chat.id,
+        sender="patita",
+        incoming_text=incoming_text,
+    )
+
+
+async def queue_court_submission(
+    *,
+    chat_id: int,
+    sender: str,
+    incoming_text: str,
+) -> None:
+    if not centralita_app:
+        return
+    case = await database.get_active_court_case(chat_id)
+    if not case:
+        return
+
+    await database.add_court_message(case["id"], sender, incoming_text)
+    buffer_key = f"corte:{chat_id}"
     was_new_buffer = buffer_key not in court_buffers
     if was_new_buffer:
         court_buffers[buffer_key] = {
             "case_id": case["id"],
-            "chat_id": update.effective_chat.id,
+            "chat_id": chat_id,
+            "sender": sender,
             "messages": [],
         }
     buffer = court_buffers[buffer_key]
     buffer["case_id"] = case["id"]
+    buffer["sender"] = sender
     buffer["messages"].append(incoming_text)
 
     existing_task = court_tasks.get(buffer_key)
@@ -1823,13 +1948,15 @@ async def queue_court_allegation(update: Update, incoming_text: str) -> None:
         existing_task.cancel()
     court_tasks[buffer_key] = asyncio.create_task(process_court_buffer_after_idle(buffer_key))
 
-    await centralita_app.bot.send_message(
-        chat_id=owner_chat_id(),
-        text=(
-            "La Corte toma nota de la alegacion y esperara "
-            f"{AUTO_REPLY_IDLE_SECONDS} segundos por si Patita amplia declaracion."
-        ),
-    )
+    if was_new_buffer:
+        subject = "Patita amplia declaracion" if sender == "patita" else "Miguel amplia defensa"
+        await centralita_app.bot.send_message(
+            chat_id=owner_chat_id(),
+            text=(
+                "La Corte toma nota de la alegacion y esperara "
+                f"{AUTO_REPLY_IDLE_SECONDS} segundos por si {subject}."
+            ),
+        )
 
 
 async def process_court_buffer_after_idle(buffer_key: str) -> None:
@@ -1855,12 +1982,14 @@ async def process_court_buffer(buffer_key: str) -> None:
         return
 
     new_messages = [str(message).strip() for message in buffer.get("messages", []) if str(message).strip()]
+    allegation_sender = str(buffer.get("sender", "patita"))
     messages = await database.get_court_messages(case["id"])
     try:
         decision = await generate_court_reply(
             accusation=case["accusation"],
             messages=messages,
             new_allegations=new_messages,
+            new_allegations_sender=allegation_sender,
         )
     except Exception as exc:
         logger.exception("No se pudo generar respuesta de la Corte")
@@ -1876,6 +2005,7 @@ async def process_court_buffer(buffer_key: str) -> None:
     append_history("corte", "out", reply)
     await database.add_court_message(case["id"], "court", reply)
     allegations_text = "\n".join(f"- {message}" for message in new_messages) or "- Sin alegaciones registradas"
+    allegations_label = "Alegaciones de Miguel" if allegation_sender == "admin" else "Alegaciones de Patita"
 
     if decision["status"] == "sentence":
         verdict = decision.get("verdict") or "culpabilidad con atenuantes de moneria"
@@ -1890,7 +2020,7 @@ async def process_court_buffer(buffer_key: str) -> None:
             text=(
                 f"La Corte ha dictado sentencia en la causa #{case['id']}.\n"
                 f"Acusacion: {case['accusation']}\n\n"
-                "Alegaciones de Patita:\n"
+                f"{allegations_label}:\n"
                 f"{allegations_text}\n\n"
                 f"Veredicto: {verdict}\n"
                 f"Condena: {sentence_text}\n\n"
@@ -1904,7 +2034,7 @@ async def process_court_buffer(buffer_key: str) -> None:
             text=(
                 f"La Corte ha pausado la causa #{case['id']} por prudencia.\n"
                 f"Acusacion: {case['accusation']}\n\n"
-                "Alegaciones de Patita:\n"
+                f"{allegations_label}:\n"
                 f"{allegations_text}\n\n"
                 "Mensaje enviado por la Corte a Patita:\n"
                 f"{reply}"
@@ -2113,6 +2243,7 @@ def build_centralita_app() -> Application:
     app.add_handler(CommandHandler("reanudar_programas", central_resume_schedules))
     app.add_handler(CommandHandler("mimosuga_auto", central_mimosuga_auto))
     app.add_handler(CommandHandler("acusar", central_accuse))
+    app.add_handler(CommandHandler("alegar", central_court_plead))
     app.add_handler(CommandHandler("caso_estado", central_court_status))
     app.add_handler(CommandHandler("admin_ultimos", admin_latest_stories))
     app.add_handler(CommandHandler("admin_ver", admin_view_story))
@@ -2156,6 +2287,8 @@ def build_animal_app(animal_key: str) -> Application:
     if animal_key == "mimosuga":
         app.add_handler(CommandHandler("cuento", story_request))
         app.add_handler(CallbackQueryHandler(story_option_callback, pattern=r"^cuento:"))
+    if animal_key == "corte":
+        app.add_handler(CommandHandler("acusar", court_user_accuse))
     app.add_handler(
         MessageHandler(
             filters.ALL & ~filters.COMMAND,

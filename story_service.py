@@ -517,12 +517,13 @@ async def generate_court_reply(
     accusation: str,
     messages: list[dict[str, Any]],
     new_allegations: list[str],
+    new_allegations_sender: str,
 ) -> dict[str, Any]:
     history_lines = []
     for item in messages[-24:]:
         sender = item.get("sender", "")
         if sender == "admin":
-            label = "Acusacion"
+            label = "Miguel / Control Castori"
         elif sender == "patita":
             label = "Alegaciones de Patita"
         elif sender == "court":
@@ -532,6 +533,12 @@ async def generate_court_reply(
         history_lines.append(f"- {label}: {item.get('text', '')}")
     history_text = "\n".join(history_lines) or "No hay historial de causa."
     new_text = "\n".join(f"- {text}" for text in new_allegations) or "No hay alegaciones nuevas."
+    if new_allegations_sender == "admin":
+        new_label = "Alegaciones nuevas de Miguel"
+        accused_label = "Miguel"
+    else:
+        new_label = "Alegaciones nuevas de Patita"
+        accused_label = "Patita"
 
     prompt = f"""
 Eres la Corte de Pompones y Plumas, un tribunal magico de broma, pomposo,
@@ -543,12 +550,15 @@ Caso abierto:
 Historial de la causa:
 {history_text}
 
-Alegaciones nuevas de Patita:
+{new_label}:
 {new_text}
 
 Reglas:
 - Nunca uses el nombre humano de Patita. Llamala Patita, acusada, parte plumifera,
   compareciente o similares.
+- Si el acusado es Miguel, puedes llamarle Miguel, acusado, parte bombero-afectiva
+  o compareciente de sofa.
+- Parte que acaba de alegar: {accused_label}.
 - Esto es un juego romantico y tierno. Nada de castigos reales, humillantes, sexuales,
   agresivos, manipuladores ni desagradables.
 - Los "castigos" deben ser cuquis: abrazos, besos reglamentarios, sofa, modo amor,

@@ -74,6 +74,7 @@ Desde tu Telegram, abre **Centralita Magica** y usa:
 /historial mimosuga
 /historial castori 20
 /acusar Patita cruzo el pasillo sin entregar beso reglamentario.
+/alegar Niego los hechos y solicito atenuante por preparacion de cafe.
 /caso_estado
 /programar mimosuga lunes 09:00 Que tengas buena semana, patita.
 /programar mimosuga 21/06/2026 16:00 Tengo algo que contarte, sol mio.
@@ -188,6 +189,21 @@ Patita recibe una acusacion formal desde el bot de la Corte. Sus alegaciones se 
 durante `AUTO_REPLY_IDLE_SECONDS` segundos, igual que Mimosuga, y la IA responde como juez.
 Si ya hay suficientes alegaciones, dicta sentencia con condenas carinosas: abrazos, besos
 reglamentarios, sofa, modo amor o indemnizacion de mimos.
+
+Patita tambien puede iniciar una causa desde el propio bot de la Corte:
+
+```text
+/acusar Miguel ha cometido abandono de abrazo reglamentario.
+```
+
+Cuando Patita abre causa, Control Castori avisa al administrador y permite responder con:
+
+```text
+/alegar <texto>
+```
+
+Si Patita escribe en la Corte sin causa abierta, el bot solo informa de que no hay proceso
+abierto y le indica que use `/acusar` para presentar denuncia.
 
 Para consultar la ultima causa:
 

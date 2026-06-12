@@ -484,7 +484,7 @@ async def get_system_status_counts() -> dict[str, Any]:
     return dict(row) if row else {}
 
 
-async def create_court_case(*, chat_id: int, accusation: str) -> int:
+async def create_court_case(*, chat_id: int, accusation: str, accuser: str = "admin") -> int:
     db = require_pool()
     async with db.acquire() as conn:
         async with conn.transaction():
@@ -511,9 +511,10 @@ async def create_court_case(*, chat_id: int, accusation: str) -> int:
             await conn.execute(
                 """
                 insert into court_messages (case_id, sender, text)
-                values ($1, 'admin', $2)
+                values ($1, $2, $3)
                 """,
                 case_id,
+                accuser,
                 accusation,
             )
     return int(case_id)
