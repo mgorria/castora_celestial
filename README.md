@@ -205,6 +205,22 @@ Cuando Patita abre causa, Control Castori avisa al administrador y permite respo
 Si Patita escribe en la Corte sin causa abierta, el bot solo informa de que no hay proceso
 abierto y le indica que use `/acusar` para presentar denuncia.
 
+La Corte consulta normativa editable en:
+
+```text
+lore/corte/codigo-penal-pompones.md
+lore/corte/jurisprudencia.md
+```
+
+Tambien consulta automaticamente las ultimas sentencias guardadas en PostgreSQL como
+jurisprudencia reciente. Si un articulo o precedente encaja, la IA puede citarlo en la
+sentencia.
+
+Tras una acusacion, la parte acusada recibe botones de estrategia de defensa:
+negar hechos, alegar atenuantes, confesar parcialmente o solicitar acuerdo de sofa.
+Al pulsar un boton, la Corte formula una pregunta de interrogatorio antes de recibir
+las alegaciones libres.
+
 Para consultar la ultima causa:
 
 ```text

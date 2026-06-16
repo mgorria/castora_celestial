@@ -577,6 +577,21 @@ async def get_court_messages(case_id: int, limit: int = 30) -> list[dict[str, An
     return [dict(row) for row in reversed(rows)]
 
 
+async def get_recent_court_precedents(limit: int = 5) -> list[dict[str, Any]]:
+    db = require_pool()
+    rows = await db.fetch(
+        """
+        select id, accusation, verdict, sentence_text, sentenced_at
+        from court_cases
+        where status = 'sentenced'
+        order by sentenced_at desc nulls last
+        limit $1
+        """,
+        limit,
+    )
+    return [dict(row) for row in rows]
+
+
 async def sentence_court_case(
     *,
     case_id: int,

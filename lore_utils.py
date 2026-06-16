@@ -11,6 +11,7 @@ PENDING_STORIES_DIR = Path(
 RECENT_STORY_MEMORY_PATH = Path(
     os.getenv("RECENT_STORY_MEMORY_PATH", str(LORE_DIR / "historias" / "memoria-reciente.md"))
 )
+COURT_DIR = LORE_DIR / "corte"
 
 
 def read_lore_file(relative_path: str) -> str:
@@ -28,6 +29,17 @@ def read_core_lore() -> str:
         f"# Resumen de lore\n\n{resumen}\n\n"
         f"# Continuidad canonica\n\n{continuidad}\n\n"
         f"# Reglas de tono\n\n{reglas}"
+    ).strip()
+
+
+def read_court_lore() -> str:
+    codigo = read_lore_file("corte/codigo-penal-pompones.md")
+    jurisprudencia = read_lore_file("corte/jurisprudencia.md")
+    return (
+        "# Codigo Penal de Pompones y Plumas\n\n"
+        f"{codigo or 'No hay codigo penal escrito todavia.'}\n\n"
+        "# Jurisprudencia manual\n\n"
+        f"{jurisprudencia or 'No hay jurisprudencia manual escrita todavia.'}"
     ).strip()
 
 

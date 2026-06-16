@@ -5,7 +5,7 @@ from typing import Any
 
 from openai import AsyncOpenAI
 
-from lore_utils import read_core_lore, read_recent_story_memory, read_relevant_character_lore
+from lore_utils import read_core_lore, read_court_lore, read_recent_story_memory, read_relevant_character_lore
 
 
 logger = logging.getLogger("control-castora.story_service")
@@ -518,7 +518,9 @@ async def generate_court_reply(
     messages: list[dict[str, Any]],
     new_allegations: list[str],
     new_allegations_sender: str,
+    precedents: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    court_lore = read_court_lore()
     history_lines = []
     for item in messages[-24:]:
         sender = item.get("sender", "")
@@ -539,10 +541,23 @@ async def generate_court_reply(
     else:
         new_label = "Alegaciones nuevas de Patita"
         accused_label = "Patita"
+    precedent_lines = []
+    for item in (precedents or [])[:5]:
+        precedent_lines.append(
+            f"- Causa #{item.get('id')}: {item.get('accusation')} | "
+            f"veredicto: {item.get('verdict') or ''} | pena: {item.get('sentence_text') or ''}"
+        )
+    precedents_text = "\n".join(precedent_lines) or "No hay jurisprudencia automatica reciente."
 
     prompt = f"""
 Eres la Corte de Pompones y Plumas, un tribunal magico de broma, pomposo,
 ridiculamente solemne y muy carinoso. Devuelve SOLO JSON valido.
+
+Normativa aplicable:
+{court_lore}
+
+Jurisprudencia automatica reciente:
+{precedents_text}
 
 Caso abierto:
 {accusation}
@@ -563,6 +578,10 @@ Reglas:
   agresivos, manipuladores ni desagradables.
 - Los "castigos" deben ser cuquis: abrazos, besos reglamentarios, sofa, modo amor,
   disculpas dramaticas de mentira, mantita, caricias, indemnizacion de mimos.
+- Consulta el Codigo Penal de Pompones y Plumas. Si algun articulo encaja, citalo
+  de forma natural en la sentencia.
+- Si hay una sentencia previa parecida, puedes citarla como precedente de la causa #ID,
+  pero no fuerces citas si no encajan.
 - Tono de tribunal absurdo: providencia, autos, alegaciones, atenuantes, agravantes,
   sentencia, sala, acta, fiscalia de pompones.
 - Este flujo tiene un solo turno de alegaciones: despues de estas alegaciones debes dictar
@@ -573,6 +592,8 @@ Reglas:
 - Si Patita parece incomoda, molesta de verdad o habla de algo serio, no sigas el juego:
   status debe ser "continue" y reply debe ser amable, breve y prudente, recomendando pausar la causa.
 - Si dictas sentencia, debe incluir veredicto y condena amorosa concreta.
+- La sentencia debe incluir una linea breve de fundamento juridico, por ejemplo:
+  "Visto el articulo 1 y la doctrina de la causa #3..."
 - Maximo 900 caracteres.
 
 Formato JSON exacto:
@@ -598,5 +619,62 @@ Usa status "sentence" por defecto. Usa "continue" solo para pausar por prudencia
         "reply": reply,
         "verdict": str(data.get("verdict", "")).strip(),
         "sentence": str(data.get("sentence", "")).strip(),
+        "reason": str(data.get("reason", "")).strip(),
+    }
+
+
+async def generate_court_interrogation(
+    *,
+    accusation: str,
+    accused: str,
+    defense_style: str,
+    precedents: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    court_lore = read_court_lore()
+    precedent_lines = []
+    for item in (precedents or [])[:3]:
+        precedent_lines.append(
+            f"- Causa #{item.get('id')}: {item.get('accusation')} | {item.get('verdict') or ''}"
+        )
+    precedents_text = "\n".join(precedent_lines) or "No hay precedentes recientes utiles."
+    accused_text = "Patita" if accused == "patita" else "Miguel"
+
+    prompt = f"""
+Eres la Corte de Pompones y Plumas. Devuelve SOLO JSON valido.
+
+Normativa aplicable:
+{court_lore}
+
+Precedentes recientes:
+{precedents_text}
+
+Acusacion:
+{accusation}
+
+Parte acusada que va a declarar: {accused_text}
+Estrategia elegida con boton: {defense_style}
+
+Necesito una sola pregunta de interrogatorio, mona, judicial y no repetitiva.
+
+Reglas:
+- No uses el nombre humano de Patita. Si la acusada es Patita, llamala Patita o parte plumifera.
+- Si el acusado es Miguel, puedes llamarle Miguel o parte bombero-afectiva.
+- La pregunta debe ayudar a que la parte acusada escriba alegaciones libres.
+- Puede citar un articulo del codigo si encaja, pero no debe sonar pesada.
+- Tono pomposo, absurdo, carinoso y breve.
+- Maximo 450 caracteres.
+
+Formato JSON exacto:
+{{
+  "question": "pregunta que vera la parte acusada",
+  "reason": "motivo breve para admin"
+}}
+"""
+    data = await _generate_json(prompt)
+    question = str(data.get("question", "")).strip()
+    if not question:
+        raise StoryGenerationError("La Corte no devolvio pregunta de interrogatorio")
+    return {
+        "question": question,
         "reason": str(data.get("reason", "")).strip(),
     }

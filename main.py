@@ -32,6 +32,7 @@ from lore_utils import (
 )
 from story_service import (
     StoryGenerationError,
+    generate_court_interrogation,
     generate_court_reply,
     generate_full_story,
     generate_soft_mimosuga_reply,
@@ -120,6 +121,13 @@ auto_reply_buffers: dict[str, dict[str, Any]] = {}
 auto_reply_tasks: dict[str, asyncio.Task] = {}
 court_buffers: dict[str, dict[str, Any]] = {}
 court_tasks: dict[str, asyncio.Task] = {}
+
+COURT_DEFENSE_STYLES = {
+    "deny": "niega solemnemente los hechos",
+    "attenuate": "alega atenuantes de moneria, cansancio o buena intencion",
+    "confess": "confiesa parcialmente con arrepentimiento cuqui",
+    "sofa": "solicita acuerdo amistoso de sofa y mimos",
+}
 
 AUTO_REPLY_DEFAULTS = {
     "mimosuga": {
@@ -517,6 +525,21 @@ def format_short_schedule(schedule: dict[str, Any], when: datetime) -> str:
     if len(text) > 70:
         text = text[:67] + "..."
     return f"{when.strftime('%d/%m %H:%M')} - {display_name}: {text}"
+
+
+def court_defense_keyboard(case_id: int, accused: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("Niego los hechos", callback_data=f"courtdef:{case_id}:{accused}:deny"),
+                InlineKeyboardButton("Atenuantes", callback_data=f"courtdef:{case_id}:{accused}:attenuate"),
+            ],
+            [
+                InlineKeyboardButton("Confieso un poco", callback_data=f"courtdef:{case_id}:{accused}:confess"),
+                InlineKeyboardButton("Acuerdo de sofa", callback_data=f"courtdef:{case_id}:{accused}:sofa"),
+            ],
+        ]
+    )
 
 
 def is_owner(update: Update) -> bool:
@@ -964,10 +987,14 @@ async def central_accuse(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         f"{accusation}\n\n"
         "La compareciente dispone de este canal para presentar alegaciones, excusas, "
         "pucheros, atenuantes de moneria o pruebas de inocencia.\n\n"
-        "La Sala esperara sus manifestaciones antes de deliberar con la solemnidad "
-        "blandita que exige el caso."
+        "Antes de declarar, seleccione estrategia de defensa para que la Sala formule "
+        "interrogatorio."
     )
-    await court_app.bot.send_message(chat_id=partner_chat_id, text=text)
+    await court_app.bot.send_message(
+        chat_id=partner_chat_id,
+        text=text,
+        reply_markup=court_defense_keyboard(case_id, "patita"),
+    )
     append_history("corte", "out", text)
     await update.effective_chat.send_message(f"Causa #{case_id} enviada a la Corte.")
 
@@ -1083,10 +1110,74 @@ async def court_user_accuse(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             text=(
                 f"Patita ha abierto causa #{case_id} en la Corte.\n"
                 f"Acusacion: {accusation}\n\n"
-                "Puedes presentar alegaciones con:\n"
+                "Puedes escoger estrategia de defensa con los botones o presentar alegaciones con:\n"
                 "/alegar <texto>"
             ),
+            reply_markup=court_defense_keyboard(case_id, "admin"),
         )
+
+
+async def court_defense_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query or not query.message or not query.from_user:
+        return
+
+    parts = (query.data or "").split(":")
+    if len(parts) != 4:
+        await query.answer()
+        return
+    _, case_id_text, accused, style_key = parts
+    if accused == "admin" and query.from_user.id != owner_chat_id():
+        await query.answer("Solo Miguel puede escoger esta defensa.", show_alert=True)
+        return
+    if accused == "patita":
+        partner_chat_id = get_partner_chat_id("corte")
+        if partner_chat_id and query.message.chat_id != partner_chat_id:
+            await query.answer("Esta defensa pertenece a otra causa.", show_alert=True)
+            return
+
+    try:
+        case_id = int(case_id_text)
+    except ValueError:
+        await query.answer("Causa no valida.", show_alert=True)
+        return
+    style = COURT_DEFENSE_STYLES.get(style_key)
+    if not style:
+        await query.answer("Estrategia no valida.", show_alert=True)
+        return
+    if not database.db_available() or not openai_available():
+        await query.answer("La Corte no tiene sellos disponibles.", show_alert=True)
+        return
+
+    case = await database.get_active_court_case(query.message.chat_id if accused == "patita" else get_partner_chat_id("corte") or 0)
+    if not case or case["id"] != case_id:
+        await query.answer("La causa ya no esta activa.", show_alert=True)
+        return
+
+    await query.answer("Estrategia incorporada al acta.")
+    await database.add_court_message(case_id, accused, f"[Estrategia de defensa] {style}")
+    try:
+        precedents = await database.get_recent_court_precedents(3)
+        interrogation = await generate_court_interrogation(
+            accusation=case["accusation"],
+            accused=accused,
+            defense_style=style,
+            precedents=precedents,
+        )
+        question = interrogation["question"]
+    except Exception as exc:
+        logger.exception("No se pudo generar interrogatorio de la Corte")
+        question = (
+            "La Corte solicita a la parte compareciente que exponga, con la mayor "
+            "solemnidad blandita posible, sus alegaciones antes de sentencia."
+        )
+
+    await database.add_court_message(case_id, "court", question)
+    await query.message.reply_text(question)
+    if accused == "admin":
+        await query.message.reply_text("Responde con /alegar <texto> para presentar defensa.")
+    else:
+        await query.message.reply_text("Puede contestar con sus alegaciones en uno o varios mensajes.")
 
 
 async def story_request(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1985,11 +2076,13 @@ async def process_court_buffer(buffer_key: str) -> None:
     allegation_sender = str(buffer.get("sender", "patita"))
     messages = await database.get_court_messages(case["id"])
     try:
+        precedents = await database.get_recent_court_precedents(5)
         decision = await generate_court_reply(
             accusation=case["accusation"],
             messages=messages,
             new_allegations=new_messages,
             new_allegations_sender=allegation_sender,
+            precedents=precedents,
         )
     except Exception as exc:
         logger.exception("No se pudo generar respuesta de la Corte")
@@ -2256,6 +2349,7 @@ def build_centralita_app() -> Application:
     app.add_handler(CallbackQueryHandler(admin_test_story_callback, pattern=r"^adminteststory:"))
     app.add_handler(CallbackQueryHandler(admin_story_status_callback, pattern=r"^adminstory:"))
     app.add_handler(CallbackQueryHandler(auto_reply_callback, pattern=r"^autoreply:"))
+    app.add_handler(CallbackQueryHandler(court_defense_callback, pattern=r"^courtdef:"))
     for animal_key, animal in ANIMALS.items():
         app.add_handler(
             CommandHandler(
@@ -2289,6 +2383,7 @@ def build_animal_app(animal_key: str) -> Application:
         app.add_handler(CallbackQueryHandler(story_option_callback, pattern=r"^cuento:"))
     if animal_key == "corte":
         app.add_handler(CommandHandler("acusar", court_user_accuse))
+        app.add_handler(CallbackQueryHandler(court_defense_callback, pattern=r"^courtdef:"))
     app.add_handler(
         MessageHandler(
             filters.ALL & ~filters.COMMAND,
