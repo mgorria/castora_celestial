@@ -33,12 +33,21 @@ def read_core_lore() -> str:
 
 
 def read_court_lore() -> str:
-    codigo = read_lore_file("corte/codigo-penal-pompones.md")
+    codigo_pata = read_lore_file("corte/codigo-penal-infracciones-pata.md")
+    codigo_oso = read_lore_file("corte/codigo-penal-infracciones-oso.md")
     jurisprudencia = read_lore_file("corte/jurisprudencia.md")
     jueces = read_lore_file("corte/jueces.md")
     return (
-        "# Codigo Penal de Pompones y Plumas\n\n"
-        f"{codigo or 'No hay codigo penal escrito todavia.'}\n\n"
+        "# Codigos Penales de la Corte de Pompones y Plumas\n\n"
+        "Hay dos codigos distintos. Antes de citar un articulo, la Corte debe elegir "
+        "el codigo correcto segun la parte acusada y comprobar que el articulo citado "
+        "dice realmente lo que se afirma.\n\n"
+        "## Codigo para infracciones de la Pata\n\n"
+        "Usar cuando la acusada sea Patita, la Pata o la parte plumifera.\n\n"
+        f"{codigo_pata or 'No hay codigo para infracciones de la Pata escrito todavia.'}\n\n"
+        "## Codigo para infracciones del Oso\n\n"
+        "Usar cuando el acusado sea Miguel, el Oso o la parte osuna.\n\n"
+        f"{codigo_oso or 'No hay codigo para infracciones del Oso escrito todavia.'}\n\n"
         "# Perfiles de jueces\n\n"
         f"{jueces or 'No hay perfiles de jueces escritos todavia.'}\n\n"
         "# Jurisprudencia manual\n\n"

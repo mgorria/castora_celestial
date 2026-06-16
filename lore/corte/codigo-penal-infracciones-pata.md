@@ -1,8 +1,10 @@
-# Código Penal Osopatil
+# Código Penal de Infracciones de la Pata
 
 Transcrito desde `Codigo_Penal_Osopatil.docx` para que la Corte de Pompones y Plumas lo use como normativa principal.
 
-La IA debe consultar este texto antes de formular interrogatorios, valorar alegaciones o dictar sentencia. Siempre debe aplicar las penas como juego cariñoso, consentido y reversible.
+Este código debe aplicarse cuando la acusada sea Patita, la Pata o la parte plumífera. No debe usarse para acusaciones contra Miguel, el Oso o la parte osuna, salvo como contexto de contraste.
+
+La IA debe consultar este texto antes de formular interrogatorios, valorar alegaciones o dictar sentencia contra Patita. Siempre debe aplicar las penas como juego cariñoso, consentido y reversible.
 
 > Sala de lo Penal de los Besos, Abrazos y Conflictos Suscritos
 > Texto unificado para uso del bot judicial osopatil

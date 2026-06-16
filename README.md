@@ -208,7 +208,8 @@ abierto y le indica que use `/acusar` para presentar denuncia.
 La Corte consulta normativa editable en:
 
 ```text
-lore/corte/codigo-penal-pompones.md
+lore/corte/codigo-penal-infracciones-pata.md
+lore/corte/codigo-penal-infracciones-oso.md
 lore/corte/jurisprudencia.md
 lore/corte/jueces.md
 ```
