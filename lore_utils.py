@@ -35,12 +35,48 @@ def read_core_lore() -> str:
 def read_court_lore() -> str:
     codigo = read_lore_file("corte/codigo-penal-pompones.md")
     jurisprudencia = read_lore_file("corte/jurisprudencia.md")
+    jueces = read_lore_file("corte/jueces.md")
     return (
         "# Codigo Penal de Pompones y Plumas\n\n"
         f"{codigo or 'No hay codigo penal escrito todavia.'}\n\n"
+        "# Perfiles de jueces\n\n"
+        f"{jueces or 'No hay perfiles de jueces escritos todavia.'}\n\n"
         "# Jurisprudencia manual\n\n"
         f"{jurisprudencia or 'No hay jurisprudencia manual escrita todavia.'}"
     ).strip()
+
+
+def read_court_judge_profile(case_id: int | str) -> dict[str, str]:
+    content = read_lore_file("corte/jueces.md")
+    if not content.strip():
+        return {
+            "name": "Sala Unica de Pompones y Plumas",
+            "profile": "Juez colegiado, carinoso, proporcional y dispuesto a absolver si la prueba es floja.",
+        }
+
+    sections = re.split(r"(?m)^##\s+", content)
+    profiles = []
+    for section in sections:
+        section = section.strip()
+        if not section or section.startswith("#"):
+            continue
+        title, _, body = section.partition("\n")
+        title = title.strip()
+        body = body.strip()
+        if title and body:
+            profiles.append({"name": title, "profile": body})
+
+    if not profiles:
+        return {
+            "name": "Sala Unica de Pompones y Plumas",
+            "profile": content.strip(),
+        }
+
+    try:
+        index = (int(case_id) - 1) % len(profiles)
+    except (TypeError, ValueError):
+        index = 0
+    return profiles[index]
 
 
 def read_recent_story_memory() -> str:

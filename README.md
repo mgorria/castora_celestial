@@ -210,11 +210,17 @@ La Corte consulta normativa editable en:
 ```text
 lore/corte/codigo-penal-pompones.md
 lore/corte/jurisprudencia.md
+lore/corte/jueces.md
 ```
 
 Tambien consulta automaticamente las ultimas sentencias guardadas en PostgreSQL como
 jurisprudencia reciente. Si un articulo o precedente encaja, la IA puede citarlo en la
 sentencia.
+
+Cada causa elige automaticamente un juez ponente desde `lore/corte/jueces.md`.
+Los jueces tienen criterios distintos: algunos absuelven con facilidad, otros se fijan
+mas en fugas de abrazo, otros rebajan por atenuantes o archivan por exceso de encanto.
+Esto ayuda a que las sentencias no sean siempre "culpable con atenuantes".
 
 Tras una acusacion, la parte acusada recibe botones de estrategia de defensa:
 negar hechos, alegar atenuantes, confesar parcialmente o solicitar acuerdo de sofa.

@@ -5,7 +5,13 @@ from typing import Any
 
 from openai import AsyncOpenAI
 
-from lore_utils import read_core_lore, read_court_lore, read_recent_story_memory, read_relevant_character_lore
+from lore_utils import (
+    read_core_lore,
+    read_court_judge_profile,
+    read_court_lore,
+    read_recent_story_memory,
+    read_relevant_character_lore,
+)
 
 
 logger = logging.getLogger("control-castora.story_service")
@@ -514,6 +520,7 @@ Formato JSON exacto:
 
 async def generate_court_reply(
     *,
+    case_id: int,
     accusation: str,
     messages: list[dict[str, Any]],
     new_allegations: list[str],
@@ -521,6 +528,9 @@ async def generate_court_reply(
     precedents: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     court_lore = read_court_lore()
+    judge = read_court_judge_profile(case_id)
+    judge_name = judge["name"]
+    judge_profile = judge["profile"]
     history_lines = []
     for item in messages[-24:]:
         sender = item.get("sender", "")
@@ -556,6 +566,12 @@ ridiculamente solemne y muy carinoso. Devuelve SOLO JSON valido.
 Normativa aplicable:
 {court_lore}
 
+Juez ponente de esta causa:
+{judge_name}
+
+Perfil y criterio del juez:
+{judge_profile}
+
 Jurisprudencia automatica reciente:
 {precedents_text}
 
@@ -587,13 +603,24 @@ Reglas:
 - Este flujo tiene un solo turno de alegaciones: despues de estas alegaciones debes dictar
   sentencia final, sin pedir mas aclaraciones, salvo que Patita parezca incomoda o sea algo serio.
 - Debe valorar las alegaciones, aceptar excusas graciosas si procede y cerrar con sentencia.
-- No alargues artificialmente el proceso. La sentencia puede ser culpable, inocente,
-  culpable con atenuantes de moneria o archivo por exceso de encanto.
+- No alargues artificialmente el proceso. Debes elegir un resultado segun hechos, prueba,
+  alegaciones, normativa, juez ponente y precedentes.
+- No dictes siempre "culpable con atenuantes". Esa formula solo debe aparecer cuando de verdad
+  encaje. La Corte tambien puede absolver, archivar, advertir, declarar culpa compartida,
+  homologar acuerdo de sofa o imponer una condena simbolica minima.
+- Si la acusacion es debil, teatral, poco probada o la defensa es convincente, considera
+  absolucion, archivo por ternura suficiente o advertencia sin condena.
+- Si hay reparacion espontanea, cansancio, hambre, sueno, provocacion del Oso o exceso de
+  encanto, aplica atenuantes reales y reduce mucho la pena.
+- Si hay fuga, reincidencia, fraude patil o desacato adorable claro, puede haber condena,
+  pero siempre proporcional y carinosa.
+- Evita repetir el mismo veredicto, estructura y condena que las causas recientes.
 - Si Patita parece incomoda, molesta de verdad o habla de algo serio, no sigas el juego:
   status debe ser "continue" y reply debe ser amable, breve y prudente, recomendando pausar la causa.
 - Si dictas sentencia, debe incluir veredicto y condena amorosa concreta.
 - La sentencia debe incluir una linea breve de fundamento juridico, por ejemplo:
   "Visto el articulo 1 y la doctrina de la causa #3..."
+- La sentencia debe mencionar al juez ponente de forma natural o en encabezado breve.
 - Maximo 900 caracteres.
 
 Formato JSON exacto:
@@ -602,6 +629,7 @@ Formato JSON exacto:
   "reply": "texto que vera Patita",
   "verdict": "",
   "sentence": "",
+  "judge": "{judge_name}",
   "reason": "motivo breve para admin"
 }}
 
@@ -619,18 +647,23 @@ Usa status "sentence" por defecto. Usa "continue" solo para pausar por prudencia
         "reply": reply,
         "verdict": str(data.get("verdict", "")).strip(),
         "sentence": str(data.get("sentence", "")).strip(),
+        "judge": str(data.get("judge", judge_name)).strip() or judge_name,
         "reason": str(data.get("reason", "")).strip(),
     }
 
 
 async def generate_court_interrogation(
     *,
+    case_id: int,
     accusation: str,
     accused: str,
     defense_style: str,
     precedents: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     court_lore = read_court_lore()
+    judge = read_court_judge_profile(case_id)
+    judge_name = judge["name"]
+    judge_profile = judge["profile"]
     precedent_lines = []
     for item in (precedents or [])[:3]:
         precedent_lines.append(
@@ -644,6 +677,12 @@ Eres la Corte de Pompones y Plumas. Devuelve SOLO JSON valido.
 
 Normativa aplicable:
 {court_lore}
+
+Juez instructor:
+{judge_name}
+
+Perfil y criterio del juez:
+{judge_profile}
 
 Precedentes recientes:
 {precedents_text}
@@ -661,12 +700,14 @@ Reglas:
 - Si el acusado es Miguel, puedes llamarle Miguel o parte bombero-afectiva.
 - La pregunta debe ayudar a que la parte acusada escriba alegaciones libres.
 - Puede citar un articulo del codigo si encaja, pero no debe sonar pesada.
+- La pregunta debe reflejar el caracter del juez instructor.
 - Tono pomposo, absurdo, carinoso y breve.
 - Maximo 450 caracteres.
 
 Formato JSON exacto:
 {{
   "question": "pregunta que vera la parte acusada",
+  "judge": "{judge_name}",
   "reason": "motivo breve para admin"
 }}
 """
@@ -676,5 +717,6 @@ Formato JSON exacto:
         raise StoryGenerationError("La Corte no devolvio pregunta de interrogatorio")
     return {
         "question": question,
+        "judge": str(data.get("judge", judge_name)).strip() or judge_name,
         "reason": str(data.get("reason", "")).strip(),
     }

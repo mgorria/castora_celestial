@@ -1159,6 +1159,7 @@ async def court_defense_callback(update: Update, context: ContextTypes.DEFAULT_T
     try:
         precedents = await database.get_recent_court_precedents(3)
         interrogation = await generate_court_interrogation(
+            case_id=case_id,
             accusation=case["accusation"],
             accused=accused,
             defense_style=style,
@@ -2078,6 +2079,7 @@ async def process_court_buffer(buffer_key: str) -> None:
     try:
         precedents = await database.get_recent_court_precedents(5)
         decision = await generate_court_reply(
+            case_id=case["id"],
             accusation=case["accusation"],
             messages=messages,
             new_allegations=new_messages,
@@ -2101,8 +2103,9 @@ async def process_court_buffer(buffer_key: str) -> None:
     allegations_label = "Alegaciones de Miguel" if allegation_sender == "admin" else "Alegaciones de Patita"
 
     if decision["status"] == "sentence":
-        verdict = decision.get("verdict") or "culpabilidad con atenuantes de moneria"
+        verdict = decision.get("verdict") or "resolucion afectiva sin veredicto formal"
         sentence_text = decision.get("sentence") or reply
+        judge_name = decision.get("judge") or "Juez no identificado"
         await database.sentence_court_case(
             case_id=case["id"],
             verdict=verdict,
@@ -2115,6 +2118,7 @@ async def process_court_buffer(buffer_key: str) -> None:
                 f"Acusacion: {case['accusation']}\n\n"
                 f"{allegations_label}:\n"
                 f"{allegations_text}\n\n"
+                f"Juez ponente: {judge_name}\n"
                 f"Veredicto: {verdict}\n"
                 f"Condena: {sentence_text}\n\n"
                 "Mensaje enviado por la Corte a Patita:\n"
