@@ -605,6 +605,12 @@ Reglas:
 - Debe valorar las alegaciones, aceptar excusas graciosas si procede y cerrar con sentencia.
 - No alargues artificialmente el proceso. Debes elegir un resultado segun hechos, prueba,
   alegaciones, normativa, juez ponente y precedentes.
+- La interpretacion del Codigo Penal y la pena concreta deben depender claramente del juez
+  ponente. Usa su severidad, sus criterios, sus articulos preferidos, su tipo de penas y su
+  estilo de sentencia. Dos jueces distintos no deberian resolver igual el mismo caso.
+- La pena debe sonar propia de ese juez: Pomponia protege descanso y reduce penas; Pluminio
+  se conmueve y perdona; Borlita mide articulos y duraciones; Don Cojin protege sofa y besos;
+  Chisporrita reparte culpas y atenuantes; Lacito Final dicta resoluciones ceremoniales.
 - No dictes siempre "culpable con atenuantes". Esa formula solo debe aparecer cuando de verdad
   encaje. La Corte tambien puede absolver, archivar, advertir, declarar culpa compartida,
   homologar acuerdo de sofa o imponer una condena simbolica minima.
@@ -621,6 +627,8 @@ Reglas:
 - La sentencia debe incluir una linea breve de fundamento juridico, por ejemplo:
   "Visto el articulo 1 y la doctrina de la causa #3..."
 - La sentencia debe mencionar al juez ponente de forma natural o en encabezado breve.
+- La condena no debe ser generica. Debe tener una accion concreta, una duracion o una formula
+  de cumplimiento, salvo que el veredicto sea absolucion, archivo o advertencia sin pena.
 - Maximo 900 caracteres.
 
 Formato JSON exacto:
