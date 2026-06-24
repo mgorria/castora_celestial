@@ -223,6 +223,10 @@ Los jueces tienen criterios distintos: algunos absuelven con facilidad, otros se
 mas en fugas de abrazo, otros rebajan por atenuantes o archivan por exceso de encanto.
 Esto ayuda a que las sentencias no sean siempre "culpable con atenuantes".
 
+Antes del fundamento y del fallo, el juez incluye una valoracion personal en primera
+persona. Comenta los hechos y las alegaciones con su propio caracter, de modo que no solo
+cambian el veredicto y la pena: tambien cambia la voz con la que se dicta la sentencia.
+
 Tras una acusacion, la parte acusada recibe botones de estrategia de defensa:
 negar hechos, alegar atenuantes, confesar parcialmente o solicitar acuerdo de sofa.
 Al pulsar un boton, la Corte formula una pregunta de interrogatorio antes de recibir
@@ -256,7 +260,7 @@ STARTUP_DELAY_SECONDS=8
 AUTO_REPLY_IDLE_SECONDS=90
 DATABASE_URL=postgresql://...
 OPENAI_API_KEY=tu_api_key_openai
-OPENAI_MODEL=gpt-5.2
+OPENAI_MODEL=gpt-5.5
 TELEGRAM_ADMIN_ID=tu_chat_id
 SANDRA_TELEGRAM_ID=chat_id_de_sandra
 PENDING_STORIES_DIR=/app/data/lore/historias/pendientes

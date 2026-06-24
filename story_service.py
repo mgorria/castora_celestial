@@ -16,7 +16,7 @@ from lore_utils import (
 
 logger = logging.getLogger("control-castora.story_service")
 
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.2")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.5")
 
 STORY_TYPE_GUIDE = """
 Tipos de historia que conviene rotar:
@@ -609,6 +609,14 @@ Reglas:
 - Este flujo tiene un solo turno de alegaciones: despues de estas alegaciones debes dictar
   sentencia final, sin pedir mas aclaraciones, salvo que Patita parezca incomoda o sea algo serio.
 - Debe valorar las alegaciones, aceptar excusas graciosas si procede y cerrar con sentencia.
+- Antes del fundamento y del fallo, el juez debe hacer una valoracion personal del caso
+  en primera persona, con 2 a 4 frases. Debe comentar los hechos, la credibilidad o gracia
+  de las alegaciones y aquello que personalmente le ha llamado la atencion.
+- Esa valoracion debe sonar propia del juez ponente: puede mostrarse conmovido, esceptico,
+  protector, sorprendido, divertido o severo segun su perfil. No debe ser una formula vacia,
+  repetir el fundamento juridico ni limitarse a decir que ha estudiado los autos.
+- La valoracion puede dirigirse brevemente a la parte acusada, pero nunca humillar ni convertir
+  el juego en un reproche real.
 - No alargues artificialmente el proceso. Debes elegir un resultado segun hechos, prueba,
   alegaciones, normativa, juez ponente y precedentes.
 - La interpretacion del Codigo Penal y la pena concreta deben depender claramente del juez
@@ -635,12 +643,15 @@ Reglas:
 - La sentencia debe mencionar al juez ponente de forma natural o en encabezado breve.
 - La condena no debe ser generica. Debe tener una accion concreta, una duracion o una formula
   de cumplimiento, salvo que el veredicto sea absolucion, archivo o advertencia sin pena.
-- Maximo 900 caracteres.
+- El campo reply debe contener solo el fundamento, el fallo, la pena y un cierre breve; la
+  aplicacion colocara delante la valoracion personal del juez.
+- Maximo 900 caracteres para reply y 450 para personal_assessment.
 
 Formato JSON exacto:
 {{
   "status": "sentence",
-  "reply": "texto que vera Patita",
+  "reply": "fundamento, fallo, pena y cierre que vera la parte acusada",
+  "personal_assessment": "valoracion personal del juez en primera persona",
   "verdict": "",
   "sentence": "",
   "judge": "{judge_name}",
@@ -650,9 +661,18 @@ Formato JSON exacto:
 Usa status "sentence" por defecto. Usa "continue" solo para pausar por prudencia si el juego parece no encajar.
 """
     data = await _generate_json(prompt)
-    reply = str(data.get("reply", "")).strip()
-    if not reply:
+    decision_text = str(data.get("reply", "")).strip()
+    personal_assessment = str(data.get("personal_assessment", "")).strip()
+    if not decision_text:
         raise StoryGenerationError("La Corte no devolvio respuesta")
+    if not personal_assessment:
+        raise StoryGenerationError("La Corte no devolvio valoracion personal del juez")
+    reply = (
+        f"JUEZ PONENTE: {judge_name}\n\n"
+        "VALORACION PERSONAL DEL JUEZ\n"
+        f"{personal_assessment}\n\n"
+        f"{decision_text}"
+    )
     status = str(data.get("status", "continue")).strip().lower()
     if status not in {"continue", "sentence"}:
         status = "continue"
@@ -662,6 +682,7 @@ Usa status "sentence" por defecto. Usa "continue" solo para pausar por prudencia
         "verdict": str(data.get("verdict", "")).strip(),
         "sentence": str(data.get("sentence", "")).strip(),
         "judge": str(data.get("judge", judge_name)).strip() or judge_name,
+        "personal_assessment": personal_assessment,
         "reason": str(data.get("reason", "")).strip(),
     }
 

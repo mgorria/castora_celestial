@@ -2106,6 +2106,7 @@ async def process_court_buffer(buffer_key: str) -> None:
         verdict = decision.get("verdict") or "resolucion afectiva sin veredicto formal"
         sentence_text = decision.get("sentence") or reply
         judge_name = decision.get("judge") or "Juez no identificado"
+        personal_assessment = decision.get("personal_assessment") or "Sin valoracion separada"
         await database.sentence_court_case(
             case_id=case["id"],
             verdict=verdict,
@@ -2119,6 +2120,7 @@ async def process_court_buffer(buffer_key: str) -> None:
                 f"{allegations_label}:\n"
                 f"{allegations_text}\n\n"
                 f"Juez ponente: {judge_name}\n"
+                f"Valoracion personal: {personal_assessment}\n"
                 f"Veredicto: {verdict}\n"
                 f"Condena: {sentence_text}\n\n"
                 "Mensaje enviado por la Corte a Patita:\n"
