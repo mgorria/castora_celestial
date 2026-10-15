@@ -7,6 +7,7 @@ El proyecto ejecuta varios bots en el mismo proceso:
 - **Oficina Castori**, el bot visible para Sandra.
 - **Mimosuga**, una tortuguita muy mayor y entrañable, figura de abuela para Sandra.
 - **Corte de Pompones y Plumas**, tribunal carinoso para juicios de broma.
+- **Doctor Salchicher**, consultorio de cuidados cotidianos y mimos.
 - **Centralita Magica**, el bot privado desde el que se envian mensajes y se reciben respuestas.
 
 La estructura esta preparada para anadir mas animales en el futuro mediante el diccionario `ANIMALS` de `main.py`.
@@ -239,6 +240,74 @@ Para consultar la ultima causa:
 ```
 
 ## Railway
+
+### Doctor Salchicher
+
+Bot: [Doctor Salchicher](https://t.me/DoctorSalchicher_bot).
+Es un personaje de cuidados generales para una persona adulta. Hace una o dos
+preguntas por turno y propone una receta de cuidados para molestias leves recientes.
+No diagnostica, receta medicamentos ni aconseja suplementos como jalea real.
+La IA selecciona preguntas y cuidados de un catalogo acotado, no envia consejos
+medicos de texto libre. Esto limita su alcance; no es un sistema de triaje validado.
+
+En el servicio **worker**, anadir:
+
+```env
+TOKEN_SALCHICHER=token_nuevo_de_BotFather
+SALCHICHER_CHAT_ID=el_mismo_id_personal_de_Patita
+SALCHICHER_IDLE_SECONDS=90
+```
+
+Reutiliza `OPENAI_API_KEY`, `OPENAI_MODEL` y el volumen `DATA_FILE` existentes.
+Opcionalmente `SALCHICHER_MODEL` permite elegir otro modelo solo para este bot.
+No requiere otra base de datos ni migraciones. Si falta el token, los otros bots
+siguen funcionando. Solo permite chats privados del propietario y de Patita:
+usa `SANDRA_TELEGRAM_ID`, o el chat conocido de Salchicher/Mimosuga/Castori.
+No vincula al primer desconocido que le escriba.
+
+Patita abre el enlace y pulsa **Iniciar**. `/start` solo notifica al administrador,
+sin saludos automaticos. Al escribir o usar `/consulta`, elige consulta privada o
+compartirla con el Oso. Luego cuenta lo que le pasa. Los mensajes se agrupan tras
+90 segundos de silencio. El bot recuerda la consulta, pregunta lo que falte y da
+cuidados sencillos cuando procede. Ante posible urgencia detectada por el filtro
+local responde inmediatamente, incluso con el modo automatico apagado. El modelo
+tambien revisa el contexto; los filtros no garantizan detectar todas las urgencias.
+
+Control Castori:
+
+```text
+/status
+/salchicher_auto on
+/salchicher_auto off
+/salchicher Un abrazo de consultorio, patita.
+```
+
+En el bot Salchicher: `/consulta`, `/ayuda` y `/olvidar`. El administrador puede
+probarlo desde su propio chat con Salchicher, sin vincular su ID como el de Patita.
+Si ella opta por compartir, Control recibe un resumen por respuesta con el bloque
+de entrada y la respuesta completa. Si elige privado no se reenvian sus textos.
+
+La memoria de consultas vive en `data.json` del volumen, separada del historial
+general, cuentos y lore. Se elimina tras 48 horas sin mensajes (limpieza periodica
+o al arrancar). `/olvidar` elimina esa memoria y cancela lo pendiente; no borra las
+copias en Telegram ni los registros que el proveedor pudiera conservar. OpenAI
+recibe los textos para responder con `store=False`; esto no equivale a una promesa
+de retencion cero del proveedor. No se imprimen sintomas ni respuestas IA en logs.
+Una consulta pendiente puede continuar tras reiniciar; no se reenvian respuestas
+ya reservadas. Un envio con resultado incierto no se repite automaticamente.
+
+Personalidad editable: `lore/personajes/doctor-salchicher.md`.
+Catalogo y limites: `salchicher_service.py`. Vida de la consulta: `salchicher.py`.
+Pruebas sin API, Telegram ni cobros: `python -m unittest discover -s tests -v`.
+
+Fuentes para el catalogo (revisadas el 15/10/2026):
+
+- [NHS: cuidados del resfriado](https://www.nhs.uk/conditions/common-cold/).
+- [NHS: dificultad para respirar](https://www.nhs.uk/symptoms/shortness-of-breath/).
+- [Comunidad de Madrid: urgencias y 112](https://www.comunidad.madrid/salud/atencion-urgencias-emergencias-sanitarias).
+- [TGA: precauciones con jalea real](https://www.tga.gov.au/resources/advertising-permissions/royal-jelly).
+
+### Despliegue general
 
 En Railway, conecta el repositorio de GitHub y configura estas variables:
 

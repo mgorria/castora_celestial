@@ -25,6 +25,7 @@ from telegram.ext import (
 )
 
 import database
+from salchicher import Salchicher
 from lore_utils import (
     read_core_lore,
     write_pending_story_markdown,
@@ -110,7 +111,14 @@ ANIMALS: dict[str, dict[str, str]] = {
         "chat_id_env": "CORTE_CHAT_ID",
         "partner_key": "corte_partner_chat_id",
         "central_command": "corte",
-    }
+    },
+    "salchicher": {
+        "display_name": "Doctor Salchicher",
+        "token_env": "TOKEN_SALCHICHER",
+        "chat_id_env": "SALCHICHER_CHAT_ID",
+        "partner_key": "salchicher_partner_chat_id",
+        "central_command": "salchicher",
+    },
 }
 
 animal_apps: dict[str, Application] = {}
@@ -121,6 +129,7 @@ auto_reply_buffers: dict[str, dict[str, Any]] = {}
 auto_reply_tasks: dict[str, asyncio.Task] = {}
 court_buffers: dict[str, dict[str, Any]] = {}
 court_tasks: dict[str, asyncio.Task] = {}
+salchicher: Salchicher | None = None
 
 COURT_DEFENSE_STYLES = {
     "deny": "niega solemnemente los hechos",
@@ -592,6 +601,7 @@ async def central_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "/alegar <texto>\n"
         "/caso_estado\n"
         "/mimosuga_auto <on|off|status>\n"
+        "/salchicher_auto <on|off>\n"
         "/status"
     )
 
@@ -656,6 +666,8 @@ async def central_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     lines.append(f"- Modo: {mode_text}")
     lines.append(f"- Espera para agrupar mensajes: {AUTO_REPLY_IDLE_SECONDS} segundos")
     lines.append(f"- Lotes esperando: {pending_batches}")
+    if salchicher:
+        lines.extend(["", salchicher.status()])
 
     lines.append("")
     lines.append("Cuentos y lore:")
@@ -1833,6 +1845,8 @@ async def send_scheduled_message(schedule: dict[str, Any]) -> bool:
 async def scheduler_loop() -> None:
     while True:
         try:
+            if salchicher:
+                salchicher.maintenance()
             if schedules_paused():
                 await asyncio.sleep(SCHEDULER_POLL_SECONDS)
                 continue
@@ -1888,6 +1902,10 @@ async def animal_start(
     if not update.effective_chat:
         return
 
+    if animal_key == "salchicher":
+        if not salchicher or not salchicher.allowed(update) or is_owner(update):
+            return
+
     chat_id = update.effective_chat.id
     already_started = has_seen_start(animal_key, chat_id) or (
         get_partner_chat_id(animal_key) == chat_id
@@ -1923,6 +1941,11 @@ async def animal_message(
     context: ContextTypes.DEFAULT_TYPE,
 ) -> None:
     if not update.effective_chat or not update.message:
+        return
+
+    if animal_key == "salchicher":
+        if salchicher:
+            await salchicher.receive(update, context)
         return
 
     partner_chat_id = get_partner_chat_id(animal_key)
@@ -2322,6 +2345,46 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
         logger.exception("No se pudo notificar el error al propietario")
 
 
+def salchicher_authorized_users() -> set[int]:
+    partner = (SANDRA_TELEGRAM_ID or get_partner_chat_id("salchicher")
+               or get_partner_chat_id("mimosuga") or get_partner_chat_id("castori"))
+    return {owner_chat_id()} | ({int(partner)} if partner else set())
+
+
+async def salchicher_send(chat_id: int, text: str) -> None:
+    app = animal_apps["salchicher"]
+    for chunk in split_telegram_text(text):
+        await app.bot.send_message(chat_id=chat_id, text=chunk)
+
+
+async def salchicher_notify(text: str) -> None:
+    if centralita_app:
+        for chunk in split_telegram_text(text):
+            await centralita_app.bot.send_message(chat_id=owner_chat_id(), text=chunk)
+
+
+async def salchicher_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logger.error("Error en Doctor Salchicher: %s", type(context.error).__name__)
+    if salchicher:
+        await salchicher.safe_notify("Ha ocurrido un error en Doctor Salchicher. "
+                                    "Los detalles de la consulta no se incluyen en el aviso.")
+
+
+async def central_salchicher_auto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not is_owner(update) or not update.effective_chat:
+        return
+    if not salchicher:
+        await update.effective_chat.send_message("Doctor Salchicher pendiente de TOKEN_SALCHICHER.")
+        return
+    action = context.args[0].lower() if context.args else "status"
+    if action in {"on", "off"}:
+        salchicher.set_enabled(action == "on")
+    elif action != "status":
+        await update.effective_chat.send_message("Uso: /salchicher_auto on|off. Estado general: /status")
+        return
+    await update.effective_chat.send_message(salchicher.status())
+
+
 def build_centralita_app() -> Application:
     app = (
         ApplicationBuilder()
@@ -2341,6 +2404,7 @@ def build_centralita_app() -> Application:
     app.add_handler(CommandHandler("pausar_programas", central_pause_schedules))
     app.add_handler(CommandHandler("reanudar_programas", central_resume_schedules))
     app.add_handler(CommandHandler("mimosuga_auto", central_mimosuga_auto))
+    app.add_handler(CommandHandler("salchicher_auto", central_salchicher_auto))
     app.add_handler(CommandHandler("acusar", central_accuse))
     app.add_handler(CommandHandler("alegar", central_court_plead))
     app.add_handler(CommandHandler("caso_estado", central_court_status))
@@ -2390,13 +2454,18 @@ def build_animal_app(animal_key: str) -> Application:
     if animal_key == "corte":
         app.add_handler(CommandHandler("acusar", court_user_accuse))
         app.add_handler(CallbackQueryHandler(court_defense_callback, pattern=r"^courtdef:"))
+    if animal_key == "salchicher" and salchicher:
+        app.add_handler(CommandHandler("consulta", salchicher.receive))
+        app.add_handler(CommandHandler("ayuda", salchicher.welcome))
+        app.add_handler(CommandHandler("olvidar", salchicher.reset))
+        app.add_handler(CallbackQueryHandler(salchicher.consent, pattern=r"^salchicher:"))
     app.add_handler(
         MessageHandler(
             filters.ALL & ~filters.COMMAND,
             lambda update, context: animal_message(animal_key, update, context),
         )
     )
-    app.add_error_handler(error_handler)
+    app.add_error_handler(salchicher_error_handler if animal_key == "salchicher" else error_handler)
     return app
 
 
@@ -2418,7 +2487,7 @@ async def stop_app(app: Application) -> None:
 
 
 async def main() -> None:
-    global centralita_app
+    global centralita_app, salchicher
 
     acquire_single_instance_lock()
     _ = owner_chat_id()
@@ -2429,6 +2498,12 @@ async def main() -> None:
         await asyncio.sleep(STARTUP_DELAY_SECONDS)
 
     await database.init_db()
+
+    if os.getenv("TOKEN_SALCHICHER"):
+        salchicher = Salchicher(
+            load_data, save_data, salchicher_authorized_users, salchicher_send, salchicher_notify,
+            idle_seconds=int(os.getenv("SALCHICHER_IDLE_SECONDS", str(AUTO_REPLY_IDLE_SECONDS))),
+        )
 
     centralita_app = build_centralita_app()
     for animal_key in ANIMALS:
@@ -2460,6 +2535,8 @@ async def main() -> None:
         await stop_event.wait()
     finally:
         scheduler_task.cancel()
+        if salchicher:
+            await salchicher.close()
         for app in reversed(apps):
             await stop_app(app)
         await database.close_db()
