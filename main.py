@@ -26,6 +26,8 @@ from telegram.ext import (
 
 import database
 from salchicher import Salchicher
+from vaca import Vaca
+from vaca_campaigns import VacaCampaigns
 from lore_utils import (
     read_core_lore,
     write_pending_story_markdown,
@@ -119,6 +121,13 @@ ANIMALS: dict[str, dict[str, str]] = {
         "partner_key": "salchicher_partner_chat_id",
         "central_command": "salchicher",
     },
+    "vaca": {
+        "display_name": "Vaca Mágica",
+        "token_env": "TOKEN_VACA",
+        "chat_id_env": "VACA_CHAT_ID",
+        "partner_key": "vaca_partner_chat_id",
+        "central_command": "vaca",
+    },
 }
 
 animal_apps: dict[str, Application] = {}
@@ -130,6 +139,8 @@ auto_reply_tasks: dict[str, asyncio.Task] = {}
 court_buffers: dict[str, dict[str, Any]] = {}
 court_tasks: dict[str, asyncio.Task] = {}
 salchicher: Salchicher | None = None
+vaca: Vaca | None = None
+vaca_campaigns: VacaCampaigns | None = None
 
 COURT_DEFENSE_STYLES = {
     "deny": "niega solemnemente los hechos",
@@ -235,10 +246,14 @@ def load_data() -> dict[str, Any]:
 
 
 def save_data(data: dict[str, Any]) -> None:
-    DATA_FILE.write_text(
+    # All writers run synchronously on the same event loop. Replace atomically so
+    # a restart cannot leave half a wishlist or half a reserved delivery on disk.
+    temporary = DATA_FILE.with_name(DATA_FILE.name + ".tmp")
+    temporary.write_text(
         json.dumps(data, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    temporary.replace(DATA_FILE)
 
 
 def get_partner_chat_id(animal_key: str) -> int | None:
@@ -602,6 +617,7 @@ async def central_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "/caso_estado\n"
         "/mimosuga_auto <on|off|status>\n"
         "/salchicher_auto <on|off>\n"
+        "/vaca_ayuda (deseos, pistas y visitas privadas)\n"
         "/status"
     )
 
@@ -668,6 +684,8 @@ async def central_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     lines.append(f"- Lotes esperando: {pending_batches}")
     if salchicher:
         lines.extend(["", salchicher.status()])
+    if vaca:
+        lines.extend(["", vaca.status()])
 
     lines.append("")
     lines.append("Cuentos y lore:")
@@ -712,6 +730,8 @@ async def central_history(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     animal_key = context.args[0].lower()
+    if animal_key == "vaca" and not is_private_owner(update):
+        return
     if animal_key not in ANIMALS:
         await update.effective_chat.send_message(
             "Animal no reconocido. Disponibles: " + ", ".join(sorted(ANIMALS))
@@ -754,6 +774,13 @@ async def central_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     animal_key = context.args[0].lower()
+    if animal_key == "vaca":
+        if is_private_owner(update):
+            await update.effective_chat.send_message(
+                "Las visitas de la Vaca se preparan con /vaca_visita "
+                "DD/MM/AAAA HH:MM | regalos. Consulta /vaca_ayuda."
+            )
+        return
     if animal_key not in ANIMALS:
         await update.effective_chat.send_message(
             "Animal no reconocido. Disponibles: " + ", ".join(sorted(ANIMALS))
@@ -1784,6 +1811,8 @@ async def send_as_animal(
 ) -> None:
     if not update.effective_chat or not update.message or not is_owner(update):
         return
+    if animal_key == "vaca" and not is_private_owner(update):
+        return
 
     command = ANIMALS[animal_key]["central_command"]
     text = " ".join(context.args).strip()
@@ -1792,6 +1821,8 @@ async def send_as_animal(
         return
 
     partner_chat_id = get_partner_chat_id(animal_key)
+    if animal_key == "vaca":
+        partner_chat_id = vaca_recipient()
     if not partner_chat_id:
         await update.effective_chat.send_message(
             f"Todavia no tengo el chat_id de {ANIMALS[animal_key]['display_name']}. "
@@ -1807,9 +1838,12 @@ async def send_as_animal(
         )
         return
 
-    await animal_app.bot.send_chat_action(partner_chat_id, ChatAction.TYPING)
-    await animal_app.bot.send_message(chat_id=partner_chat_id, text=text)
-    append_history(animal_key, "out", text)
+    if animal_key == "vaca":
+        await vaca_send_public(partner_chat_id, text)
+    else:
+        await animal_app.bot.send_chat_action(partner_chat_id, ChatAction.TYPING)
+        await animal_app.bot.send_message(chat_id=partner_chat_id, text=text)
+        append_history(animal_key, "out", text)
     await update.effective_chat.send_message(
         f"Enviado desde {ANIMALS[animal_key]['display_name']}."
     )
@@ -1847,6 +1881,10 @@ async def scheduler_loop() -> None:
         try:
             if salchicher:
                 salchicher.maintenance()
+            if vaca:
+                vaca.maintenance()
+            if vaca_campaigns:
+                await vaca_campaigns.tick()
             if schedules_paused():
                 await asyncio.sleep(SCHEDULER_POLL_SECONDS)
                 continue
@@ -1901,6 +1939,18 @@ async def animal_start(
 ) -> None:
     if not update.effective_chat:
         return
+    if animal_key == "vaca":
+        if not vaca or not vaca.allowed(update):
+            return
+        chat_id = update.effective_chat.id
+        if not is_owner(update):
+            first_start = not has_seen_start("vaca", chat_id)
+            set_partner_chat_id("vaca", chat_id)
+            mark_seen_start("vaca", chat_id)
+            if first_start:
+                await notify_animal_ready("vaca", chat_id)
+        await vaca.welcome(update, context)
+        return
 
     if animal_key == "salchicher":
         if not salchicher or not salchicher.allowed(update) or is_owner(update):
@@ -1941,6 +1991,10 @@ async def animal_message(
     context: ContextTypes.DEFAULT_TYPE,
 ) -> None:
     if not update.effective_chat or not update.message:
+        return
+    if animal_key == "vaca":
+        if vaca:
+            await vaca.receive(update, context)
         return
 
     if animal_key == "salchicher":
@@ -2335,6 +2389,10 @@ async def process_auto_reply_buffer(buffer_key: str) -> None:
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = getattr(update, "message", None)
+    if message and (getattr(message, "text", None) or "").lstrip().lower().startswith("/vaca"):
+        await vaca_error_handler(update, context)
+        return
     logger.exception("Error gestionando update %s", update, exc_info=context.error)
     try:
         await context.bot.send_message(
@@ -2385,6 +2443,119 @@ async def central_salchicher_auto(update: Update, context: ContextTypes.DEFAULT_
     await update.effective_chat.send_message(salchicher.status())
 
 
+def is_private_owner(update: Update) -> bool:
+    return bool(is_owner(update) and update.effective_chat
+                and update.effective_chat.type == "private"
+                and update.effective_chat.id == owner_chat_id())
+
+
+def vaca_partner_id() -> int | None:
+    value = (SANDRA_TELEGRAM_ID or get_partner_chat_id("vaca")
+             or get_partner_chat_id("mimosuga") or get_partner_chat_id("castori"))
+    partner = int(value) if value else None
+    return partner if partner != owner_chat_id() else None
+
+
+def vaca_authorized_users() -> set[int]:
+    partner = vaca_partner_id()
+    return {owner_chat_id()} | ({partner} if partner else set())
+
+
+def vaca_recipient() -> int | None:
+    partner = vaca_partner_id()
+    # Configuring a Telegram ID is not proof she opened this particular bot.
+    if partner and get_partner_chat_id("vaca") == partner and has_seen_start("vaca", partner):
+        return partner
+    return None
+
+
+async def vaca_send(chat_id: int, text: str) -> None:
+    if chat_id not in vaca_authorized_users():
+        raise ValueError("Destinatario de Vaca no autorizado")
+    for chunk in split_telegram_text(text):
+        await animal_apps["vaca"].bot.send_message(chat_id=chat_id, text=chunk)
+
+
+async def vaca_notify(text: str) -> None:
+    if centralita_app:
+        for chunk in split_telegram_text(text):
+            await centralita_app.bot.send_message(chat_id=owner_chat_id(), text=chunk)
+
+
+async def vaca_send_public(chat_id: int, text: str) -> None:
+    """Only successfully sent text crosses from the private plan into conversation."""
+    await vaca_send(chat_id, text)
+    if vaca:
+        vaca.remember_outgoing(chat_id, text)
+    append_history("vaca", "out", text)
+
+
+async def vaca_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logger.error("Error en Vaca Magica: %s", type(context.error).__name__)
+    try:
+        await vaca_notify("Ha ocurrido un error en la Vaca Mágica. "
+                          "Revisa /vaca_visitas y /status. No se incluyen regalos en los logs.")
+    except Exception:
+        logger.error("No se pudo notificar un error de Vaca")
+
+
+VACA_CAMPAIGN_COMMANDS = (
+    "vaca_visita", "vaca_visitas", "vaca_activar", "vaca_texto", "vaca_hora",
+    "vaca_fecha", "vaca_cancelar", "vaca_pausa",
+)
+
+
+async def central_vaca(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not is_private_owner(update) or not update.message:
+        return
+    command = (update.message.text or "").split()[0].split("@")[0].lower()
+    if command == "/vaca_ayuda":
+        await update.effective_chat.send_message(
+            "Vaca Mágica · control privado\n\n"
+            "/vaca <mensaje> — hablar como la Vaca\n"
+            "/vaca_deseos — cuaderno de Patita\n"
+            "/vaca_auto on|off|status — conversación\n\n"
+            "/vaca_visita DD/MM/AAAA HH:MM | regalos\n"
+            "Crea un borrador con pistas y buenos días. La hora corresponde a la "
+            "mañana en que los regalos estarán bajo el árbol (Europe/Madrid por defecto).\n"
+            "/vaca_visitas [ID] — revisar fechas y textos\n"
+            "/vaca_texto ID EVENTO | texto\n"
+            "/vaca_hora ID EVENTO DD/MM/AAAA HH:MM\n"
+            "/vaca_fecha ID DD/MM/AAAA HH:MM — cambiar la entrega\n"
+            "EVENTO: pista1, pista2 o manana.\n"
+            "/vaca_activar ID — activar el borrador revisado\n"
+            "/vaca_cancelar ID\n"
+            "/vaca_pausa on|off — pausar o reanudar visitas\n\n"
+            "Las pistas iniciales van 3 días y 1 día antes a las 18:00, si quedan "
+            "en el futuro y dentro de diciembre. Al activar, autorizas esos textos "
+            "y fechas: el saludo asume que has colocado los regalos. Cambiar una "
+            "visita exige volver a activarla. Los envíos con más de 2 horas de "
+            "retraso caducan; un envío incierto no se repite.\n\n"
+            "Patita debe iniciar su bot. Tú puedes probarlo desde tu propio chat "
+            "sin modificar su cuaderno. /pausar_programas detiene también las visitas."
+        )
+        return
+    if not vaca or not vaca_campaigns:
+        await update.effective_chat.send_message("Vaca pendiente de TOKEN_VACA. Consulta /vaca_ayuda.")
+        return
+    if command == "/vaca_deseos":
+        partner = vaca_partner_id()
+        text = vaca.format_wishlist(partner) if partner else "Configura SANDRA_TELEGRAM_ID primero."
+        for chunk in split_telegram_text(text):
+            await update.effective_chat.send_message(chunk)
+        return
+    if command == "/vaca_auto":
+        action = context.args[0].lower() if context.args else "status"
+        if action in {"on", "off"}:
+            vaca.set_enabled(action == "on")
+        elif action != "status":
+            await update.effective_chat.send_message("Uso: /vaca_auto on|off|status")
+            return
+        await update.effective_chat.send_message(vaca.status())
+        return
+    await vaca_campaigns.handle_admin(update, context)
+
+
 def build_centralita_app() -> Application:
     app = (
         ApplicationBuilder()
@@ -2405,6 +2576,8 @@ def build_centralita_app() -> Application:
     app.add_handler(CommandHandler("reanudar_programas", central_resume_schedules))
     app.add_handler(CommandHandler("mimosuga_auto", central_mimosuga_auto))
     app.add_handler(CommandHandler("salchicher_auto", central_salchicher_auto))
+    for command in (*VACA_CAMPAIGN_COMMANDS, "vaca_ayuda", "vaca_deseos", "vaca_auto"):
+        app.add_handler(CommandHandler(command, central_vaca))
     app.add_handler(CommandHandler("acusar", central_accuse))
     app.add_handler(CommandHandler("alegar", central_court_plead))
     app.add_handler(CommandHandler("caso_estado", central_court_status))
@@ -2459,13 +2632,21 @@ def build_animal_app(animal_key: str) -> Application:
         app.add_handler(CommandHandler("ayuda", salchicher.welcome))
         app.add_handler(CommandHandler("olvidar", salchicher.reset))
         app.add_handler(CallbackQueryHandler(salchicher.consent, pattern=r"^salchicher:"))
+    if animal_key == "vaca" and vaca:
+        for command in ("lista", "pedir", "quitar", "favorito", "olvidar"):
+            app.add_handler(CommandHandler(command, vaca.receive))
+        app.add_handler(CommandHandler("ayuda", vaca.receive))
     app.add_handler(
         MessageHandler(
             filters.ALL & ~filters.COMMAND,
             lambda update, context: animal_message(animal_key, update, context),
         )
     )
-    app.add_error_handler(salchicher_error_handler if animal_key == "salchicher" else error_handler)
+    if animal_key == "vaca" and vaca:
+        # Unknown commands must never route through another animal or expose admin help.
+        app.add_handler(MessageHandler(filters.COMMAND, vaca.receive))
+    handler = {"salchicher": salchicher_error_handler, "vaca": vaca_error_handler}.get(animal_key, error_handler)
+    app.add_error_handler(handler)
     return app
 
 
@@ -2487,7 +2668,7 @@ async def stop_app(app: Application) -> None:
 
 
 async def main() -> None:
-    global centralita_app, salchicher
+    global centralita_app, salchicher, vaca, vaca_campaigns
 
     acquire_single_instance_lock()
     _ = owner_chat_id()
@@ -2504,6 +2685,12 @@ async def main() -> None:
             load_data, save_data, salchicher_authorized_users, salchicher_send, salchicher_notify,
             idle_seconds=int(os.getenv("SALCHICHER_IDLE_SECONDS", str(AUTO_REPLY_IDLE_SECONDS))),
         )
+    if os.getenv("TOKEN_VACA"):
+        vaca = Vaca(load_data, save_data, vaca_authorized_users, vaca_send, vaca_notify,
+                    idle_seconds=int(os.getenv("VACA_IDLE_SECONDS", "20")))
+        vaca_campaigns = VacaCampaigns(load_data, save_data, vaca_recipient,
+                                       vaca_send_public, vaca_notify, APP_TIMEZONE,
+                                       paused=schedules_paused)
 
     centralita_app = build_centralita_app()
     for animal_key in ANIMALS:
@@ -2535,6 +2722,9 @@ async def main() -> None:
         await stop_event.wait()
     finally:
         scheduler_task.cancel()
+        await asyncio.gather(scheduler_task, return_exceptions=True)
+        if vaca:
+            await vaca.close()
         if salchicher:
             await salchicher.close()
         for app in reversed(apps):

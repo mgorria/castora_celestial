@@ -307,6 +307,126 @@ Fuentes para el catalogo (revisadas el 15/10/2026):
 - [Comunidad de Madrid: urgencias y 112](https://www.comunidad.madrid/salud/atencion-urgencias-emergencias-sanitarias).
 - [TGA: precauciones con jalea real](https://www.tga.gov.au/resources/advertising-permissions/royal-jelly).
 
+### Vaca Mágica
+
+La Vaca habla con Patita, guarda su lista de ilusiones y prepara mensajes para las
+visitas sorpresa de diciembre. Tiene una voz cariñosa y traviesa, con expresiones
+como «muuuuy» y «muuuucho». Apuntar un deseo nunca promete que vaya a recibirlo.
+
+En el servicio **worker**, configurar:
+
+```env
+TOKEN_VACA=token_nuevo_de_BotFather
+VACA_CHAT_ID=el_id_personal_de_Patita
+VACA_IDLE_SECONDS=20
+```
+
+Reutiliza `OPENAI_API_KEY`, `OPENAI_MODEL`, `APP_TIMEZONE` (por defecto
+`Europe/Madrid`) y el volumen `DATA_FILE`. `VACA_MODEL` permite elegir otro modelo
+para la Vaca. No requiere otra base de datos ni migraciones. Si falta `TOKEN_VACA`,
+este bot no se inicia y los demás siguen funcionando.
+
+Patita debe abrir el bot y pulsar **Iniciar** antes de activar visitas. La vinculación
+se limita a su identidad conocida: `SANDRA_TELEGRAM_ID`, el ID configurado de Vaca o
+el chat conocido de Mimosuga/Castori. Solo se aceptan chats privados de Patita y del
+propietario; no se vincula a un desconocido que escriba primero. Las pruebas del
+propietario mantienen una lista independiente.
+
+Patita puede decir «apúntame unas botas negras», corregir «mejor en talla 38», pedir
+que quite algo o consultar sus deseos. Si comenta que algo le gusta sin pedirlo,
+la Vaca pide aclaración antes de modificar la lista. La conversación se agrupa tras
+`VACA_IDLE_SECONDS` segundos de silencio. También dispone de comandos directos:
+
+```text
+/ayuda
+/lista
+/pedir botas negras talla 38 https://ejemplo.com/botas
+/quitar w1
+/favorito w1
+/olvidar
+```
+
+`/favorito` pone o retira la estrella. `/olvidar` borra la memoria de conversación y
+cancela su respuesta pendiente, conservando la lista; no borra mensajes de Telegram.
+La lista admite hasta 60 deseos y conserva los enlaces y preferencias que facilite
+Patita. La ayuda explica que el Oso puede consultar esa lista para preparar sorpresas.
+
+Desde el chat **privado** del propietario con Control Castori:
+
+```text
+/vaca_ayuda
+/vaca_deseos
+/vaca_auto on
+/vaca_auto off
+/vaca_auto status
+/vaca Un abrazo de pezuñas, patita.
+/vaca_visita 15/12/2026 08:30 | un libro de ilustraciones y unos calcetines suaves
+```
+
+`/vaca_visita` prepara un borrador privado con los regalos, fechas y los tres textos.
+Por defecto hay una pista tres días antes a las 18:00, otra el día anterior a las
+18:00 y el mensaje de la mañana a la hora indicada. Las pistas que ya hayan pasado
+o caigan fuera de diciembre se omiten; una visita próxima puede tener solo el mensaje
+de la mañana. La entrega y cualquier horario editado deben ser futuros y de diciembre.
+
+Revisar el borrador y activarlo con su ID:
+
+```text
+/vaca_visitas
+/vaca_visitas ID
+/vaca_activar ID
+```
+
+Hasta activar, no se envía ningún mensaje de esa visita. La mañana presupone que el
+propietario habrá colocado los regalos para la fecha planificada: el bot no verifica
+una entrega física ni exige otra confirmación cada noche. El generador de pistas
+recibe los regalos para redactar el borrador privado, que debe revisarse antes de
+activarlo. La conversación de Patita no recibe los regalos ni las fechas pendientes.
+
+Para ajustar una visita, los eventos se llaman `pista1`, `pista2` y `manana`:
+
+```text
+/vaca_texto ID pista1 | He encontrado una cinta con un secreto de pezuña.
+/vaca_hora ID pista1 12/12/2026 19:00
+/vaca_fecha ID 20/12/2026 08:30
+/vaca_cancelar ID
+/vaca_pausa on
+/vaca_pausa off
+```
+
+Cambiar un texto o una hora devuelve la visita a borrador y requiere activarla de
+nuevo. `/vaca_fecha` cambia la entrega y recalcula las pistas pendientes, conservando
+los textos y lo ya enviado. Para mover la entrega a otro año se debe usar ese comando,
+no `/vaca_hora`. Un mensaje enviado o de resultado incierto no se modifica ni reenvía.
+La cancelación conserva ese historial. `/vaca_pausa` afecta a todas las visitas; la
+pausa global `/pausar_programas` también impide sus envíos. `/vaca_auto` controla la
+conversación, de forma independiente de las visitas. Usar `/vaca_visita` para estas
+entregas: el comando genérico `/programar vaca` está deshabilitado.
+
+Cada visita activa conserva el destinatario vinculado en ese momento. Si cambia,
+vuelve a borrador para revisarla. Los mensajes vencidos hace más de dos horas caducan
+y se avisa al propietario una sola vez. Se reserva cada envío antes de contactar con
+Telegram; tras un timeout, error o reinicio ambiguo no se reintenta automáticamente.
+Conviene comprobar el chat antes de decidir si hace falta otro mensaje.
+
+Los deseos y la conversación viven en `data.json`, separados del registro privado
+`vaca_campaigns`, que contiene regalos, fechas y borradores. No se incorpora ese
+registro secreto al contexto de la IA conversacional, al lore general ni al historial
+de Patita. Los comandos de gestión se limitan al propietario en chat privado y los
+errores no imprimen regalos ni respuestas completas en logs. Los datos permanecen
+en el volumen: la separación de contexto no cifra el archivo. Las llamadas a OpenAI
+usan `store=False`, sin prometer retención cero por parte del proveedor.
+
+Personalidad: `lore/personajes/vaca-magica.md`. IA y validación de operaciones:
+`vaca_service.py`. Conversación y deseos: `vaca.py`. Visitas: `vaca_campaigns.py`.
+La respuesta estructurada sigue la documentación de
+[Structured Outputs de OpenAI](https://developers.openai.com/api/docs/guides/structured-outputs?api-mode=responses).
+
+Pruebas con servicios simulados, sin mensajes reales ni llamadas a la API:
+`python -m unittest discover -s tests -v`. Cubren deseos, permisos, aislamiento de
+secretos, fechas Madrid/UTC, borradores, cancelación, reprogramación, caducidad y
+resultados de envío inciertos.
+
 ### Despliegue general
 
 En Railway, conecta el repositorio de GitHub y configura estas variables:

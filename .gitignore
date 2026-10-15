@@ -1,8 +1,10 @@
 __pycache__/
 *.py[cod]
 .venv/
+.test-deps/
 venv/
 .env
 data.json
+data.json.tmp
 .idea/
 .vscode/
