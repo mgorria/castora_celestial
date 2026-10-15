@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 from salchicher import Salchicher, RETENTION_SECONDS
 from salchicher_service import EMERGENCY_TEXT, PROFESSIONAL_TEXT, UNAVAILABLE_TEXT, render_decision, urgent_signal
+from salchicher_service import generate_care_reply
 
 
 def update(text="hola", user_id=1, chat_type="private"):
@@ -49,6 +50,25 @@ class ServiceTests(unittest.TestCase):
 
     def test_emergency_not_replaced_by_care(self):
         self.assertEqual(render_decision({"action": "emergency", "care": ["honey"]}, [])[0], EMERGENCY_TEXT)
+
+
+class ProviderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_json_mode_requirement_and_storage_disabled(self):
+        import os
+        from unittest.mock import MagicMock
+        async def provider(**kwargs):
+            self.assertIn("json", kwargs["input"].lower())
+            self.assertFalse(kwargs["store"])
+            return SimpleNamespace(output_text='{"action":"ask","questions":["duration"]}')
+        client = MagicMock()
+        client.responses.create = AsyncMock(side_effect=provider)
+        manager = MagicMock()
+        manager.__aenter__ = AsyncMock(return_value=client)
+        manager.__aexit__ = AsyncMock(return_value=False)
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "synthetic"}), \
+             patch("salchicher_service.AsyncOpenAI", return_value=manager):
+            reply, questions = await generate_care_reply([{"role": "user", "content": "mocos"}], [])
+        self.assertEqual(questions, ["duration"])
 
 
 class ConversationTests(unittest.IsolatedAsyncioTestCase):
