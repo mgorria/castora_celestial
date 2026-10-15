@@ -165,7 +165,7 @@ Ejemplo de formato: {"action":"ask","questions":["duration","severity"],"care":[
         response = await client.responses.create(
             model=os.getenv("SALCHICHER_MODEL") or os.getenv("OPENAI_MODEL", "gpt-5.5"),
             instructions=instructions,
-            input=json.dumps(payload, ensure_ascii=False),
+            input="Analiza estos datos y devuelve el JSON solicitado.\n" + json.dumps(payload, ensure_ascii=False),
             text={"format": {"type": "json_object"}},
             store=False,
         )
