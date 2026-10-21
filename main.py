@@ -2780,9 +2780,21 @@ async def main() -> None:
         admin_provider = AdminService(load_data, lambda: animal_apps, get_partner_chat_id,
             owner_chat_id, admin_chat_id, get_admin_app=lambda: centralita_app,
             next_schedule_time=next_schedule_time, timezone=APP_TIMEZONE, get_vaca_partner=vaca_partner_id)
+        accounts = None
+        portal_origin = os.getenv("CASTORI_PORTAL_ORIGIN")
+        if portal_origin:
+            from account_service import AccountService
+            accounts = AccountService(resolve_web_actor)
+            try:
+                await accounts.initialize()
+            except Exception as exc:
+                # A portal outage must not stop the established Telegram services.
+                logger.warning("Portal de cuentas no disponible: %s", type(exc).__name__)
+                accounts = None
         web_bridge = WebBridge(load_data, save_data, lambda: animal_apps, resolve_web_actor,
             history_provider=history_provider, get_admin_app=lambda: centralita_app,
-            admin_state_provider=admin_provider, admin_actor_id=admin_chat_id)
+            admin_state_provider=admin_provider, admin_actor_id=admin_chat_id,
+            account_service=accounts, portal_origin=portal_origin)
 
     if os.getenv("TOKEN_SALCHICHER"):
         salchicher = Salchicher(

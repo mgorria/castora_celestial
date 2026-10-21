@@ -27,6 +27,7 @@ import time
 from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Callable
+from urllib.parse import quote
 from uuid import uuid4
 
 from aiohttp import web
@@ -92,7 +93,8 @@ class WebBridge:
                  resolve_actor: Callable, token: str | None = None,
                  allowed_origin: str | None = None, state_provider: Callable | None = None,
                  history_provider=None, get_admin_app: Callable | None = None,
-                 admin_state_provider: Callable | None = None, admin_actor_id: Callable | None = None):
+                 admin_state_provider: Callable | None = None, admin_actor_id: Callable | None = None,
+                 account_service=None, portal_origin: str | None = None, portal_root=None):
         self.load, self.save = load, save
         self.get_apps, self.resolve_actor = get_apps, resolve_actor
         self.token = token if token is not None else os.getenv("CASTORI_WEB_TOKEN", "")
@@ -102,6 +104,14 @@ class WebBridge:
         self.get_admin_app = get_admin_app or (lambda: None)
         self.admin_state_provider = admin_state_provider
         self.admin_actor_id = admin_actor_id
+        self.account_service = account_service
+        self.portal = None
+        if portal_origin:
+            from portal import Portal
+            try:
+                self.portal = Portal(self, account_service, portal_origin, root=portal_root)
+            except ValueError:
+                logger.warning("Portal desactivado: origen HTTPS no valido")
         # Centralita can contain gifts and consented health notifications. Its
         # display buffer is deliberately never persisted or sent to HistoryService.
         self.admin_events = []
@@ -556,9 +566,45 @@ class WebBridge:
         finally:
             self._set_status(key, status)
 
+    async def _admin_invitation(self, request):
+        if not self._admin_authorized(request):
+            return _failure("owner_required", 403)
+        if self.account_service is None or self.portal is None:
+            return _failure("portal_unavailable", 503)
+        from account_service import AccountError
+        try:
+            if request.query:
+                return _failure("invalid_query")
+            if request.method == "GET":
+                result = await self.account_service.invitation_status()
+            else:
+                if request.content_type != "application/json":
+                    return _failure("json_required", 415)
+                try:
+                    body = await request.json()
+                except (ValueError, UnicodeError):
+                    return _failure("invalid_body")
+                if (not isinstance(body, dict) or set(body) != {"action"} or not isinstance(body["action"], str)
+                        or body["action"] not in {"create", "reset", "revoke"}):
+                    return _failure("invalid_body")
+                if body["action"] == "revoke":
+                    await self.account_service.revoke_invitation()
+                    result = await self.account_service.invitation_status()
+                else:
+                    result = await self.account_service.create_invitation(reset=body["action"] == "reset")
+                    result["invite_url"] = self.portal.origin + "/castori/#invite/" + quote(result["code"], safe="")
+            result["portal_url"] = self.portal.origin + "/castori/"
+            if isinstance(result.get("expires_at"), datetime):
+                result["expires_at"] = result["expires_at"].isoformat()
+            return web.json_response(result)
+        except AccountError as exc:
+            return _failure(exc.code, exc.status)
+
     def create_app(self) -> web.Application:
         @web.middleware
         async def authentication(request, handler):
+            if self.portal and self.portal.handles(request):
+                return await self.portal.authenticate(request, handler)
             if request.path == "/castori-web/health" and request.method == "GET":
                 return await handler(request)
             supplied = request.headers.get("Authorization", "")
@@ -596,6 +642,10 @@ class WebBridge:
         app.router.add_get("/castori-web/admin-events", self._admin_events)
         app.router.add_post("/castori-web/admin-action", self._admin_action)
         app.router.add_post("/castori-web/admin-callback", self._admin_callback)
+        app.router.add_get("/castori-web/admin-invitation", self._admin_invitation)
+        app.router.add_post("/castori-web/admin-invitation", self._admin_invitation)
+        if self.portal:
+            self.portal.install(app)
         return app
 
     async def start(self, host="127.0.0.1", port=8080) -> None:

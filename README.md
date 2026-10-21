@@ -490,6 +490,10 @@ No subas nunca el archivo `.env` ni `data.json` al repositorio. Ya estan incluid
 
 `web_bridge.py` añade un transporte autenticado dentro del proceso existente. Se activa sólo al configurar `CASTORI_WEB_TOKEN`; sin esa variable Telegram sigue funcionando como antes. `CASTORI_WEB_HOST` por defecto escucha sólo en loopback y `PORT` por defecto es 8080. En Railway usar `0.0.0.0` y un endpoint HTTPS dirigido a ese puerto.
 
+`CASTORI_PORTAL_ORIGIN` habilita el portal propio de Sandra en ese origen HTTPS. `portal.py` sirve únicamente `portal_web/` y las APIs de cuenta; su cookie siempre representa a Sandra y nunca autentica Centralita. `account_service.py` guarda en PostgreSQL cuentas Argon2id, hashes de invitaciones de un uso con 48 horas y sesiones revocables de siete días. El panel privado de Miguel crea/revoca invitaciones mediante `/castori-web/admin-invitation`. Una invitación de recuperación requiere el usuario original, cambia su contraseña e invalida las sesiones previas. El origen de los POST se compara con la configuración fija, sin confiar en Host ni X-Forwarded-Host. No hay registro abierto ni rol elegido por el navegador.
+
+Los archivos públicos se sincronizan desde el Site con `node sites/oficina-castori/scripts/prepare-portal.mjs` antes del despliegue. No copiar fuentes del bot, configuración ni datos a `portal_web/`.
+
 El proxy privado de Sites valida la cuenta de ChatGPT y envía el rol `owner` o `sandra`; `resolve_web_actor` lo vincula con la identidad ya configurada. Nunca se admiten IDs de usuario/chat enviados por el navegador. El token es servidor a servidor y debe ser aleatorio, independiente de los tokens de Telegram.
 
 Los handlers, base de datos, historial, revisiones de Centralita, colas y scheduler se reutilizan. Las salidas exitosas de Telegram aparecen en la web con sus teclados; la web admite los comandos y callbacks correspondientes. El espejo conserva hasta 200 eventos por conversación; el archivo duradero conserva los mensajes nuevos fuera de ese límite. Los últimos 1000 recibos evitan reejecutar una misma solicitud. Los envíos inciertos no se reintentan automáticamente.
