@@ -485,3 +485,25 @@ Al arrancar, el bot crea automaticamente las tablas necesarias si `DATABASE_URL`
 ## Nota de seguridad
 
 No subas nunca el archivo `.env` ni `data.json` al repositorio. Ya estan incluidos en `.gitignore`.
+
+## Interfaz web opcional
+
+`web_bridge.py` añade un transporte autenticado dentro del proceso existente. Se activa sólo al configurar `CASTORI_WEB_TOKEN`; sin esa variable Telegram sigue funcionando como antes. `CASTORI_WEB_HOST` por defecto escucha sólo en loopback y `PORT` por defecto es 8080. En Railway usar `0.0.0.0` y un endpoint HTTPS dirigido a ese puerto.
+
+El proxy privado de Sites valida la cuenta de ChatGPT y envía el rol `owner` o `sandra`; `resolve_web_actor` lo vincula con la identidad ya configurada. Nunca se admiten IDs de usuario/chat enviados por el navegador. El token es servidor a servidor y debe ser aleatorio, independiente de los tokens de Telegram.
+
+Los handlers, base de datos, historial, revisiones de Centralita, colas y scheduler se reutilizan. Las salidas exitosas de Telegram aparecen en la web con sus teclados; la web admite los comandos y callbacks correspondientes. El espejo conserva hasta 200 eventos por conversación; el archivo duradero conserva los mensajes nuevos fuera de ese límite. Los últimos 1000 recibos evitan reejecutar una misma solicitud. Los envíos inciertos no se reintentan automáticamente.
+
+`history_service.py` inicializa una instantánea del historial legado antes de arrancar el polling. Recupera sólo los mensajes aún conservados cuya identidad se pueda atribuir a la sesión y las respuestas de Mimosuga confirmadas como enviadas. La biblioteca consulta el texto completo de los cuentos de Mimosuga con destinatario y entrega confirmados, independientemente de su estado editorial. Las rutas autenticadas `/history`, `/stories` y `/story` admiten paginación y sólo leen la identidad resuelta en servidor. No existe una importación general del historial de Telegram: los mensajes ya descartados requieren una fuente adicional.
+
+Los eventos nuevos, salvo Salchicher, se encolan en `data.json` antes de recortar el espejo y se archivan de forma idempotente en PostgreSQL. Una caída de la base de datos conserva la cola para reintentar sin reenviar mensajes a Telegram. `/olvidar` de la Vaca incrementa una época persistente, limpia el historial local y borra el archivo anterior cuando la base vuelve a estar disponible; la época impide que los mensajes olvidados reaparezcan. Sus deseos siguen en su almacenamiento propio.
+
+Salchicher sólo guarda texto de usuario después del consentimiento. Su espejo caduca en un máximo de 48 horas y se purga al caducar la consulta o usar `/olvidar`. Las sesiones del propietario y Sandra permanecen separadas. La vista de Sandra nunca recibe planes privados de regalos ni acceso administrativo. Dulcimiel todavía no tiene servicio implementado.
+
+### Centralita en la web
+
+`admin_service.py` proporciona una vista explícita del estado administrativo, sin secretos ni consultas privadas de Salchicher. Las rutas `/admin-state`, `/admin-events`, `/admin-action` y `/admin-callback` requieren el rol propietario y su identidad Telegram resuelta en servidor. Las acciones pasan por los handlers de la Centralita existente, en el mismo proceso y con los mismos datos. `TELEGRAM_ADMIN_ID` no se suplanta: si difiere de `MI_CHAT_ID`, las funciones de revisión reservadas a ese administrador quedan deshabilitadas en la web.
+
+El bot de Centralita refleja mensajes, teclados y resultados en un registro separado en RAM (200 eventos, 48 horas). No se archiva en PostgreSQL ni en el historial de Sandra. El cursor incluye una identidad de arranque para que el navegador descarte datos tras un reinicio. Los recibos persistentes evitan repetir acciones y permiten consultar resultados inciertos sin reenviar. `/mimosuga_pendientes [ID]` vuelve a mostrar propuestas pendientes y sus controles originales; consultar el estado del panel nunca envía mensajes.
+
+Pruebas offline: `python -m unittest discover -s tests -q`. Los tests de web utilizan HTTP local y Telegram/OpenAI simulados. La activación de la configuración en producción está pendiente de autorización.

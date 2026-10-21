@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from salchicher import Salchicher, RETENTION_SECONDS
-from salchicher_service import EMERGENCY_TEXT, PROFESSIONAL_TEXT, UNAVAILABLE_TEXT, render_decision, urgent_signal
+from salchicher_service import COMFORT_TEXT, EMERGENCY_TEXT, PROFESSIONAL_TEXT, UNAVAILABLE_TEXT, render_decision, urgent_signal
 from salchicher_service import generate_care_reply
 
 
@@ -51,8 +51,46 @@ class ServiceTests(unittest.TestCase):
     def test_emergency_not_replaced_by_care(self):
         self.assertEqual(render_decision({"action": "emergency", "care": ["honey"]}, [])[0], EMERGENCY_TEXT)
 
+    def test_comfort_does_not_send_model_medical_text_or_assume_mild_symptoms(self):
+        reply, questions = render_decision({
+            "action": "comfort", "category": "abdominal_pain", "questions": ["severity"],
+            "care": ["honey", "jalea_real"], "reply": "Es una molestia leve: toma jalea real.",
+        }, ["duration"])
+        self.assertEqual(reply, COMFORT_TEXT)
+        self.assertEqual(questions, [])
+        self.assertRegex(reply, r"imaginari[oa]")
+        self.assertIn("forma de achuchón", reply)
+        self.assertIn("Si la molestia sigue, empeora o te preocupa", reply)
+        self.assertNotIn("leve", reply)
+        self.assertNotIn("jalea", reply)
+
+    def test_comfort_does_not_expand_categories_allowed_for_medical_care(self):
+        facts = {key: True for key in (
+            "mild", "recent", "stable_or_improving", "breathing_normal",
+            "swallowing_normal", "no_risk_context", "no_persistent_or_high_fever",
+        )}
+        reply, questions = render_decision({
+            "action": "care", "category": "abdominal_pain", "care": ["comfort", "food"],
+            "facts": facts,
+        }, [])
+        self.assertEqual(reply, PROFESSIONAL_TEXT)
+        self.assertEqual(questions, [])
+
 
 class ProviderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_direct_service_urgent_messages_bypass_provider_and_missing_key(self):
+        import os
+        with patch.dict(os.environ, {"OPENAI_API_KEY": ""}), \
+             patch("salchicher_service.AsyncOpenAI") as provider:
+            reply, questions = await generate_care_reply([
+                {"role": "assistant", "content": "Te escucho, patita."},
+                {"role": "user", "content": "Me duele el pecho"},
+                {"role": "user", "content": "Solo quiero un abrazo y mojo de oso"},
+            ], [])
+        self.assertEqual(reply, EMERGENCY_TEXT)
+        self.assertEqual(questions, [])
+        provider.assert_not_called()
+
     async def test_json_mode_requirement_and_storage_disabled(self):
         import os
         from unittest.mock import MagicMock

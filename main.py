@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import signal
 import socket
 import uuid
@@ -21,13 +22,18 @@ from telegram.ext import (
     CommandHandler,
     ContextTypes,
     MessageHandler,
+    TypeHandler,
     filters,
 )
+from telegram.request import HTTPXRequest
 
 import database
 from salchicher import Salchicher
 from vaca import Vaca
 from vaca_campaigns import VacaCampaigns
+from web_bridge import RecordingExtBot, WebBridge
+from history_service import HistoryService
+from admin_service import AdminService
 from lore_utils import (
     read_core_lore,
     write_pending_story_markdown,
@@ -141,6 +147,7 @@ court_tasks: dict[str, asyncio.Task] = {}
 salchicher: Salchicher | None = None
 vaca: Vaca | None = None
 vaca_campaigns: VacaCampaigns | None = None
+web_bridge: WebBridge | None = None
 
 COURT_DEFENSE_STYLES = {
     "deny": "niega solemnemente los hechos",
@@ -616,6 +623,7 @@ async def central_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "/alegar <texto>\n"
         "/caso_estado\n"
         "/mimosuga_auto <on|off|status>\n"
+        "/mimosuga_pendientes [ID]\n"
         "/salchicher_auto <on|off>\n"
         "/vaca_ayuda (deseos, pistas y visitas privadas)\n"
         "/status"
@@ -1725,6 +1733,47 @@ async def admin_story_status_callback(update: Update, context: ContextTypes.DEFA
         await query.answer("No encuentro esa historia.", show_alert=True)
 
 
+async def central_pending_mimosuga(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Reopen a saved review through the same owner-only callback workflow."""
+    if not is_private_owner(update) or not update.effective_chat:
+        return
+    if len(context.args) > 1 or (context.args and not re.fullmatch(r"[1-9][0-9]{0,18}", context.args[0])):
+        await update.effective_chat.send_message("Uso: /mimosuga_pendientes [ID]")
+        return
+    if not database.db_available():
+        await update.effective_chat.send_message("Base de datos no disponible. Las revisiones no se han cargado.")
+        return
+    partner = get_partner_chat_id("mimosuga")
+    if not partner or partner != resolve_web_actor("sandra"):
+        await update.effective_chat.send_message("Mimosuga necesita una destinataria vinculada antes de abrir revisiones.")
+        return
+    if context.args:
+        draft_id = int(context.args[0])
+        if draft_id > 2**63 - 1:
+            await update.effective_chat.send_message("Uso: /mimosuga_pendientes [ID]")
+            return
+        draft = await database.get_auto_reply_draft(draft_id)
+        drafts = [draft] if (draft and draft.get("status") == "pending"
+            and draft.get("animal_key") == "mimosuga" and draft.get("incoming_chat_id") == partner) else []
+    else:
+        drafts = await database.get_pending_auto_reply_drafts(animal_key="mimosuga", chat_id=partner, limit=20)
+    if not drafts:
+        await update.effective_chat.send_message("No hay respuestas pendientes en esta revisión de Mimosuga.")
+        return
+    for draft in drafts:
+        draft_id = draft["id"]
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("Enviar", callback_data=f"autoreply:{draft_id}:send"),
+            InlineKeyboardButton("Descartar", callback_data=f"autoreply:{draft_id}:reject"),
+        ]])
+        text = (f"Respuesta suave de Mimosuga #{draft_id} · pendiente de revisión\n\n"
+                f"Mensajes agrupados de Patita:\n{draft['incoming_text']}\n\n"
+                f"Propuesta:\n{draft['proposed_text']}")
+        chunks = split_telegram_text(text)
+        for index, chunk in enumerate(chunks):
+            await update.effective_chat.send_message(chunk, reply_markup=keyboard if index == len(chunks) - 1 else None)
+
+
 async def auto_reply_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if not query or not query.message or not query.from_user:
@@ -1785,6 +1834,12 @@ async def send_auto_reply_draft(draft_id: int, admin_user_id: int) -> tuple[bool
             f"No puedo enviar la respuesta #{draft_id}: "
             f"{ANIMALS[animal_key]['display_name']} no esta vinculado.",
         )
+
+    # A saved review must never be redirected when a recipient binding changes.
+    if (draft.get("incoming_chat_id") != partner_chat_id
+            or partner_chat_id != resolve_web_actor("sandra")):
+        await database.release_auto_reply_draft(draft_id)
+        return False, "La destinataria de esta revisión ha cambiado. No se ha enviado la respuesta."
 
     try:
         await animal_app.bot.send_chat_action(partner_chat_id, ChatAction.TYPING)
@@ -2557,15 +2612,23 @@ async def central_vaca(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 def build_centralita_app() -> Application:
-    app = (
-        ApplicationBuilder()
-        .token(require_env("TOKEN_CENTRALITA"))
-        .connect_timeout(30)
-        .read_timeout(30)
-        .write_timeout(30)
-        .pool_timeout(30)
-        .build()
-    )
+    token = require_env("TOKEN_CENTRALITA")
+    if web_bridge:
+        request = HTTPXRequest(connection_pool_size=256, connect_timeout=30,
+                               read_timeout=30, write_timeout=30, pool_timeout=30)
+        bot = RecordingExtBot(token=token, bridge=web_bridge, animal_key="centralita", request=request)
+        app = ApplicationBuilder().bot(bot).build()
+
+        async def record_incoming(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+            try:
+                web_bridge.record_admin_telegram_update(update)
+            except Exception as exc:
+                logger.warning("No se pudo reflejar entrada de Centralita: %s", type(exc).__name__)
+
+        app.add_handler(TypeHandler(Update, record_incoming), group=-1)
+    else:
+        app = (ApplicationBuilder().token(token).connect_timeout(30).read_timeout(30)
+               .write_timeout(30).pool_timeout(30).build())
     app.add_handler(CommandHandler("start", central_start))
     app.add_handler(CommandHandler("status", central_status))
     app.add_handler(CommandHandler("historial", central_history))
@@ -2575,6 +2638,7 @@ def build_centralita_app() -> Application:
     app.add_handler(CommandHandler("pausar_programas", central_pause_schedules))
     app.add_handler(CommandHandler("reanudar_programas", central_resume_schedules))
     app.add_handler(CommandHandler("mimosuga_auto", central_mimosuga_auto))
+    app.add_handler(CommandHandler("mimosuga_pendientes", central_pending_mimosuga))
     app.add_handler(CommandHandler("salchicher_auto", central_salchicher_auto))
     for command in (*VACA_CAMPAIGN_COMMANDS, "vaca_ayuda", "vaca_deseos", "vaca_auto"):
         app.add_handler(CommandHandler(command, central_vaca))
@@ -2604,17 +2668,46 @@ def build_centralita_app() -> Application:
     return app
 
 
+def resolve_web_actor(actor: str) -> int | None:
+    """Resolve trusted proxy roles without allowing a browser to choose an ID."""
+    if actor == "owner":
+        return owner_chat_id()
+    if actor != "sandra":
+        return None
+    if SANDRA_TELEGRAM_ID:
+        candidate = int(SANDRA_TELEGRAM_ID)
+        return candidate if candidate > 0 and candidate != owner_chat_id() else None
+    # Legacy installations may predate SANDRA_TELEGRAM_ID. Only use an existing,
+    # unambiguous link; never create one or fall back to the administrator.
+    partners = {get_partner_chat_id(key) for key in ("castori", "mimosuga", "corte")}
+    partners.discard(None)
+    if len(partners) == 1:
+        candidate = next(iter(partners))
+        if candidate > 0 and candidate != owner_chat_id():
+            return candidate
+    return None
+
+
 def build_animal_app(animal_key: str) -> Application:
     token = require_env(ANIMALS[animal_key]["token_env"])
-    app = (
-        ApplicationBuilder()
-        .token(token)
-        .connect_timeout(30)
-        .read_timeout(30)
-        .write_timeout(30)
-        .pool_timeout(30)
-        .build()
-    )
+    if web_bridge:
+        request = HTTPXRequest(connection_pool_size=256, connect_timeout=30,
+                               read_timeout=30, write_timeout=30, pool_timeout=30)
+        bot = RecordingExtBot(token=token, bridge=web_bridge, animal_key=animal_key,
+                              request=request)
+        app = ApplicationBuilder().bot(bot).build()
+
+        async def record_incoming(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+            try:
+                web_bridge.record_telegram_update(animal_key, update)
+            except Exception as exc:
+                # A display failure must never interrupt the existing bot workflow.
+                logger.warning("No se pudo reflejar entrada web: %s", type(exc).__name__)
+
+        app.add_handler(TypeHandler(Update, record_incoming), group=-1)
+    else:
+        app = (ApplicationBuilder().token(token).connect_timeout(30).read_timeout(30)
+               .write_timeout(30).pool_timeout(30).build())
     app.add_handler(
         CommandHandler(
             "start",
@@ -2668,7 +2761,7 @@ async def stop_app(app: Application) -> None:
 
 
 async def main() -> None:
-    global centralita_app, salchicher, vaca, vaca_campaigns
+    global centralita_app, salchicher, vaca, vaca_campaigns, web_bridge
 
     acquire_single_instance_lock()
     _ = owner_chat_id()
@@ -2679,6 +2772,17 @@ async def main() -> None:
         await asyncio.sleep(STARTUP_DELAY_SECONDS)
 
     await database.init_db()
+
+    if os.getenv("CASTORI_WEB_TOKEN"):
+        history_provider = HistoryService(load_data, save_data, get_partner_chat_id, resolve_web_actor)
+        # Capture retained legacy history before any new Telegram traffic is mirrored.
+        await history_provider.initialize()
+        admin_provider = AdminService(load_data, lambda: animal_apps, get_partner_chat_id,
+            owner_chat_id, admin_chat_id, get_admin_app=lambda: centralita_app,
+            next_schedule_time=next_schedule_time, timezone=APP_TIMEZONE, get_vaca_partner=vaca_partner_id)
+        web_bridge = WebBridge(load_data, save_data, lambda: animal_apps, resolve_web_actor,
+            history_provider=history_provider, get_admin_app=lambda: centralita_app,
+            admin_state_provider=admin_provider, admin_actor_id=admin_chat_id)
 
     if os.getenv("TOKEN_SALCHICHER"):
         salchicher = Salchicher(
@@ -2719,8 +2823,14 @@ async def main() -> None:
             pass
 
     try:
+        if web_bridge:
+            await web_bridge.start(host=os.getenv("CASTORI_WEB_HOST", "127.0.0.1"),
+                                   port=int(os.getenv("PORT", "8080")))
+            logger.info("Puente web autenticado en marcha")
         await stop_event.wait()
     finally:
+        if web_bridge:
+            await web_bridge.close()
         scheduler_task.cancel()
         await asyncio.gather(scheduler_task, return_exceptions=True)
         if vaca:
