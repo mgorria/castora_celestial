@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
 
-from vaca_campaigns import VacaCampaigns
+from vaca_campaigns import VacaCampaigns, public_chat_anticipation
 
 
 MADRID = ZoneInfo("Europe/Madrid")
@@ -17,6 +17,70 @@ MESSAGES = {"clues": ["He encontrado una cinta misteriosa.", "Mis pezuñas guard
 def update(text, chat_type="private"):
     return SimpleNamespace(effective_chat=SimpleNamespace(type=chat_type, send_message=AsyncMock()),
                            message=SimpleNamespace(text=text))
+
+
+class ChatAnticipationTests(unittest.TestCase):
+    def setUp(self):
+        self.now = datetime(2026, 12, 3, 12, tzinfo=MADRID)
+        self.plan = {"id": "PRIVATE-ID", "status": "active", "recipient_id": 2,
+            "gifts": "PRIVATE-GIFTS", "delivery_at": "2026-12-10T08:00:00+01:00",
+            "events": {"pista1": {"status": "sent", "text": "DELIVERED CLUE"},
+                       "pista2": {"status": "pending", "text": "FUTURE CLUE"},
+                       "manana": {"status": "pending", "text": "FUTURE GREETING"}}}
+        self.data = {"vaca_campaigns": {"paused": False, "plans": {"PRIVATE-ID": self.plan}}}
+
+    def test_only_active_recipient_gets_permission_and_no_private_metadata(self):
+        before = copy.deepcopy(self.data)
+        self.assertEqual(public_chat_anticipation(self.data, 2, now=self.now), {"visit_active": True, "arrival_near": False})
+        self.assertEqual(public_chat_anticipation(self.data, 1, now=self.now), {"visit_active": False, "arrival_near": False})
+        self.assertEqual(self.data, before)
+
+    def test_unactivated_cancelled_completed_or_expired_visit_never_builds_expectation(self):
+        for status in ["draft", "cancelled", "completed"]:
+            with self.subTest(status=status):
+                self.plan["status"] = status
+                self.assertEqual(public_chat_anticipation(self.data, 2, now=self.now), {"visit_active": False, "arrival_near": False})
+        self.plan["status"] = "active"
+        self.assertEqual(public_chat_anticipation(self.data, 2,
+            now=datetime(2026, 12, 11, 12, tzinfo=MADRID)), {"visit_active": False, "arrival_near": False})
+
+    def test_pause_and_ambiguous_or_delivered_morning_disable_anticipation(self):
+        self.data["schedules_paused"] = True
+        self.assertEqual(public_chat_anticipation(self.data, 2, now=self.now), {"visit_active": False, "arrival_near": False})
+        self.data["schedules_paused"] = False
+        self.data["vaca_campaigns"]["paused"] = True
+        self.assertEqual(public_chat_anticipation(self.data, 2, now=self.now), {"visit_active": False, "arrival_near": False})
+        self.data["vaca_campaigns"]["paused"] = False
+        for status in ["sent", "sending", "uncertain", "expired", "cancelled"]:
+            with self.subTest(status=status):
+                self.plan["events"]["manana"]["status"] = status
+                self.assertEqual(public_chat_anticipation(self.data, 2, now=self.now), {"visit_active": False, "arrival_near": False})
+
+    def test_nearness_is_only_a_boolean_within_72_hours_and_never_a_date(self):
+        for now, near in [(datetime(2026, 12, 7, 7, 59, tzinfo=MADRID), False),
+                          (datetime(2026, 12, 7, 8, 0, tzinfo=MADRID), True),
+                          (datetime(2026, 12, 10, 7, 59, tzinfo=MADRID), True)]:
+            with self.subTest(now=now):
+                self.assertEqual(public_chat_anticipation(self.data, 2, now=now),
+                                 {"visit_active": True, "arrival_near": near})
+        self.assertEqual(public_chat_anticipation(self.data, 2,
+            now=datetime(2026, 12, 10, 8, 0, tzinfo=MADRID)), {"visit_active": False, "arrival_near": False})
+
+    def test_near_visit_is_found_even_after_a_distant_active_plan(self):
+        distant = copy.deepcopy(self.plan)
+        distant["delivery_at"] = "2026-12-30T08:00:00+01:00"
+        self.data["vaca_campaigns"]["plans"] = {"far": distant, "near": self.plan}
+        self.assertEqual(public_chat_anticipation(self.data, 2,
+            now=datetime(2026, 12, 9, 8, tzinfo=MADRID)), {"visit_active": True, "arrival_near": True})
+
+    def test_malformed_dates_and_recipient_fail_closed(self):
+        for value in [None, "invalid", "2026-12-10T08:00:00"]:
+            with self.subTest(value=value):
+                self.plan["delivery_at"] = value
+                self.assertEqual(public_chat_anticipation(self.data, 2, now=self.now), {"visit_active": False, "arrival_near": False})
+        self.plan["delivery_at"] = "2026-12-10T08:00:00+01:00"
+        self.plan["recipient_id"] = "2"
+        self.assertEqual(public_chat_anticipation(self.data, 2, now=self.now), {"visit_active": False, "arrival_near": False})
 
 
 class CampaignTests(unittest.IsolatedAsyncioTestCase):

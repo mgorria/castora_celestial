@@ -2,7 +2,7 @@
 
 import asyncio
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
@@ -11,6 +11,42 @@ EVENTS = ("pista1", "pista2", "manana")
 FINAL_EVENTS = {"sent", "uncertain", "sending"}
 MAX_LATENESS = timedelta(hours=2)
 SEND_TIMEOUT_SECONDS = 30
+
+
+def public_chat_anticipation(data: dict, chat_id: int, *, now: datetime | None = None) -> dict:
+    """Expose two permission bits to chat, never plans, dates or unsent messages.
+
+    Delivered clues already belong to the public conversation. Do not read them
+    back from campaigns: that would resurrect text after the user chose /olvidar.
+    """
+    result = {"visit_active": False, "arrival_near": False}
+    campaigns = data.get("vaca_campaigns", {})
+    if (not isinstance(campaigns, dict) or campaigns.get("paused")
+            or data.get("schedules_paused")):
+        return result
+    plans = campaigns.get("plans", {})
+    if not isinstance(plans, dict):
+        return result
+    now = now or datetime.now(timezone.utc)
+    for plan in plans.values():
+        if (not isinstance(plan, dict) or plan.get("status") != "active"
+                or type(plan.get("recipient_id")) is not int or plan["recipient_id"] != chat_id):
+            continue
+        events = plan.get("events", {})
+        morning = events.get("manana", {}) if isinstance(events, dict) else {}
+        if not isinstance(morning, dict) or morning.get("status") != "pending":
+            continue
+        try:
+            delivery = datetime.fromisoformat(plan["delivery_at"])
+            if delivery.tzinfo is None or delivery.utcoffset() is None or delivery <= now:
+                continue
+        except (KeyError, TypeError, ValueError):
+            continue
+        result["visit_active"] = True
+        if delivery - now <= timedelta(hours=72):
+            result["arrival_near"] = True
+            break
+    return result
 
 
 async def generate_visit_messages(gifts: str) -> dict:

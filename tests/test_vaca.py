@@ -198,7 +198,7 @@ class VacaTests(unittest.IsolatedAsyncioTestCase):
         release = asyncio.Event()
         calls = []
 
-        async def generate(history, wishes):
+        async def generate(history, wishes, anticipation):
             calls.append(copy.deepcopy(history))
             if len(calls) == 1:
                 started.set()
@@ -241,7 +241,7 @@ class VacaTests(unittest.IsolatedAsyncioTestCase):
         release = asyncio.Event()
         calls = []
 
-        async def generate(history, wishes):
+        async def generate(history, wishes, anticipation):
             calls.append(copy.deepcopy(history))
             if len(calls) == 1:
                 started.set()
@@ -260,6 +260,53 @@ class VacaTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls[1][-2]["content"], "Una pista: algo calentito.")
         self.assertEqual(len(self.bot.session(1)["wishes"]), 1)
         self.assertNotIn("Obsoleto", str(self.send.call_args_list))
+
+    def active_visit(self):
+        plan = {"status": "active", "recipient_id": 1, "delivery_at": "2099-12-20T08:00:00+01:00",
+                "gifts": "SECRET PURCHASE", "events": {
+                    "pista1": {"status": "sent", "text": "FORGOTTEN DELIVERED CLUE"},
+                    "pista2": {"status": "pending", "text": "SECRET FUTURE CLUE"},
+                    "manana": {"status": "pending", "text": "SECRET MORNING"}}}
+        self.data["vaca_campaigns"] = {"paused": False, "plans": {"PRIVATE-ID": plan}}
+
+    async def test_active_visit_passes_only_permission_and_never_recovers_forgotten_clues(self):
+        self.active_visit()
+        self.bot.remember_outgoing(1, "FORGOTTEN DELIVERED CLUE")
+        await self.bot.receive(update("/olvidar"), None)
+        self.send.reset_mock()
+        with patch("vaca.generate_vaca_reply", AsyncMock(return_value=answer("Una profecía de pezuña."))) as model:
+            await self.bot.receive(update("¿Me susurras una profecía?"), None)
+            await self.finish()
+        history, wishes, anticipation = model.call_args.args
+        self.assertEqual(anticipation, {"visit_active": True, "arrival_near": False})
+        self.assertNotIn("SECRET", str(model.call_args))
+        self.assertNotIn("PRIVATE-ID", str(model.call_args))
+        self.assertNotIn("FORGOTTEN", str(history))
+        self.assertFalse(wishes)
+        self.notify.assert_not_awaited()
+
+    async def test_cancelling_visit_during_generation_discards_anticipation(self):
+        self.active_visit()
+        started, release = asyncio.Event(), asyncio.Event()
+        permissions = []
+
+        async def generate(history, wishes, anticipation):
+            permissions.append(copy.deepcopy(anticipation))
+            if len(permissions) == 1:
+                started.set()
+                await release.wait()
+                return answer("OUTDATED ANTICIPATION")
+            return answer("La campanilla propone un juego de palabras, Patita.")
+
+        with patch("vaca.generate_vaca_reply", generate):
+            await self.bot.receive(update("¿Qué dice tu campanilla?"), None)
+            await asyncio.wait_for(started.wait(), 1)
+            self.data["vaca_campaigns"]["plans"]["PRIVATE-ID"]["status"] = "cancelled"
+            release.set()
+            await self.finish()
+        self.assertEqual(permissions, [{"visit_active": True, "arrival_near": False}, {"visit_active": False, "arrival_near": False}])
+        self.send.assert_awaited_once_with(1, "La campanilla propone un juego de palabras, Patita.")
+        self.assertNotIn("OUTDATED", str(self.send.call_args_list))
 
     async def test_forget_clears_memory_preserves_list_and_discards_generation(self):
         await self.bot.receive(update("/pedir libro"), None)

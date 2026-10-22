@@ -25,9 +25,9 @@
     },
     vaca: {
       name: 'La Vaca Mágica',
-      tagline: 'Un lugar para tus deseos',
+      tagline: 'Profecías y secretos a medias',
       greeting: '¡Tolón, tolón, Patita! Se me ha escapado un poquito de purpurina iridiscente al encender las luces de Navidad. Aquí caben los deseos grandes, los pequeños y los que todavía no tienen nombre.',
-      suggestions: ['Quiero guardar un deseo', 'Inventemos una Navidad bonita', 'Cuéntame un cuento mágico'],
+      suggestions: ['¿Me susurras una profecía?', '¿Qué dice tu campanilla?', 'Quiero guardar un deseo'],
       color: '#A16C74'
     },
     dulcimiel: {
@@ -178,6 +178,14 @@
 
     const care = careResponse(characterId, input, history);
     if (care) return care;
+
+    if (characterId === 'vaca' && /\b(profecia|profecias|pista|pistas|campanilla|venir|vienes|llegas|llegada|visita|secreto)\b/.test(input)) {
+      const prophecies = [
+        'Muuu… mi campanilla ha soñado que una estrella se enganchaba en un lazo y se negaba a soltarlo. «Ese lazo guarda algo», decía. Y yo, que soy muuuuy discreta, he cerrado el cuaderno antes de que leyera tu nombre. ¿Qué crees que habrá visto? ✧\n\nProfecía de ejemplo del boceto; no anuncia una visita real.',
+        'Tolón… Patita, en esta profecía de ejemplo hay un paquetito tan impaciente que se ha puesto los zapatos del revés. No te digo más, que luego mi campanilla me llama bocazas. ¿Tú crees que sabe esperar? ✧\n\nEs una escena del boceto, sin fecha ni entrega real.'
+      ];
+      return prophecies[turns % prophecies.length];
+    }
 
     if (characterId === 'dulcimiel' && /\b(prima|panuelo|animal|eres)\b/.test(input)) return voice.dulcimiel.identity[0];
     if (characterId === 'dulcimiel' && /\b(horchata|leche)\b/.test(input)) return voice.dulcimiel.gift[0];

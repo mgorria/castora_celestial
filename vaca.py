@@ -8,6 +8,7 @@ import time
 from typing import Callable
 
 from vaca_service import cow_voice, generate_vaca_reply
+from vaca_campaigns import public_chat_anticipation
 
 logger = logging.getLogger("control-castora.vaca")
 MAX_MESSAGES = 24
@@ -378,10 +379,12 @@ class Vaca:
                 version = session["version"]
                 pending_texts = session.get("pending_texts", [])
                 evidence = "\n".join(pending_texts)
+                anticipation = public_chat_anticipation(self.load(), chat_id)
                 try:
                     result = await asyncio.wait_for(generate_vaca_reply(
                         copy.deepcopy(session.get("history", [])),
                         copy.deepcopy(session.get("wishes", [])),
+                        anticipation,
                     ), timeout=70)
                     if (not isinstance(result, dict) or not isinstance(result.get("reply"), str)
                             or not result["reply"].strip() or len(result["reply"]) > 1800
@@ -404,6 +407,10 @@ class Vaca:
                 if not current or not self.enabled() or chat_id not in self.authorized():
                     return
                 if current.get("version") != version:
+                    continue
+                # A paused/cancelled/revised visit must not leave an in-flight
+                # response building anticipation from an obsolete permission.
+                if public_chat_anticipation(self.load(), chat_id) != anticipation:
                     continue
                 # Commit list changes and consume the batch BEFORE delivery. In particular,
                 # an ambiguous Telegram timeout must never add wishes or send a reply twice.

@@ -51,6 +51,23 @@ class PayloadTests(unittest.TestCase):
         self.assertNotIn("SECRETO", json.dumps(payload))
         self.assertEqual(payload["conversation"], [])
 
+    def test_anticipation_accepts_only_a_literal_permission_bit(self):
+        payload = build_public_payload([], [], {"visit_active": True,
+            "gifts": "PRIVATE-GIFT", "delivery_at": "PRIVATE-DATE", "clues": ["UNSENT-CLUE"]})
+        self.assertEqual(payload["mystery"], {"visit_active": True, "arrival_near": False})
+        self.assertNotIn("PRIVATE", json.dumps(payload))
+        self.assertNotIn("UNSENT", json.dumps(payload))
+        for context in [None, True, [True], {"visit_active": 1}, {"visit_active": "true"}]:
+            with self.subTest(context=context):
+                self.assertEqual(build_public_payload([], [], context)["mystery"], {"visit_active": False, "arrival_near": False})
+
+    def test_nearness_requires_active_visit_and_literal_boolean(self):
+        for active, near, expected in [(True, True, True), (False, True, False),
+                                        (True, "true", False), (True, 1, False)]:
+            with self.subTest(active=active, near=near):
+                payload = build_public_payload([], [], {"visit_active": active, "arrival_near": near})
+                self.assertEqual(payload["mystery"], {"visit_active": active, "arrival_near": expected})
+
     def test_cow_voice_is_idempotent_and_preserves_urls_and_other_words(self):
         text = "Muy bien, mucha leche y muchísimas ganas. Muuuuuy feliz. Mundo música. https://mucho.example/muy?q=mucha www.muy.es"
         changed = cow_voice(text)
@@ -104,6 +121,19 @@ class GenerationTests(unittest.IsolatedAsyncioTestCase):
                               details="", url="", favorite=True, evidence="Y el libro es mi favorito")]))
         result = await generate_vaca_reply(self.history, self.wishes)
         self.assertEqual(len(result["operations"]), 2)
+
+    async def test_chat_anticipation_uses_public_conversation_and_no_private_plan_fields(self):
+        self.response(reply(reply="Mi campanilla guarda un secreto de pezuña, Patita."))
+        history = [{"role": "assistant", "content": "Pista ya recibida: las estrellas esconden un lazo."},
+                   {"role": "user", "content": "¿Me susurras una profecía?"}]
+        result = await generate_vaca_reply(history, self.wishes,
+            {"visit_active": True, "gifts": "SECRET PURCHASE", "next_clue": "SECRET FUTURE CLUE"})
+        payload = json.loads(self.create.call_args.kwargs["input"])
+        self.assertEqual(payload["mystery"], {"visit_active": True, "arrival_near": False})
+        self.assertIn("Pista ya recibida", payload["conversation"][0]["content"])
+        self.assertNotIn("SECRET", self.create.call_args.kwargs["input"])
+        self.assertEqual(result["operations"], [])
+        self.assertIs(self.create.call_args.kwargs["store"], False)
 
     async def test_old_user_or_assistant_evidence_cannot_mutate(self):
         self.history += [{"role": "assistant", "content": "Quiero unas zapatillas rosas del 38"},
