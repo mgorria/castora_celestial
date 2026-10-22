@@ -55,7 +55,7 @@ class PortalTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.headers["Referrer-Policy"], "no-referrer")
         response = await self.client.get("/api/account/session")
         self.assertEqual(await response.json(), {"portal": True, "authenticated": False})
-        for route in ("state", "history?animal=mimosuga", "stories"):
+        for route in ("state", "history?animal=mimosuga", "stories", "consultations", "consultation?id=abc12345"):
             response = await self.client.get("/api/bridge/" + route)
             self.assertEqual(response.status, 401)
 
@@ -81,7 +81,8 @@ class PortalTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(response.status, 401)
 
     async def test_post_requires_exact_origin_and_json_even_before_authentication(self):
-        for route in ("/api/account/login", "/api/account/register", "/api/account/logout", "/api/bridge/message"):
+        for route in ("/api/account/login", "/api/account/register", "/api/account/logout", "/api/bridge/message",
+                      "/api/bridge/consultation-action", "/api/bridge/consultation-message"):
             for origin in (None, "null", "https://evil.example", ORIGIN + "/", "http://casa.example"):
                 headers = {"Origin": origin} if origin else {}
                 response = await self.client.post(route, json={}, headers=headers)

@@ -16,7 +16,7 @@ from telegram import Update
 from telegram.request import BaseRequest
 
 import main
-from salchicher import Salchicher
+from salchicher import INACTIVITY_SECONDS, Salchicher
 from web_bridge import RETENTION_SECONDS, WebBridge
 
 
@@ -88,7 +88,8 @@ class WebIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
         load = lambda: copy.deepcopy(self.data)
         self.bridge = WebBridge(load, save, lambda: self.apps,
-                                lambda actor: {"sandra": 11, "owner": 22}.get(actor), token=TOKEN)
+                                lambda actor: {"sandra": 11, "owner": 22}.get(actor), token=TOKEN,
+                                get_consultorio=lambda: self.doctor)
         self.doctor = Salchicher(load, save, lambda: {11, 22}, main.salchicher_send, self.notify)
         self.doctor.idle_seconds = 0.001
         values = {"web_bridge": self.bridge, "salchicher": self.doctor, "animal_apps": self.apps,
@@ -118,6 +119,14 @@ class WebIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def post(self, text, request_id="request001", animal="salchicher", headers=None):
         response = await self.client.post("/castori-web/message", headers=headers or HEADERS,
                                           json={"animal": animal, "text": text, "request_id": request_id})
+        if self.bridge.tasks:
+            await asyncio.wait_for(asyncio.gather(*list(self.bridge.tasks)), 3)
+        return response
+
+    async def consultation_message(self, text, request_id="consult001"):
+        active = self.doctor.active_consultation(11)
+        response = await self.client.post("/castori-web/consultation-message", headers=HEADERS,
+            json={"consultation_id": active["id"], "text": text, "request_id": request_id})
         if self.bridge.tasks:
             await asyncio.wait_for(asyncio.gather(*list(self.bridge.tasks)), 3)
         return response
@@ -153,34 +162,37 @@ class WebIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_web_ingress_does_not_save_health_text_before_consent(self):
         response = await self.post("SINTOMA_WEB_SIN_CONSENTIMIENTO")
-        self.assertEqual(response.status, 202)
+        self.assertEqual(response.status, 409)
         self.assertNotIn("SINTOMA_WEB_SIN_CONSENTIMIENTO", json.dumps(self.data))
         self.assertIsNone(self.doctor.session(11))
-        self.assertEqual(len((await self.events())["events"]), 1)
+        self.assertEqual(len((await self.events())["events"]), 0)
         self.notify.assert_not_awaited()
 
     async def test_emergency_before_consent_does_not_persist_input_or_notify_owner(self):
-        await self.post("No puedo respirar SINTOMA_URGENTE_PRIVADO")
+        await self.telegram("No puedo respirar SINTOMA_URGENTE_PRIVADO")
         self.assertNotIn("SINTOMA_URGENTE_PRIVADO", json.dumps(self.data))
         events = (await self.events())["events"]
         self.assertEqual(len(events), 1)
         self.assertIn("112", events[0]["text"])
         self.notify.assert_not_awaited()
 
-    async def test_real_consent_callback_edits_keyboard_and_keeps_consultation_private(self):
-        await self.post("/consulta")
+    async def test_legacy_consent_callback_cannot_skip_explicit_web_consultation(self):
+        await self.telegram("/consulta")
         before = await self.events()
         offer = before["events"][0]
         response = await self.client.post("/castori-web/callback", headers=HEADERS, json={
             "animal": "salchicher", "event_id": offer["id"], "data": "salchicher:private", "request_id": "callback001"})
-        self.assertEqual(response.status, 202)
-        await asyncio.wait_for(asyncio.gather(*list(self.bridge.tasks)), 3)
+        self.assertEqual(response.status, 403)
+        self.assertIsNone(self.doctor.session(11))
+        response = await self.client.post("/castori-web/consultation-action", headers=HEADERS,
+            json={"action": "start", "retain_history": True})
+        self.assertEqual(response.status, 200)
         self.assertFalse(self.doctor.session(11)["shared"])
         changed = (await self.events(after=before["cursor"]))["events"]
-        self.assertEqual(next(e for e in changed if e["id"] == offer["id"])["buttons"], [])
-        self.assertTrue(any("Consultorio abierto" in e["text"] for e in changed))
+        self.assertTrue(changed)
+        self.assertTrue(all(not e["buttons"] for e in changed))
+        self.assertNotIn(offer["id"], [e["id"] for e in changed])
         self.assertNotIn("answerCallbackQuery", [c[0] for c in self.requests[0].calls])
-        self.assertIn("editMessageReplyMarkup", [c[0] for c in self.requests[0].calls])
         self.notify.assert_not_awaited()
 
     async def test_send_chunks_are_all_mirrored_once_and_only_in_the_patient_inbox(self):
@@ -195,9 +207,9 @@ class WebIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_active_input_not_duplicated_and_forget_from_telegram_or_web_purges(self):
         for origin in ("telegram", "web"):
-            self.seed_consultation()
+            self.doctor.start_consultation(11, retain_history=True)
             with patch("salchicher.generate_care_reply", AsyncMock(return_value=("RESPUESTA_PRIVADA", []))):
-                await self.post("SINTOMA_CONSENTIDO", request_id=f"message_{origin}")
+                await self.consultation_message("SINTOMA_CONSENTIDO", request_id=f"message_{origin}")
                 await asyncio.wait_for(asyncio.gather(*list(self.doctor.tasks.values())), 3)
             before = await self.events()
             self.assertEqual(sum(e["text"] == "SINTOMA_CONSENTIDO" for e in before["events"]), 1)
@@ -213,7 +225,7 @@ class WebIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.notify.assert_not_awaited()
 
     async def test_expired_session_purges_recent_private_mirror_but_leaves_consent_offer(self):
-        await self.post("/consulta")
+        await self.telegram("/consulta")
         self.seed_consultation()
         self.bridge.record("salchicher", 11, "SINTOMA_RETENIDO", role="user")
         self.bridge.record("salchicher", 11, "RESPUESTA_RETENIDA")
@@ -230,12 +242,162 @@ class WebIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_owner_start_cannot_rebind_any_existing_recipient(self):
         before = copy.deepcopy(self.data)
         response = await self.post("/start", headers=OWNER_HEADERS)
-        self.assertEqual(response.status, 202)
+        self.assertEqual(response.status, 409)
         response = await self.post("/start", animal="mimosuga", headers=OWNER_HEADERS, request_id="request002")
         self.assertEqual(response.status, 403)
         for key, value in before.items():
             self.assertEqual(self.data[key], value)
         self.assertIsNone(self.doctor.session(22))
+
+    async def test_consultation_routes_keep_archive_private_and_delete_it_completely(self):
+        start = await self.client.post("/castori-web/consultation-action", headers=HEADERS,
+            json={"action": "start", "retain_history": True})
+        item = (await start.json())["consultation"]
+        self.assertEqual(item["status"], "active")
+        self.assertTrue(item["retained"])
+        again = await self.client.post("/castori-web/consultation-action", headers=HEADERS,
+            json={"action": "start", "retain_history": True})
+        self.assertEqual(again.status, 409)
+        with patch("salchicher.generate_care_reply", AsyncMock(return_value=("CUIDADO_PRIVADO", []))):
+            message = await self.consultation_message("SINTOMA_ARCHIVADO")
+            self.assertEqual(message.status, 202)
+            await asyncio.wait_for(asyncio.gather(*list(self.doctor.tasks.values())), 3)
+        listed = await self.client.get("/castori-web/consultations", headers=HEADERS)
+        listing = await listed.json()
+        self.assertEqual(listing["active_id"], item["id"])
+        self.assertNotIn("messages", listing["consultations"][0])
+        owner = await self.client.get("/castori-web/consultations", headers=OWNER_HEADERS)
+        self.assertEqual((await owner.json())["consultations"], [])
+        for action in (None, "close", "delete"):
+            if action:
+                forbidden = await self.client.post("/castori-web/consultation-action", headers=OWNER_HEADERS,
+                    json={"action": action, "consultation_id": item["id"]})
+            else:
+                forbidden = await self.client.get("/castori-web/consultation?id=" + item["id"], headers=OWNER_HEADERS)
+            self.assertEqual(forbidden.status, 404)
+        close = await self.client.post("/castori-web/consultation-action", headers=HEADERS,
+            json={"action": "close", "consultation_id": item["id"]})
+        closed = (await close.json())["consultation"]
+        self.assertEqual(closed["status"], "recovered")
+        self.assertEqual(closed["closure_reason"], "feeling_better")
+        self.assertIn("SINTOMA_ARCHIVADO", str(closed["messages"]))
+        self.assertEqual((await self.events())["events"], [])
+        detail = await self.client.get("/castori-web/consultation?id=" + item["id"], headers=HEADERS)
+        self.assertEqual(detail.status, 200)
+        delete = await self.client.post("/castori-web/consultation-action", headers=HEADERS,
+            json={"action": "delete", "consultation_id": item["id"]})
+        self.assertEqual(await delete.json(), {"consultation": None, "deleted": True})
+        self.assertNotIn("SINTOMA_ARCHIVADO", json.dumps(self.data))
+        self.assertNotIn("CUIDADO_PRIVADO", json.dumps(self.data))
+        self.notify.assert_not_awaited()
+
+    async def test_temporary_consultation_close_erases_history_instead_of_archiving(self):
+        response = await self.client.post("/castori-web/consultation-action", headers=HEADERS,
+            json={"action": "start", "retain_history": False})
+        item = (await response.json())["consultation"]
+        with patch("salchicher.generate_care_reply", AsyncMock(return_value=("TEMPORAL_RESPUESTA", []))):
+            await self.consultation_message("TEMPORAL_SINTOMA")
+            await asyncio.wait_for(asyncio.gather(*list(self.doctor.tasks.values())), 3)
+        response = await self.client.post("/castori-web/consultation-action", headers=HEADERS,
+            json={"action": "close", "consultation_id": item["id"]})
+        self.assertIsNone((await response.json())["consultation"])
+        self.assertNotIn("TEMPORAL_", json.dumps(self.data))
+        response = await self.client.get("/castori-web/consultation?id=" + item["id"], headers=HEADERS)
+        self.assertEqual(response.status, 404)
+
+    async def test_retained_episode_closes_inactive_after_30_days_not_recovered(self):
+        item = self.doctor.start_consultation(11, retain_history=True)
+        self.bridge.record("salchicher", 11, "CUIDADOS ANTIGUOS")
+        with patch("salchicher.time.time", return_value=item["updated_at"] + INACTIVITY_SECONDS + 1):
+            response = await self.client.get("/castori-web/consultations", headers=HEADERS)
+            listing = await response.json()
+            self.assertIsNone(listing["active_id"])
+            self.assertEqual(listing["consultations"][0]["status"], "inactive")
+            self.assertEqual(listing["consultations"][0]["closure_reason"], "inactivity")
+            self.assertEqual(listing["consultations"][0]["updated_at"], item["updated_at"])
+            self.assertEqual((await self.events())["events"], [])
+            response = await self.client.get("/castori-web/consultation?id=" + item["id"], headers=HEADERS)
+            self.assertEqual(response.status, 200)
+
+    async def test_queued_message_cannot_fall_into_a_different_consultation(self):
+        old = self.doctor.start_consultation(11, retain_history=True)
+        lock = self.bridge.locks.setdefault(11, asyncio.Lock())
+        await lock.acquire()
+        try:
+            response = await self.client.post("/castori-web/consultation-message", headers=HEADERS,
+                json={"consultation_id": old["id"], "text": "MENSAJE_TARDIO", "request_id": "stale001"})
+            self.assertEqual(response.status, 202)
+            self.doctor.close_consultation(11, old["id"])
+            new = self.doctor.start_consultation(11, retain_history=True)
+        finally:
+            lock.release()
+        await asyncio.wait_for(asyncio.gather(*list(self.bridge.tasks)), 3)
+        response = await self.client.get("/castori-web/request?request_id=stale001", headers=HEADERS)
+        self.assertEqual((await response.json())["status"], "rejected")
+        self.assertNotIn("MENSAJE_TARDIO", json.dumps(self.data))
+        self.assertEqual(self.doctor.active_consultation(11)["id"], new["id"])
+
+    async def test_consultation_routes_require_exact_shapes_and_server_identity(self):
+        for body in ({"action": "start"}, {"action": "start", "retain_history": "true"},
+                     {"action": "start", "retain_history": True, "chat_id": 22},
+                     {"action": "start", "retain_history": True, "shared": True}, {"action": []}):
+            response = await self.client.post("/castori-web/consultation-action", headers=HEADERS, json=body)
+            self.assertEqual(response.status, 400)
+        for path in ("consultations?chat_id=22", "consultation?id=validtest&id=validtest", "consultation?id=validtest&actor=owner"):
+            response = await self.client.get("/castori-web/" + path, headers=HEADERS)
+            self.assertEqual(response.status, 400)
+        self.seed_consultation()
+        response = await self.post("No iniciar por el chat")
+        self.assertEqual(response.status, 409)
+        response = await self.client.post("/castori-web/consultation-message", headers=HEADERS,
+            json={"consultation_id": "unknown001", "text": "Sin consulta web", "request_id": "none0010"})
+        self.assertEqual(response.status, 409)
+        item = self.doctor.start_consultation(11, retain_history=False)
+        for extra in ({"actor": "owner"}, {"chat_id": 22}, {"animal": "vaca"}):
+            response = await self.client.post("/castori-web/consultation-message", headers=HEADERS,
+                json={"consultation_id": item["id"], "text": "No aceptar extras", "request_id": "exact001", **extra})
+            self.assertEqual(response.status, 400)
+        response = await self.client.post("/castori-web/consultation-message", headers=OWNER_HEADERS,
+            json={"consultation_id": item["id"], "text": "No usar la consulta de Sandra", "request_id": "owner001"})
+        self.assertEqual(response.status, 409)
+
+    async def test_urgent_notice_survives_temporary_deletion_and_retained_closure(self):
+        for retained in (False, True):
+            with self.subTest(retained=retained):
+                item = self.doctor.start_consultation(11, retain_history=retained)
+                request_id = "urgent_saved" if retained else "urgent_temporary"
+                body = {"consultation_id": item["id"], "text": "No puedo respirar SINTOMA_URGENCIA",
+                        "request_id": request_id}
+                response = await self.client.post("/castori-web/consultation-message", headers=HEADERS, json=body)
+                self.assertEqual(response.status, 202)
+                await asyncio.wait_for(asyncio.gather(*list(self.bridge.tasks)), 3)
+                response = await self.client.get("/castori-web/request?request_id=" + request_id, headers=HEADERS)
+                self.assertEqual(await response.json(), {
+                    "request_id": request_id, "status": "processed", "notice": "urgent_help"})
+                receipt = self.data["web_bridge"]["requests"]["11:" + request_id]
+                self.assertNotIn("SINTOMA_URGENCIA", json.dumps(receipt))
+                duplicate = await self.client.post("/castori-web/consultation-message", headers=HEADERS, json=body)
+                self.assertEqual((await duplicate.json())["notice"], "urgent_help")
+                self.assertTrue((await duplicate.json())["duplicate"])
+                foreign = await self.client.get("/castori-web/request?request_id=" + request_id, headers=OWNER_HEADERS)
+                self.assertEqual(foreign.status, 404)
+                detail = await self.client.get("/castori-web/consultation?id=" + item["id"], headers=HEADERS)
+                if retained:
+                    self.assertEqual(detail.status, 200)
+                    self.assertEqual((await detail.json())["consultation"]["closure_reason"], "urgent_help")
+                else:
+                    self.assertEqual(detail.status, 404)
+                    self.assertNotIn("SINTOMA_URGENCIA", json.dumps(self.data))
+                self.assertIsNone(self.doctor.active_consultation(11))
+
+    async def test_urgent_web_notice_is_available_even_if_telegram_delivery_fails(self):
+        self.doctor.start_consultation(11, retain_history=False)
+        with patch.object(self.doctor, "send", AsyncMock(side_effect=TimeoutError("offline"))):
+            await self.consultation_message("No puedo respirar TEXTO_NO_GUARDAR", request_id="urgent_failed")
+        response = await self.client.get("/castori-web/request?request_id=urgent_failed", headers=HEADERS)
+        self.assertEqual(await response.json(), {
+            "request_id": "urgent_failed", "status": "uncertain", "notice": "urgent_help"})
+        self.assertNotIn("TEXTO_NO_GUARDAR", json.dumps(self.data))
 
 
 if __name__ == "__main__":

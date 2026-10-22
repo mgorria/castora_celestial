@@ -287,10 +287,26 @@ probarlo desde su propio chat con Salchicher, sin vincular su ID como el de Pati
 Si ella opta por compartir, Control recibe un resumen por respuesta con el bloque
 de entrada y la respuesta completa. Si elige privado no se reenvian sus textos.
 
-La memoria de consultas vive en `data.json` del volumen, separada del historial
-general, cuentos y lore. Se elimina tras 48 horas sin mensajes (limpieza periodica
-o al arrancar). `/olvidar` elimina esa memoria y cancela lo pendiente; no borra las
-copias en Telegram ni los registros que el proveedor pudiera conservar. OpenAI
+En la web, **Iniciar consulta** abre un episodio de cuidados privado. Sandra acepta
+el procesamiento de sus mensajes y elige por separado si quiere conservar la
+consulta en su historial; guardar no viene activado por defecto. Las consultas
+antiguas de Telegram no se importan ni adquieren permiso de archivo por abrir la web.
+Una consulta web nueva reemplaza la sesión temporal anterior sin copiar sus textos
+ni su permiso de compartir con el Oso. No existe un diagnóstico médico automático.
+
+La memoria vive en `data.json` del volumen, separada del historial general, cuentos
+y lore. Sin permiso de archivo, la consulta se elimina al cerrarla o tras 48 horas
+sin mensajes, igual que las sesiones tradicionales de Telegram. Con permiso de
+archivo, **Me encuentro bien** la cierra con estado `recovered`, una declaración de
+Sandra. Tras 30 días sin mensajes se cierra como `inactive`, nunca como curada. Leer
+una consulta no prolonga ese plazo. Las consultas guardadas permanecen disponibles
+para leer hasta borrarlas; abrir un historial no reanuda la conversación. Sólo puede
+haber una consulta activa por persona.
+
+**Borrar consulta** elimina ese episodio y cancela su respuesta pendiente.
+`/olvidar` elimina todas las consultas guardadas y la sesión activa de quien lo
+solicita, además del espejo web. No borra copias en Telegram ni los registros que el
+proveedor pudiera conservar. OpenAI
 recibe los textos para responder con `store=False`; esto no equivale a una promesa
 de retencion cero del proveedor. No se imprimen sintomas ni respuestas IA en logs.
 Una consulta pendiente puede continuar tras reiniciar; no se reenvian respuestas
@@ -496,13 +512,32 @@ Los archivos públicos se sincronizan desde el Site con `node sites/oficina-cast
 
 El proxy privado de Sites valida la cuenta de ChatGPT y envía el rol `owner` o `sandra`; `resolve_web_actor` lo vincula con la identidad ya configurada. Nunca se admiten IDs de usuario/chat enviados por el navegador. El token es servidor a servidor y debe ser aleatorio, independiente de los tokens de Telegram.
 
-Los handlers, base de datos, historial, revisiones de Centralita, colas y scheduler se reutilizan. Las salidas exitosas de Telegram aparecen en la web con sus teclados; la web admite los comandos y callbacks correspondientes. El espejo conserva hasta 200 eventos por conversación; el archivo duradero conserva los mensajes nuevos fuera de ese límite. Los últimos 1000 recibos evitan reejecutar una misma solicitud. Los envíos inciertos no se reintentan automáticamente.
+Los handlers, base de datos, historial, revisiones de Centralita, colas y scheduler se reutilizan. Las salidas exitosas de Telegram aparecen en la web con sus teclados; la web admite los comandos y callbacks correspondientes. Salchicher usa las rutas propias del consultorio descritas abajo: sus botones antiguos de consentimiento de Telegram no pueden abrir consultas web. El espejo conserva hasta 200 eventos por conversación; el archivo duradero conserva los mensajes nuevos fuera de ese límite. Los últimos 1000 recibos evitan reejecutar una misma solicitud. Los envíos inciertos no se reintentan automáticamente.
 
 `history_service.py` inicializa una instantánea del historial legado antes de arrancar el polling. Recupera sólo los mensajes aún conservados cuya identidad se pueda atribuir a la sesión y las respuestas de Mimosuga confirmadas como enviadas. La biblioteca consulta el texto completo de los cuentos de Mimosuga con destinatario y entrega confirmados, independientemente de su estado editorial. Las rutas autenticadas `/history`, `/stories` y `/story` admiten paginación y sólo leen la identidad resuelta en servidor. No existe una importación general del historial de Telegram: los mensajes ya descartados requieren una fuente adicional.
 
 Los eventos nuevos, salvo Salchicher, se encolan en `data.json` antes de recortar el espejo y se archivan de forma idempotente en PostgreSQL. Una caída de la base de datos conserva la cola para reintentar sin reenviar mensajes a Telegram. `/olvidar` de la Vaca incrementa una época persistente, limpia el historial local y borra el archivo anterior cuando la base vuelve a estar disponible; la época impide que los mensajes olvidados reaparezcan. Sus deseos siguen en su almacenamiento propio.
 
-Salchicher sólo guarda texto de usuario después del consentimiento. Su espejo caduca en un máximo de 48 horas y se purga al caducar la consulta o usar `/olvidar`. Las sesiones del propietario y Sandra permanecen separadas. La vista de Sandra nunca recibe planes privados de regalos ni acceso administrativo. Dulcimiel todavía no tiene servicio implementado.
+Salchicher sólo guarda texto de usuario después del consentimiento. Su espejo temporal caduca en un máximo de 48 horas y se purga al cerrar, borrar o caducar el episodio o usar `/olvidar`. El historial consentido del consultorio vive aparte en `data.json`; no entra en el archivo general de PostgreSQL ni se entrega a Centralita. Las sesiones e historiales del propietario y Sandra permanecen separados, también al conocer el identificador de una consulta ajena.
+
+### API del consultorio web
+
+Estas rutas usan el prefijo interno `/castori-web/` o el prefijo del portal `/api/bridge/`. La cookie del portal siempre identifica a Sandra; las solicitudes servidor a servidor resuelven el actor en el servidor. Ninguna ruta acepta `actor`, `chat_id` o un destinatario en su cuerpo o parámetros. Los POST del portal exigen el origen HTTPS configurado y JSON.
+
+| Ruta | Entrada | Resultado |
+| --- | --- | --- |
+| `GET consultations` | Sin parámetros | Resúmenes propios y `active_id`; no incluye mensajes |
+| `GET consultation` | `?id=ID` | Detalle y mensajes del episodio propio, o 404 |
+| `POST consultation-action` | `{"action":"start","retain_history":true}`; booleano obligatorio | Consulta privada con saludo inicial; 409 si ya hay una activa |
+| `POST consultation-action` | `{"action":"close","consultation_id":"ID"}` | Cierra por declaración de mejoría; elimina si era temporal |
+| `POST consultation-action` | `{"action":"delete","consultation_id":"ID"}` | Borra sólo el episodio propio seleccionado |
+| `POST consultation-message` | `{"consultation_id":"ID","text":"…","request_id":"…"}` | Recibo idempotente; 409 si no corresponde a la consulta activa |
+
+El mensaje se comprueba otra vez al ejecutarlo para impedir que una petición en espera entre en una consulta posterior. Las respuestas tardías tampoco se reflejan en otro episodio. Las consultas cerradas son de lectura; para escribir se inicia otra. La ruta genérica `message` de Salchicher admite únicamente `/ayuda` y `/olvidar`; el texto de consulta pasa por `consultation-message` y requiere un episodio iniciado explícitamente.
+
+Si el filtro urgente cierra la consulta, su recibo devuelve `notice: "urgent_help"` al consultar `GET request?request_id=…` o repetir la misma solicitud. Es un código fijo, sin síntomas, para mostrar el aviso en la web aunque la consulta temporal ya se haya borrado o el envío a Telegram haya fallado. Un resultado `uncertain` también puede llevar este aviso.
+
+La Vaca conserva sus deseos propios en `state.wishes` y sus mensajes ya recibidos en `history?animal=vaca`. Las acciones `/pedir`, `/favorito` y `/quitar` utilizan los mismos handlers del bot. La vista de Sandra nunca recibe planes privados de regalos, fechas futuras de visitas ni acceso administrativo. Dulcimiel todavía no tiene servicio implementado.
 
 ### Centralita en la web
 
@@ -510,4 +545,4 @@ Salchicher sólo guarda texto de usuario después del consentimiento. Su espejo 
 
 El bot de Centralita refleja mensajes, teclados y resultados en un registro separado en RAM (200 eventos, 48 horas). No se archiva en PostgreSQL ni en el historial de Sandra. El cursor incluye una identidad de arranque para que el navegador descarte datos tras un reinicio. Los recibos persistentes evitan repetir acciones y permiten consultar resultados inciertos sin reenviar. `/mimosuga_pendientes [ID]` vuelve a mostrar propuestas pendientes y sus controles originales; consultar el estado del panel nunca envía mensajes.
 
-Pruebas offline: `python -m unittest discover -s tests -q`. Los tests de web utilizan HTTP local y Telegram/OpenAI simulados. La activación de la configuración en producción está pendiente de autorización.
+Pruebas offline: `python -m unittest discover -s tests -q`. Los tests de web utilizan HTTP local y Telegram/OpenAI simulados. Pasar estas pruebas no acredita un despliegue en producción; su versión y funcionamiento deben comprobarse por separado.

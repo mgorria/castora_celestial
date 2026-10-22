@@ -1,18 +1,26 @@
-"""Telegram lifecycle and short-lived, private consultation state."""
+"""Private care episodes, with opt-in history and legacy Telegram consent."""
 
 import asyncio
+import copy
 import logging
 import time
 from typing import Callable
+from uuid import uuid4
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from salchicher_service import EMERGENCY_TEXT, UNAVAILABLE_TEXT, generate_care_reply, urgent_signal
+from salchicher_service import CARE, EMERGENCY_TEXT, UNAVAILABLE_TEXT, generate_care_reply, urgent_signal
 
 logger = logging.getLogger("control-castora.salchicher")
 RETENTION_SECONDS = 48 * 60 * 60
+INACTIVITY_SECONDS = 30 * 24 * 60 * 60
 MAX_MESSAGES = 24
+CONSULTATION_GREETING = (
+    "¡Adelante, patita! Te guardé el sillón junto a la ventana. Me pongo las gafitas "
+    "y abro nuestro cuaderno de cuidados. Cuéntame qué notas y desde cuándo, "
+    "y vamos pasito a pasito."
+)
 INTRO = (
     "Soy el Doctor Salchicher, patita: personaje de cuidados y mimos. Puedo hacerte "
     "unas preguntas y proponerte cuidados generales; no soy un medico ni hago diagnosticos.\n\n"
@@ -48,22 +56,198 @@ class Salchicher:
         return bool(self.state().get("enabled", True))
 
     def session(self, chat_id: int) -> dict | None:
+        self._expire_consultations()
         session = self.state().get("sessions", {}).get(str(chat_id))
-        if session and session.get("updated_at", 0) + RETENTION_SECONDS > time.time():
-            return session
-        return None
+        if session and not session.get("session_id"):
+            # Legacy consent is unchanged; this internal identity only fences
+            # an old in-flight send from a later session after /olvidar.
+            self.set_session(chat_id, session)
+        return session
 
     def set_session(self, chat_id: int, session: dict) -> None:
         state = self.state()
+        session.setdefault("session_id", uuid4().hex)
+        state.setdefault("sessions", {})[str(chat_id)] = session
+        self.store(state)
+
+    def _cancel_worker(self, chat_id: int) -> None:
+        task = self.tasks.pop(chat_id, None)
+        if task:
+            task.cancel()
+
+    def _expire_consultations(self) -> None:
+        """Read-time and scheduled expiry; reading an episode is not activity."""
+        state = self.state()
+        changed = False
+        now = time.time()
+        for key, session in list(state.get("sessions", {}).items()):
+            retained = session.get("consultation_id") and session.get("retained") is True
+            ttl = INACTIVITY_SECONDS if retained else RETENTION_SECONDS
+            if session.get("updated_at", 0) + ttl > now:
+                continue
+            self._cancel_worker(int(key))
+            if retained:
+                record = state.get("consultations", {}).get(key, {}).get(session["consultation_id"])
+                if record and record.get("status") == "active":
+                    record["status"] = "inactive"
+                    record["closed_at"] = session.get("updated_at", 0) + ttl
+                    record["closure_reason"] = "inactivity"
+            state["sessions"].pop(key, None)
+            changed = True
+        if changed:
+            self.store(state)
+
+    def _require_user(self, chat_id: int) -> None:
+        if type(chat_id) is not int or chat_id not in self.authorized():
+            raise ValueError("consultation_forbidden")
+
+    @staticmethod
+    def _consultation_record(state: dict, chat_id: int, session: dict) -> dict | None:
+        if not session.get("consultation_id"):
+            return None
+        if session.get("retained") is True:
+            return state.get("consultations", {}).get(str(chat_id), {}).get(session["consultation_id"])
+        return session.get("consultation")
+
+    @staticmethod
+    def _public_consultation(record: dict, *, include_messages: bool = True) -> dict:
+        fields = ("id", "title", "status", "retained", "created_at", "updated_at",
+                  "closed_at", "closure_reason", "care_summary")
+        result = {key: copy.deepcopy(record.get(key)) for key in fields}
+        if include_messages:
+            result["messages"] = copy.deepcopy(record.get("messages", []))
+        return result
+
+    def list_consultations(self, chat_id: int) -> list[dict]:
+        self._require_user(chat_id)
+        self._expire_consultations()
+        state = self.state()
+        records = list(state.get("consultations", {}).get(str(chat_id), {}).values())
+        session = state.get("sessions", {}).get(str(chat_id), {})
+        if session.get("consultation_id") and session.get("retained") is not True:
+            record = self._consultation_record(state, chat_id, session)
+            if record:
+                records.append(record)
+        return [self._public_consultation(record, include_messages=False)
+                for record in sorted(records, key=lambda record: record["created_at"], reverse=True)]
+
+    def get_consultation(self, chat_id: int, consultation_id: str) -> dict | None:
+        self._require_user(chat_id)
+        self._expire_consultations()
+        state = self.state()
+        record = state.get("consultations", {}).get(str(chat_id), {}).get(consultation_id)
+        if record is None:
+            session = state.get("sessions", {}).get(str(chat_id), {})
+            if session.get("consultation_id") == consultation_id:
+                record = self._consultation_record(state, chat_id, session)
+        return self._public_consultation(record) if record else None
+
+    def active_consultation(self, chat_id: int) -> dict | None:
+        self._require_user(chat_id)
+        session = self.session(chat_id)
+        if session and session.get("consultation_id"):
+            return self.get_consultation(chat_id, session["consultation_id"])
+        return None
+
+    def has_active_consultation(self, chat_id: int) -> bool:
+        return self.active_consultation(chat_id) is not None
+
+    def start_consultation(self, chat_id: int, *, retain_history: bool) -> dict:
+        """Start only after the caller has collected a separate history choice."""
+        self._require_user(chat_id)
+        if type(retain_history) is not bool:
+            raise ValueError("consultation_consent_required")
+        if not self.enabled():
+            raise ValueError("consultation_paused")
+        self._expire_consultations()
+        state = self.state()
+        key = str(chat_id)
+        existing = state.get("sessions", {}).get(key)
+        if existing and existing.get("consultation_id"):
+            raise ValueError("consultation_active")
+        # A legacy 48-hour session has no archival consent. Starting a new web
+        # episode replaces it without importing its history or sharing setting.
+        self._cancel_worker(chat_id)
+        now = time.time()
+        consultation_id = uuid4().hex
+        record = {
+            "id": consultation_id, "title": "Consulta de cuidados", "status": "active",
+            "retained": retain_history, "created_at": now, "updated_at": now,
+            "closed_at": None, "closure_reason": None, "care_summary": [],
+            "messages": [{"role": "assistant", "content": CONSULTATION_GREETING, "created_at": now}],
+        }
+        session = {
+            "consultation_id": consultation_id, "session_id": consultation_id,
+            "retained": retain_history, "shared": False,
+            "history": [{"role": "assistant", "content": CONSULTATION_GREETING}],
+            "asked": [], "updated_at": now, "version": time.time_ns(), "pending": False,
+        }
+        if retain_history:
+            state.setdefault("consultations", {}).setdefault(key, {})[consultation_id] = record
+        else:
+            session["consultation"] = record
+        state.setdefault("sessions", {})[key] = session
+        self.store(state)
+        return self._public_consultation(record)
+
+    def close_consultation(self, chat_id: int, consultation_id: str) -> dict | None:
+        """The person reports feeling better; this is never a medical conclusion."""
+        self._require_user(chat_id)
+        self._expire_consultations()
+        state = self.state()
+        key = str(chat_id)
+        session = state.get("sessions", {}).get(key, {})
+        if session.get("consultation_id") != consultation_id:
+            return self.get_consultation(chat_id, consultation_id)
+        self._cancel_worker(chat_id)
+        record = self._consultation_record(state, chat_id, session)
+        if record:
+            record["status"] = "recovered"
+            record["closed_at"] = time.time()
+            record["closure_reason"] = "feeling_better"
+        state["sessions"].pop(key, None)
+        self.store(state)
+        return self._public_consultation(record) if record and session.get("retained") else None
+
+    def delete_consultation(self, chat_id: int, consultation_id: str) -> bool:
+        self._require_user(chat_id)
+        self._expire_consultations()
+        state = self.state()
+        key = str(chat_id)
+        removed = state.get("consultations", {}).get(key, {}).pop(consultation_id, None) is not None
+        session = state.get("sessions", {}).get(key, {})
+        if session.get("consultation_id") == consultation_id:
+            self._cancel_worker(chat_id)
+            state["sessions"].pop(key, None)
+            removed = True
+        if not state.get("consultations", {}).get(key):
+            state.get("consultations", {}).pop(key, None)
+        if removed:
+            self.store(state)
+        return removed
+
+    def _save_message(self, chat_id: int, session: dict, role: str, content: str) -> None:
+        state = self.state()
+        now = time.time()
+        session["history"] = (session["history"] + [{"role": role, "content": content}])[-MAX_MESSAGES:]
+        session["updated_at"] = now
+        record = self._consultation_record(state, chat_id, session)
+        if record:
+            record["messages"].append({"role": role, "content": content, "created_at": now})
+            record["updated_at"] = now
+            if role == "assistant":
+                # Only include vetted care sentences actually delivered in this
+                # episode. Never infer a diagnosis from the person's messages.
+                selected = [text for text in CARE.values() if text in content]
+                record["care_summary"] = list(dict.fromkeys(record["care_summary"] + selected))
         state.setdefault("sessions", {})[str(chat_id)] = session
         self.store(state)
 
     def forget(self, chat_id: int) -> None:
-        task = self.tasks.pop(chat_id, None)
-        if task:
-            task.cancel()
+        self._cancel_worker(chat_id)
         state = self.state()
         state.setdefault("sessions", {}).pop(str(chat_id), None)
+        state.get("consultations", {}).pop(str(chat_id), None)
         self.store(state)
 
     def set_enabled(self, enabled: bool) -> None:
@@ -99,6 +283,24 @@ class Salchicher:
     async def welcome(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not self.allowed(update):
             return
+        current = self.active_consultation(update.effective_chat.id)
+        if current:
+            retention = (
+                "Elegiste guardar este historial privado para volver a leerlo: se conserva "
+                "hasta que lo borres. Si pasan 30 días sin actividad, la consulta se cierra "
+                "por inactividad; eso no significa que te hayas recuperado."
+                if current["retained"] else
+                "Elegiste no guardar historial: esta consulta se borra al cerrarla o tras "
+                "48 horas sin actividad."
+            )
+            await update.effective_chat.send_message(
+                "Tu sillón sigue reservado, patita. Tenemos una consulta de cuidados abierta "
+                "y puedes continuar contándome por aquí o desde la web.\n\n"
+                + retention + " No envío copia al Oso. Puedes cerrar la consulta en la web "
+                "cuando te encuentres mejor, o borrar todas tus consultas con /olvidar. "
+                "Las copias de los chats de Telegram se borran desde Telegram."
+            )
+            return
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("Abrir consulta privada", callback_data="salchicher:private")],
             [InlineKeyboardButton("Abrir y compartir con el Oso", callback_data="salchicher:shared")],
@@ -129,7 +331,7 @@ class Salchicher:
             return
         self.forget(update.effective_chat.id)
         await update.effective_chat.send_message(
-            "He borrado la consulta de mi memoria, patita. Las copias en Telegram siguen "
+            "He borrado tus consultas y su historial de mi memoria, patita. Las copias en Telegram siguen "
             "en sus chats. Cuando quieras, podemos abrir otra con /consulta."
         )
 
@@ -143,7 +345,21 @@ class Salchicher:
         # This backstop runs before batching, model availability, consent or the on/off switch.
         if urgent_signal(text):
             session = self.session(chat_id)
-            self.forget(chat_id)
+            self._cancel_worker(chat_id)
+            if session and session.get("consultation_id"):
+                session["pending"] = False
+                session["version"] += 1
+                self._save_message(chat_id, session, "user", text[:4000])
+                self._save_message(chat_id, session, "assistant", EMERGENCY_TEXT)
+            state = self.state()
+            if session:
+                record = self._consultation_record(state, chat_id, session)
+                if record:
+                    record["status"] = "inactive"
+                    record["closed_at"] = time.time()
+                    record["closure_reason"] = "urgent_help"
+            state.setdefault("sessions", {}).pop(str(chat_id), None)
+            self.store(state)
             await self.send(chat_id, EMERGENCY_TEXT)
             if session and session.get("shared"):
                 await self.safe_notify("Doctor Salchicher ha indicado buscar ayuda urgente.\n" + text[:2500])
@@ -162,12 +378,10 @@ class Salchicher:
         if len(text) > 4000:
             await self.send(chat_id, "Cuentame lo principal en un mensaje mas corto, patita.")
             return
-        session["history"] = (session["history"] + [{"role": "user", "content": text}])[-MAX_MESSAGES:]
-        session["updated_at"] = time.time()
         session["due_at"] = time.time() + self.idle_seconds
         session["version"] += 1
         session["pending"] = True
-        self.set_session(chat_id, session)
+        self._save_message(chat_id, session, "user", text)
         self.ensure_worker(chat_id)
 
     def ensure_worker(self, chat_id: int) -> None:
@@ -185,6 +399,8 @@ class Salchicher:
                     await asyncio.sleep(remaining)
                     continue
                 version = session["version"]
+                consultation_id = session.get("consultation_id")
+                session_id = session["session_id"]
                 history = session["history"]
                 try:
                     reply, questions = await asyncio.wait_for(
@@ -196,6 +412,9 @@ class Salchicher:
                     reply, questions = UNAVAILABLE_TEXT, []
                 current = self.session(chat_id)
                 if not current or not self.enabled():
+                    return
+                if (current.get("consultation_id") != consultation_id
+                        or current.get("session_id") != session_id):
                     return
                 if current["version"] != version:
                     continue
@@ -210,10 +429,14 @@ class Salchicher:
                                            "No se reintentara automaticamente para evitar duplicados.")
                     continue
                 latest = self.session(chat_id)
-                if latest:
-                    latest["history"] = (latest["history"] + [{"role": "assistant", "content": reply}])[-MAX_MESSAGES:]
+                if (latest and latest.get("consultation_id") == consultation_id
+                        and latest.get("session_id") == session_id):
                     latest["asked"] = list(dict.fromkeys(latest["asked"] + questions))
-                    self.set_session(chat_id, latest)
+                    self._save_message(chat_id, latest, "assistant", reply)
+                else:
+                    # Closing or deleting while transport was pending must not
+                    # re-create history or attach a reply to a later episode.
+                    return
                 if current.get("shared"):
                     block = []
                     for entry in reversed(history):
@@ -231,11 +454,7 @@ class Salchicher:
                 self.tasks.pop(chat_id, None)
 
     def maintenance(self) -> None:
-        state = self.state()
-        expired = [key for key, session in state.get("sessions", {}).items()
-                   if session.get("updated_at", 0) + RETENTION_SECONDS <= time.time()]
-        for key in expired:
-            self.forget(int(key))
+        self._expire_consultations()
         if self.enabled():
             for key, session in self.state().get("sessions", {}).items():
                 if session.get("pending") and int(key) in self.authorized():

@@ -200,26 +200,26 @@ class WebBridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await status.json())["status"], "uncertain")
 
     async def test_callback_requires_same_actor_current_button_and_allowed_prefix(self):
-        event = self.keyboard_event()
-        body = {"animal": "salchicher", "event_id": event["id"], "data": "salchicher:private", "request_id": "request001"}
-        for mutation, headers in (({"data": "salchicher:shared"}, HEADERS), ({}, OWNER_HEADERS),
-                                  ({"data": "autoreply:99:send"}, HEADERS), ({"animal": "mimosuga"}, HEADERS)):
+        event = self.keyboard_event("mimosuga", 11, "cuento:1:continue")
+        body = {"animal": "mimosuga", "event_id": event["id"], "data": "cuento:1:continue", "request_id": "request001"}
+        for mutation, headers in (({"data": "cuento:2:continue"}, HEADERS), ({}, OWNER_HEADERS),
+                                  ({"data": "autoreply:99:send"}, HEADERS), ({"animal": "corte"}, HEADERS)):
             response = await self.post("callback", {**body, **mutation}, headers)
             self.assertEqual(response.status, 403)
         response = await self.post("callback", body)
         self.assertEqual(response.status, 202)
         await self.finish()
-        update = self.apps["salchicher"].updates[0]
-        self.assertEqual(update.callback_query.data, "salchicher:private")
+        update = self.apps["mimosuga"].updates[0]
+        self.assertEqual(update.callback_query.data, "cuento:1:continue")
         self.assertEqual(update.callback_query.message.message_id, 99)
         self.assertTrue(update.callback_query.id.startswith("web:"))
 
     async def test_callback_duplicate_still_succeeds_after_button_removal(self):
-        event = self.keyboard_event()
-        body = {"animal": "salchicher", "event_id": event["id"], "data": "salchicher:private", "request_id": "request001"}
+        event = self.keyboard_event("mimosuga", 11, "cuento:1:continue")
+        body = {"animal": "mimosuga", "event_id": event["id"], "data": "cuento:1:continue", "request_id": "request001"}
         await self.post("callback", body)
         await self.finish()
-        self.bridge.edit_keyboard("salchicher", 11, 99, None)
+        self.bridge.edit_keyboard("mimosuga", 11, 99, None)
         response = await self.post("callback", body)
         self.assertTrue((await response.json())["duplicate"])
         response = await self.post("callback", {**body, "request_id": "request002"})
@@ -317,6 +317,35 @@ class WebBridgeTests(unittest.IsolatedAsyncioTestCase):
             with patch.object(self.bridge, "record", side_effect=OSError("disk full")):
                 self.assertIs(await bot.send_message(11, "Hola"), delivered)
             send.assert_awaited_once()
+
+    async def test_late_delivery_is_not_recorded_in_a_new_consultation(self):
+        self.data["salchicher"]["sessions"]["11"]["consultation_id"] = "old-consultation"
+        self.data["salchicher"]["sessions"]["11"]["retained"] = True
+        bot = RecordingExtBot(token="123:offline", bridge=self.bridge, animal_key="salchicher")
+        delivered = Message.de_json({"message_id": 99, "date": int(time.time()), "text": "Respuesta anterior",
+                                     "chat": {"id": 11, "type": "private"}}, bot)
+
+        async def delayed(*args, **kwargs):
+            self.data["salchicher"]["sessions"]["11"]["consultation_id"] = "new-consultation"
+            return delivered
+
+        with patch.object(ExtBot, "send_message", AsyncMock(side_effect=delayed)):
+            self.assertIs(await bot.send_message(11, "Respuesta anterior"), delivered)
+        self.assertEqual((await self.get_events("salchicher"))["events"], [])
+
+    async def test_late_legacy_delivery_is_not_recorded_after_a_new_telegram_consent(self):
+        self.data["salchicher"]["sessions"]["11"]["session_id"] = "old-telegram-session"
+        bot = RecordingExtBot(token="123:offline", bridge=self.bridge, animal_key="salchicher")
+        delivered = Message.de_json({"message_id": 99, "date": int(time.time()), "text": "Respuesta anterior",
+                                     "chat": {"id": 11, "type": "private"}}, bot)
+
+        async def delayed(*args, **kwargs):
+            self.data["salchicher"]["sessions"]["11"]["session_id"] = "new-telegram-session"
+            return delivered
+
+        with patch.object(ExtBot, "send_message", AsyncMock(side_effect=delayed)):
+            self.assertIs(await bot.send_message(11, "Respuesta anterior"), delivered)
+        self.assertEqual((await self.get_events("salchicher"))["events"], [])
 
 
 if __name__ == "__main__":

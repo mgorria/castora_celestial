@@ -73,6 +73,12 @@
     if (id === 'corte') return `<span class="${avatar ? 'avatar avatar-symbol' : 'court-portrait'}" aria-hidden="true"><span>⚖</span>${avatar ? '' : '<small>la corte celestial</small>'}</span>`;
     return `<img class="${avatar ? 'avatar' : ''}" src="assets/${id === 'vaca' ? 'vaca-v2' : id}.png" alt="${avatar ? '' : esc(characters[id].name)}" ${avatar ? '' : 'loading="lazy"'}>`;
   }
+  const experiences = window.CastoriExperiences?.create({ bridge, esc, icon, portrait, formatDate, formatTime, uid,
+    mode: () => mode, epoch: () => liveEpoch, ready, navigate, toast, showModal, closeModal: () => modal.close(), submitLive,
+    refreshState: refreshServerState,
+    wishes: () => mode === 'demo' ? state.wishes.map(w => ({ ...w, name: w.text })) : (serverState.wishes || []),
+    demoWish: (action, wish) => { if (mode !== 'demo') return; if (action === 'add') state.wishes.push(wish); else if (action === 'remove') state.wishes = state.wishes.filter(w => w.id !== wish.id); else { const w = state.wishes.find(w => w.id === wish.id); if (w) w.favorite = !w.favorite; } persist(); }
+  });
   function accountChrome() {
     document.body.dataset.access = accountLocked() ? 'locked' : 'open';
     document.getElementById('account-gate').hidden = !accountLocked();
@@ -142,10 +148,10 @@
     const controlNav = document.getElementById('control-nav'); controlNav.hidden = !canOpenControl(); controlNav.querySelector('span').textContent = mode === 'demo' ? 'Vista de Miguel' : 'Mi Centralita';
   }
   function renderFriends() {
-    document.getElementById('friend-nav').innerHTML = ids.map(id => `<button class="friend-link ${view === 'chat' && activeId === id ? 'active' : ''}" data-chat="${id}">${portrait(id, true)}<span class="friend-name">${esc(characters[id].name)}<small>${esc(status(id))}</small></span><span class="online-dot ${ready(id) && mode === 'live' ? '' : 'offline'}" aria-hidden="true"></span></button>`).join('');
+    document.getElementById('friend-nav').innerHTML = ids.map(id => `<button class="friend-link ${['chat', 'clinic', 'consultation', 'vaca'].includes(view) && activeId === id ? 'active' : ''}" data-chat="${id}">${portrait(id, true)}<span class="friend-name">${esc(characters[id].name)}<small>${esc(status(id))}</small></span><span class="online-dot ${ready(id) && mode === 'live' ? '' : 'offline'}" aria-hidden="true"></span></button>`).join('');
   }
   function title(eyebrow, heading, text) { return `<div class="page-title"><div class="eyebrow">${icon('star')}${esc(eyebrow)}</div><h1>${esc(heading)}</h1><p>${esc(text)}</p></div>`; }
-  function card(id) { return `<button class="character-card" data-chat="${id}"><div class="portrait-wrap">${portrait(id)}</div><h3>${esc(characters[id].name)}</h3><p>${esc(details[id].short)}</p><span class="card-bottom">${esc(ready(id) ? 'Entrar a charlar' : status(id))} ${icon('arrow')}</span></button>`; }
+  function card(id) { return `<button class="character-card" data-chat="${id}"><div class="portrait-wrap">${portrait(id)}</div><h3>${esc(characters[id].name)}</h3><p>${esc(details[id].short)}</p><span class="card-bottom">${esc(ready(id) ? (id === 'salchicher' ? 'Visitar el consultorio' : id === 'vaca' ? 'Entrar al establo' : 'Entrar a charlar') : status(id))} ${icon('arrow')}</span></button>`; }
   function home() {
     return `<section class="hero" aria-labelledby="welcome-title"><img class="hero-art" src="assets/casa-celestial-v2.png" alt="Castori, Mimosuga y la Vaca Mágica en una oficina iluminada dentro de un árbol"><div class="hero-content"><div class="eyebrow">${icon('star')} UN LUGAR HECHO DE CARIÑO</div><h1 id="welcome-title">Qué bien que estés<br>aquí, <em>Patita.</em></h1><p>Al otro lado hay una historia, un abrazo<br>y alguien con ganas de escucharte.</p><div class="hero-buttons"><button class="button" data-chat="mimosuga">¿Charlamos un ratito? ${icon('arrow')}</button><button class="text-button" id="discover-friends">Conocer a mis amigos</button></div></div><div class="hero-caption">${icon('heart')} Pasa. Estás en casa.</div></section><section id="our-friends"><div class="section-heading"><div><h2>¿Con quién te apetece hablar?</h2><p>Tu pequeño universo, con todas sus historias.</p></div><span class="aside-note">Siempre hay una silla para ti.</span></div><div class="character-grid">${ids.map(card).join('')}</div></section><div class="below-home"><button class="story-feature" data-story="${stories[0].id}"><span class="mini-book">${icon('book')}</span><span><span class="eyebrow">UN CUENTO DE MUESTRA</span><h3>${esc(stories[0].title)}</h3><p>Una pequeña historia para explorar este rincón.</p></span>${icon('arrow')}</button><div class="daily-note"><span>✧</span><div><span class="eyebrow">UNA COSITA PARA RECORDAR</span><blockquote>Lo bonito también está<br>en los días normales.</blockquote></div></div></div>`;
   }
@@ -237,7 +243,7 @@
   function cancelPage(page) { if (!page) return; page.version++; page.controller?.abort(); page.controller = null; page.loading = false; }
   function cancelStory() { storyVersion++; storyController?.abort(); storyController = null; }
   function cancelArchiveReads() { Object.values(archives).forEach(cancelPage); cancelPage(storyShelf); cancelStory(); }
-  function clearHistory(id) { cancelPage(archives[id]); delete archives[id]; }
+  function clearHistory(id) { cancelPage(archives[id]); delete archives[id]; if (id === 'vaca') experiences?.clearLetters(); }
   function archiveAccessError(error) {
     if (error.status !== 401 && error.status !== 403) return false;
     clearLiveState(); mode = 'offline'; connectionError = error.message; connectionStatus = error.status; navigate(view, activeId, false); return true;
@@ -507,16 +513,21 @@
     return title('El cuaderno de la Vaca Mágica', 'Las cosas que te hacen ilusión.', mode === 'demo' ? 'Un cuaderno de ejemplo, guardado solo en este navegador.' : 'Tus deseos se gestionan con el mismo cuaderno de la Vaca Mágica.') + `<div class="wish-board"><div><form class="wish-form" id="wish-form"><input id="wish-input" aria-label="Nuevo deseo" placeholder="Me haría ilusión…" maxlength="240" ${enabled ? '' : 'disabled'} required><button class="button" type="submit" ${enabled ? '' : 'disabled'}>${icon('plus')} Apuntar ilusión</button></form>${mode !== 'demo' ? `<button class="text-button wish-chat-link" data-open-wishlist ${canCommand('vaca', '/lista') ? '' : 'disabled'}>Ver la lista en la conversación →</button>` : ''}<div id="wish-list">${wishRows()}</div></div><aside class="wish-aside"><img src="assets/vaca-v2.png" alt="La Vaca Mágica"><p>«Patita, tengo una página<br>muuuuy especial para ti.»</p><small>Apuntar un deseo no promete un regalo. Lo bonito empieza por imaginarlo.</small><button class="text-button" data-chat="vaca" style="margin-top:20px">Contárselo a la Vaca →</button></aside></div>`;
   }
   function stopPolling() { pollVersion++; clearTimeout(pollTimer); if (pollController) pollController.abort(); pollController = null; }
-  function navigate(next, id, updateHash = true) {
+  function navigate(next, id, updateHash = true, direct = false) {
     if (accountLocked()) return;
+    if (experiences && next === 'chat' && id === 'salchicher') next = 'clinic';
+    if (experiences && (next === 'wishes' || next === 'chat' && id === 'vaca' && !direct)) next = 'vaca';
+    const experienceId = next === 'consultation' ? (id && !ids.includes(id) ? id : experiences?.selectedId()) : null;
+    experiences?.leave();
     if (view === 'control' && next !== 'control') clearInvitationSecret();
     stopPolling(); stopAdminReads(); cancelArchiveReads(); if (modal.open) modal.close(); if (next === 'chat' && !ids.includes(id)) next = 'home'; view = next; if (id && ids.includes(id)) activeId = id;
-    const views = { home, conversations, library, memories, wishes, control }; main.innerHTML = next === 'chat' ? chat(activeId) : (views[next] || home)();
-    const labels = { home: 'Mi rincón', conversations: 'Conversaciones', library: 'La biblioteca', memories: 'Mis recuerdos', wishes: 'Cuaderno de ilusiones', control: 'Mi Centralita' };
+    if (next === 'clinic' || next === 'consultation') activeId = 'salchicher'; else if (next === 'vaca') activeId = 'vaca';
+    const views = { home, conversations, library, memories, wishes, control }; main.innerHTML = experiences && ['clinic', 'consultation', 'vaca'].includes(next) ? experiences.render(next, experienceId) : next === 'chat' ? chat(activeId) : (views[next] || home)();
+    const labels = { home: 'Mi rincón', conversations: 'Conversaciones', library: 'La biblioteca', memories: 'Mis recuerdos', wishes: 'Cuaderno de ilusiones', control: 'Mi Centralita', clinic: 'El consultorio de Salchicher', consultation: 'Mi consulta', vaca: 'El establo de las ilusiones' };
     document.getElementById('breadcrumb-current').textContent = next === 'chat' ? characters[activeId].name : labels[next] || 'Mi rincón';
     document.querySelectorAll('.nav-item').forEach(b => { const active = b.dataset.view === next || (next === 'chat' && b.dataset.view === 'conversations'); b.classList.toggle('active', active); if (active) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); b.querySelector('.nav-dot')?.remove(); if (active) b.insertAdjacentHTML('beforeend', '<span class="nav-dot"></span>'); });
     renderFriends(); renderConnection(); closeMenu();
-    const nextHash = next === 'chat' ? `#chat/${activeId}` : `#${next === 'home' ? 'inicio' : next}`; if (updateHash && location.hash !== nextHash) history.pushState(null, '', nextHash);
+    const nextHash = next === 'consultation' ? '#consultation/' + encodeURIComponent(experienceId || '') : next === 'chat' ? `#${activeId === 'vaca' ? 'carta' : 'chat'}/${activeId}` : `#${next === 'home' ? 'inicio' : next}`; if (updateHash && location.hash !== nextHash) history.pushState(null, '', nextHash);
     window.scrollTo(0, 0); if (next === 'chat') { scrollChat(); bindComposer(); }
     if (next === 'wishes') document.getElementById('wish-form').addEventListener('submit', addWish);
     main.focus({ preventScroll: true });
@@ -524,6 +535,7 @@
     if (mode === 'live' && next === 'wishes') startPolling('vaca');
     if (mode === 'live' && next === 'library') loadStories(true);
     if (next === 'control' && canOpenControl()) { bindControl(); if (mode === 'live') { loadAdminState(); startAdminPolling(); } }
+    if (['clinic', 'consultation', 'vaca'].includes(next)) experiences?.enter(next);
   }
   function scrollChat() { const log = document.getElementById('chat-messages'); if (log) log.scrollTop = log.scrollHeight; }
   function refreshChat(forceScroll = false, prepended = false) {
@@ -559,6 +571,7 @@
     if (mode === 'live') {
       renderFriends();
       if (view === 'wishes') document.getElementById('wish-list').innerHTML = wishRows();
+      if (view === 'vaca') experiences?.refreshWishes();
       if (view === 'chat') {
         document.querySelectorAll('[data-command]').forEach(b => { b.disabled = !canCommand(activeId, b.dataset.command); });
         document.getElementById('chat-input').disabled = !ready(activeId); refreshChat();
@@ -567,6 +580,7 @@
     return data;
   }
   function clearLiveState() {
+    experiences?.clear();
     liveEpoch++; cancelArchiveReads(); if (modal.open) modal.close(); document.getElementById('modal-content').innerHTML = '';
     clearAdminState();
     for (const data of [liveChats, cursors, deliveryNotes]) for (const key of Object.keys(data)) delete data[key];
@@ -603,7 +617,7 @@
   function exploreDemo() {
     if (account.portal || accountLocked()) return;
     clearInvitationSecret();
-    connectVersion++; stopPolling(); mode = 'demo';
+    connectVersion++; stopPolling(); clearLiveState(); mode = 'demo';
     for (const id of ids) { const messages = state.chats[id]; if (id !== 'corte' && Array.isArray(messages) && messages.at(-1)?.role === 'user' && !pending.has(id)) { const last = messages.at(-1); messages.push({ id: uid(), role: 'assistant', text: reply(id, last.text, messages.slice(0, -1)), time: Date.now() }); } }
     navigate(view, activeId, false);
   }
@@ -678,7 +692,7 @@
     } finally { if (version === storyVersion) storyController = null; }
   }
   function openStory(id) { const s = stories.find(x => x.id === id); if (!s) return; cancelStory(); const saved = state.memories.some(x => x.storyId === id); showModal(`<div class="eyebrow">${icon('book')}CUENTO DE MUESTRA</div><h2 id="modal-title">${esc(s.title)}</h2><div class="story-text">${esc(s.body)}</div><div class="story-signature">Con cariño, desde la Castora Celestial.</div><button class="button secondary" data-save-story="${esc(s.id)}">${icon(saved ? 'check' : 'heart')}${saved ? 'Guardado en mis recuerdos' : 'Guardar este cuento de muestra'}</button>`); }
-  function about() { cancelStory(); showModal(`<div class="eyebrow">${icon('star')} TU PEQUEÑO UNIVERSO</div><h2 id="modal-title">Una ventanita a vuestros bots.</h2><p>Con el acceso conectado, los mensajes, los cuentos, los deseos y los botones llegan desde los mismos servicios de tus bots. Oficina Castori espera una respuesta humana; Dulcimiel estará disponible próximamente.</p><p>La biblioteca reúne los cuentos que Mimosuga ya te ha entregado. Las tres muestras del boceto están en una sección separada. El modo «Explorar boceto» utiliza respuestas preparadas y datos locales de ejemplo.</p><p>Las conversaciones conectadas y los cuentos reales no se guardan en este navegador. Salchicher muestra solo su consulta activa de hasta 48 horas, sin archivo permanente; puedes elegir una consulta privada o compartida y borrarla desde su conversación. Los favoritos de cuentos de muestra sí se guardan localmente.</p><button class="button" id="close-about">Volver a mi rincón ${icon('heart')}</button>`); }
+  function about() { cancelStory(); showModal(`<div class="eyebrow">${icon('star')} TU PEQUEÑO UNIVERSO</div><h2 id="modal-title">Una ventanita a vuestros bots.</h2><p>Con el acceso conectado, los mensajes, los cuentos, los deseos y los botones llegan desde los mismos servicios de tus bots. Oficina Castori espera una respuesta humana; Dulcimiel estará disponible próximamente.</p><p>La biblioteca reúne los cuentos que Mimosuga ya te ha entregado. Las tres muestras del boceto están en una sección separada. El modo «Explorar boceto» utiliza respuestas preparadas y datos locales de ejemplo.</p><p>Las conversaciones conectadas y los cuentos reales no se guardan en este navegador. Salchicher tiene un consultorio privado: tú eliges si guardas cada consulta. Las guardadas se cierran tras 30 días sin actividad y siguen disponibles para releer; las temporales se borran tras 48 horas sin actividad o al cerrarlas. Puedes borrar cualquier consulta desde su ficha. Los favoritos de cuentos de muestra sí se guardan localmente.</p><button class="button" id="close-about">Volver a mi rincón ${icon('heart')}</button>`); }
   function toggleMemory(messageId) {
     if (mode !== 'demo') return; const existing = state.memories.findIndex(x => x.messageId === messageId);
     if (existing >= 0) state.memories.splice(existing, 1); else { const m = demoHistory(activeId).find(x => x.id === messageId); if (!m) return; state.memories.push({ id: uid(), type: 'message', messageId, author: characters[activeId].name, text: m.text }); }
@@ -694,6 +708,7 @@
     else if (b.hasAttribute('data-account-show-password')) { const input = document.getElementById('account-password'), visible = input.type === 'password'; input.type = visible ? 'text' : 'password'; b.textContent = visible ? 'Ocultar' : 'Mostrar'; b.setAttribute('aria-label', visible ? 'Ocultar contraseña' : 'Mostrar contraseña'); }
     else if (b.hasAttribute('data-account-logout') || b.id === 'account-logout') logoutAccount();
     else if (accountLocked()) return;
+    else if (experiences && await experiences.handle(b)) return;
     else if (b.hasAttribute('data-invitation-refresh')) loadInvitation();
     else if (b.dataset.invitationAction) changeInvitation(b.dataset.invitationAction);
     else if (b.dataset.invitationCopy) copyInvitation(b.dataset.invitationCopy);
@@ -735,6 +750,6 @@
   document.getElementById('mobile-menu').addEventListener('click', () => { const open = document.getElementById('sidebar').classList.toggle('open'); document.getElementById('mobile-shade').classList.toggle('open', open); document.getElementById('mobile-menu').setAttribute('aria-expanded', String(open)); });
   document.getElementById('mobile-shade').addEventListener('click', closeMenu);
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMenu(); });
-  function fromHash() { if (accountLocked()) return; const path = location.hash.slice(1).split('/'); if (path[0] === 'chat' && ids.includes(path[1])) navigate('chat', path[1], false); else navigate(['conversations', 'library', 'memories', 'wishes', 'control'].includes(path[0]) ? path[0] : 'home', null, false); }
+  function fromHash() { if (accountLocked()) return; const path = location.hash.slice(1).split('/'); if (path[0] === 'consultation' && path[1]) { let id; try { id = decodeURIComponent(path[1]); } catch (_) { navigate('clinic', null, false); return; } navigate('consultation', id, false); } else if (path[0] === 'carta' && path[1] === 'vaca') navigate('chat', 'vaca', false, true); else if (path[0] === 'chat' && ids.includes(path[1])) navigate('chat', path[1], false); else navigate(['conversations', 'library', 'memories', 'wishes', 'control', 'clinic', 'vaca'].includes(path[0]) ? path[0] : 'home', null, false); }
   window.addEventListener('hashchange', fromHash); window.addEventListener('pagehide', () => { stopPolling(); stopAdminReads(); cancelArchiveReads(); clearInvitationSecret(); }); bridge.onUnauthorized?.(expireAccountSession); applyTheme(); bootstrapAccount();
 }());

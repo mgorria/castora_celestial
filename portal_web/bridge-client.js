@@ -4,6 +4,7 @@
   Object.assign(messages, { history_unavailable: 'No se pueden recuperar los mensajes anteriores en este momento.', stories_unavailable: 'No se puede consultar el archivo de cuentos en este momento.', story_not_found: 'Este cuento no está disponible en tu biblioteca.' });
   Object.assign(messages, { invalid_credentials: 'El usuario o la contraseña no coinciden. Prueba de nuevo.', invalid_invitation: 'Esta invitación ya no está disponible. Pídele a Miguel una nueva llave.', invalid_username: 'Elige otro nombre de usuario siguiendo las indicaciones.', weak_password: 'Elige una contraseña más larga para guardar bien tu rincón.', rate_limited: 'Ha habido varios intentos seguidos. Espera un momento antes de volver a probar.', temporarily_unavailable: 'No hemos podido abrir la puerta en este momento. Vuelve a intentarlo en un ratito.' });
   let unauthorizedHandler;
+  Object.assign(messages, { consultation_required: 'Primero entra en una consulta con Salchicher.', consultation_active: 'Ya tienes una consulta abierta. Puedes continuar en ella.', consultation_not_found: 'Esta consulta ya no está disponible.', consultation_action_required: 'Abre el consultorio para empezar una nueva consulta.', consultations_unavailable: 'El consultorio todavía necesita conectarse. Tus consultas no se han modificado.' });
   Object.assign(messages, { invalid_password: 'Elige una contraseña de entre 12 y 128 caracteres.', account_exists: 'Esta cuenta ya tiene su llave. Entra con tu usuario o pide a Miguel una invitación de recuperación.', no_account: 'Todavía no hay una cuenta que recuperar. Primero hace falta una invitación de entrada.', accounts_unavailable: 'La puerta de acceso no está disponible en este momento. Vuelve a intentarlo en un ratito.', account_identity_unavailable: 'Tu rincón todavía necesita una conexión. Miguel puede comprobarla desde la Centralita.' });
   async function request(path, options = {}) {
     const controller = new AbortController();
@@ -31,6 +32,10 @@
     history: (animal, before, signal) => request('/history?animal=' + encodeURIComponent(animal) + '&limit=30' + (before == null ? '' : '&before=' + encodeURIComponent(before)), { signal }),
     stories: (before, signal) => request('/stories?limit=12' + (before == null ? '' : '&before=' + encodeURIComponent(before)), { signal }),
     story: (id, signal) => request('/story?id=' + encodeURIComponent(id), { signal }),
+    consultations: signal => request('/consultations', { signal }),
+    consultation: (id, signal) => request('/consultation?id=' + encodeURIComponent(id), { signal }),
+    consultationAction: body => request('/consultation-action', { body }),
+    consultationMessage: body => request('/consultation-message', { body }),
     adminState: signal => request('/admin-state', { signal }),
     adminEvents: (after, signal) => request('/admin-events?after=' + encodeURIComponent(after ?? '0'), { signal }),
     adminAction: body => request('/admin-action', { body }),

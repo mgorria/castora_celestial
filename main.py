@@ -2466,7 +2466,12 @@ def salchicher_authorized_users() -> set[int]:
 
 async def salchicher_send(chat_id: int, text: str) -> None:
     app = animal_apps["salchicher"]
+    session = (salchicher.session(chat_id) or {}) if salchicher else {}
+    identity = (session.get("session_id"), session.get("consultation_id"))
     for chunk in split_telegram_text(text):
+        current = (salchicher.session(chat_id) or {}) if salchicher else {}
+        if (current.get("session_id"), current.get("consultation_id")) != identity:
+            raise asyncio.CancelledError()
         await app.bot.send_message(chat_id=chat_id, text=chunk)
 
 
@@ -2794,7 +2799,7 @@ async def main() -> None:
         web_bridge = WebBridge(load_data, save_data, lambda: animal_apps, resolve_web_actor,
             history_provider=history_provider, get_admin_app=lambda: centralita_app,
             admin_state_provider=admin_provider, admin_actor_id=admin_chat_id,
-            account_service=accounts, portal_origin=portal_origin)
+            account_service=accounts, portal_origin=portal_origin, get_consultorio=lambda: salchicher)
 
     if os.getenv("TOKEN_SALCHICHER"):
         salchicher = Salchicher(

@@ -40,6 +40,7 @@ STORE_KEY = "web_bridge"
 MAX_EVENTS = 200
 MAX_REQUESTS = 1000
 RETENTION_SECONDS = 48 * 60 * 60
+CONSULTATION_INACTIVITY_SECONDS = 30 * 24 * 60 * 60
 ANIMALS = ("castori", "mimosuga", "salchicher", "vaca", "corte", "dulcimiel")
 COMMANDS = {
     "castori": {"start"},
@@ -65,6 +66,7 @@ REQUEST_ID = re.compile(r"^[a-zA-Z0-9_-]{8,100}$")
 HISTORY_CURSOR = re.compile(r"^[A-Za-z0-9_-]{1,512}$")
 _dispatch_failed = ContextVar("castori_web_dispatch_failed", default=False)
 _admin_dispatch_chat = ContextVar("castori_web_admin_chat", default=None)
+_UNSPECIFIED_CONSULTATION = object()
 
 
 def _keyboard(markup) -> list:
@@ -94,7 +96,8 @@ class WebBridge:
                  allowed_origin: str | None = None, state_provider: Callable | None = None,
                  history_provider=None, get_admin_app: Callable | None = None,
                  admin_state_provider: Callable | None = None, admin_actor_id: Callable | None = None,
-                 account_service=None, portal_origin: str | None = None, portal_root=None):
+                 account_service=None, portal_origin: str | None = None, portal_root=None,
+                 get_consultorio: Callable | None = None):
         self.load, self.save = load, save
         self.get_apps, self.resolve_actor = get_apps, resolve_actor
         self.token = token if token is not None else os.getenv("CASTORI_WEB_TOKEN", "")
@@ -105,6 +108,7 @@ class WebBridge:
         self.admin_state_provider = admin_state_provider
         self.admin_actor_id = admin_actor_id
         self.account_service = account_service
+        self.get_consultorio = get_consultorio or (lambda: None)
         self.portal = None
         if portal_origin:
             from portal import Portal
@@ -155,7 +159,10 @@ class WebBridge:
     @staticmethod
     def _active_consultation(data: dict, chat_id: int) -> bool:
         session = data.get("salchicher", {}).get("sessions", {}).get(str(chat_id), {})
-        return bool(session and session.get("updated_at", 0) > time.time() - RETENTION_SECONDS)
+        retention = (CONSULTATION_INACTIVITY_SECONDS
+                     if session.get("consultation_id") and session.get("retained") is True
+                     else RETENTION_SECONDS)
+        return bool(session and session.get("updated_at", 0) > time.time() - retention)
 
     def _clean(self, state: dict, data: dict) -> bool:
         cutoff = time.time() - RETENTION_SECONDS
@@ -164,7 +171,9 @@ class WebBridge:
             if scope.endswith(":salchicher"):
                 chat_id = int(scope.split(":", 1)[0])
                 active = self._active_consultation(data, chat_id)
+                current_id = data.get("salchicher", {}).get("sessions", {}).get(str(chat_id), {}).get("consultation_id")
                 kept = [event for event in events if event.get("timestamp", 0) > cutoff
+                        and (not event.get("consultation_id") or (active and event["consultation_id"] == current_id))
                         and (active or not (event.get("requires_consultation") or event.get("role") == "user"))]
                 if len(kept) != len(events):
                     state["inboxes"][scope] = kept
@@ -175,6 +184,9 @@ class WebBridge:
 
     def maintenance(self) -> None:
         self._clean_admin()
+        doctor = self.get_consultorio()
+        if doctor:
+            doctor.maintenance()
         data, state = self._read()
         if self._clean(state, data):
             self.save(data)
@@ -271,10 +283,20 @@ class WebBridge:
         await self.flush_history()
 
     def record(self, animal: str, chat_id: int, text: str, *, role="assistant",
-               source="telegram", message_id=None, reply_markup=None) -> dict | None:
+               source="telegram", message_id=None, reply_markup=None,
+               expected_consultation_id=_UNSPECIFIED_CONSULTATION,
+               expected_session_id=_UNSPECIFIED_CONSULTATION) -> dict | None:
         if animal not in ANIMALS or not self.eligible(chat_id):
             return None
         data, state = self._read()
+        if animal == "salchicher":
+            current_session = data.get("salchicher", {}).get("sessions", {}).get(str(chat_id), {})
+            if (expected_consultation_id is not _UNSPECIFIED_CONSULTATION
+                    and expected_consultation_id != current_session.get("consultation_id")):
+                return None
+            if (expected_session_id is not _UNSPECIFIED_CONSULTATION
+                    and expected_session_id != current_session.get("session_id")):
+                return None
         cleaned = self._clean(state, data)
         consultation_active = animal == "salchicher" and self._active_consultation(data, chat_id)
         if animal == "salchicher" and role == "user" and not consultation_active:
@@ -296,6 +318,9 @@ class WebBridge:
                  "buttons": _keyboard(reply_markup)}
         if consultation_active:
             event["requires_consultation"] = True
+            consultation_id = data.get("salchicher", {}).get("sessions", {}).get(str(chat_id), {}).get("consultation_id")
+            if consultation_id:
+                event["consultation_id"] = consultation_id
         if message_id is not None:
             event["message_id"] = int(message_id)
         events.append(event)
@@ -638,6 +663,10 @@ class WebBridge:
         app.router.add_get("/castori-web/history", self._history)
         app.router.add_get("/castori-web/stories", self._stories)
         app.router.add_get("/castori-web/story", self._story)
+        app.router.add_get("/castori-web/consultations", self._consultations)
+        app.router.add_get("/castori-web/consultation", self._consultation)
+        app.router.add_post("/castori-web/consultation-action", self._consultation_action)
+        app.router.add_post("/castori-web/consultation-message", self._consultation_message)
         app.router.add_get("/castori-web/admin-state", self._admin_state)
         app.router.add_get("/castori-web/admin-events", self._admin_events)
         app.router.add_post("/castori-web/admin-action", self._admin_action)
@@ -721,11 +750,15 @@ class WebBridge:
                           for key in ("id", "name", "details", "url", "favorite")}
                          for item in wishes[:60] if isinstance(item, dict)]
         consultation = data.get("salchicher", {}).get("sessions", {}).get(str(chat_id), {})
-        active = bool(consultation and consultation.get("updated_at", 0) > time.time() - RETENTION_SECONDS)
+        active = self._active_consultation(data, chat_id)
         result = {"actor": request["actor"], "characters": characters, "wishes": public_wishes,
                   "private_consultation": {"active": active, "sharing": bool(consultation.get("shared")) if active else False},
                   "history": {"enabled": self.history_provider is not None, "excluded_animals": ["salchicher"]},
                   "stories": {"enabled": self.history_provider is not None}}
+        doctor = self.get_consultorio()
+        current = doctor.active_consultation(chat_id) if doctor else None
+        result["consultorio"] = {"available": doctor is not None and "salchicher" in apps,
+                                 "active_id": current["id"] if current else None}
         # Optional provider must itself return an explicit public projection, not load_data().
         if self.state_provider:
             extra = self.state_provider(request["actor"], chat_id)
@@ -734,6 +767,114 @@ class WebBridge:
             if isinstance(extra, dict):
                 result["details"] = extra
         return web.json_response(result)
+
+    async def _consultations(self, request):
+        if request.query:
+            return _failure("invalid_consultation_query")
+        doctor = self.get_consultorio()
+        if doctor is None:
+            return _failure("consultorio_unavailable", 503)
+        consultations = doctor.list_consultations(request["chat_id"])
+        active = next((entry["id"] for entry in consultations if entry["status"] == "active"), None)
+        return web.json_response({"consultations": consultations, "active_id": active})
+
+    @staticmethod
+    def _consultation_id(value):
+        return isinstance(value, str) and REQUEST_ID.fullmatch(value) is not None
+
+    async def _consultation(self, request):
+        if (set(request.query) != {"id"} or len(request.query.getall("id")) != 1
+                or not self._consultation_id(request.query["id"])):
+            return _failure("invalid_consultation_query")
+        doctor = self.get_consultorio()
+        if doctor is None:
+            return _failure("consultorio_unavailable", 503)
+        item = doctor.get_consultation(request["chat_id"], request.query["id"])
+        return web.json_response({"consultation": item}) if item else _failure("consultation_not_found", 404)
+
+    async def _consultation_action(self, request):
+        if request.query:
+            return _failure("invalid_consultation_action")
+        try:
+            body = await request.json()
+        except (ValueError, UnicodeError):
+            return _failure("invalid_consultation_action")
+        if not isinstance(body, dict):
+            return _failure("invalid_consultation_action")
+        action = body.get("action")
+        if not isinstance(action, str):
+            return _failure("invalid_consultation_action")
+        if action == "start":
+            if set(body) != {"action", "retain_history"} or type(body["retain_history"]) is not bool:
+                return _failure("invalid_consultation_action")
+        elif action in {"close", "delete"}:
+            if set(body) != {"action", "consultation_id"} or not self._consultation_id(body["consultation_id"]):
+                return _failure("invalid_consultation_action")
+        else:
+            return _failure("invalid_consultation_action")
+        doctor = self.get_consultorio()
+        if doctor is None:
+            return _failure("consultorio_unavailable", 503)
+        chat_id = request["chat_id"]
+        async with self.locks.setdefault(chat_id, asyncio.Lock()):
+            if action == "start":
+                if "salchicher" not in self.get_apps() or not doctor.enabled():
+                    return _failure("consultorio_unavailable", 503)
+                try:
+                    item = doctor.start_consultation(chat_id, retain_history=body["retain_history"])
+                except ValueError as exc:
+                    if str(exc) == "consultation_active":
+                        return _failure("consultation_active", 409)
+                    raise
+                # A new episode starts with a clean transient feed. Its consented
+                # archive belongs exclusively to the consultation service.
+                self.forget("salchicher", chat_id)
+                for message in item.get("messages", []):
+                    if message.get("role") == "assistant":
+                        self.record("salchicher", chat_id, message["content"], source="web")
+                return web.json_response({"consultation": item})
+            item = doctor.get_consultation(chat_id, body["consultation_id"])
+            if item is None:
+                return _failure("consultation_not_found", 404)
+            if action == "close":
+                result = doctor.close_consultation(chat_id, body["consultation_id"])
+            else:
+                doctor.delete_consultation(chat_id, body["consultation_id"])
+                result = None
+            self.maintenance()
+            response = {"consultation": result}
+            if action == "delete":
+                response["deleted"] = True
+            return web.json_response(response)
+
+    async def _consultation_message(self, request):
+        if request.query:
+            return _failure("invalid_consultation_message")
+        try:
+            body = await request.json()
+        except (ValueError, UnicodeError):
+            return _failure("invalid_consultation_message")
+        if (not isinstance(body, dict) or set(body) != {"consultation_id", "text", "request_id"}
+                or not self._consultation_id(body.get("consultation_id"))
+                or not isinstance(body.get("text"), str) or not body["text"].strip()
+                or len(body["text"]) > 4000
+                or not isinstance(body.get("request_id"), str) or not REQUEST_ID.fullmatch(body["request_id"])):
+            return _failure("invalid_consultation_message")
+        body["text"] = body["text"].strip()
+        if self._command(body["text"]) is not None:
+            return _failure("command_not_allowed", 403)
+        body["animal"] = "salchicher"
+        key, fingerprint, existing = self._existing(request["chat_id"], body, "consultation-message")
+        if existing is not None:
+            return existing
+        doctor = self.get_consultorio()
+        if doctor is None or "salchicher" not in self.get_apps():
+            return _failure("consultorio_unavailable", 503)
+        active = doctor.active_consultation(request["chat_id"])
+        if active is None or active["id"] != body["consultation_id"]:
+            return _failure("consultation_required", 409)
+        self._reserve(key, fingerprint)
+        return self._schedule(request["chat_id"], body, "consultation-message", key)
 
     @staticmethod
     def _page_arguments(request, *, animal=False, default_limit=40, max_limit=100):
@@ -834,7 +975,16 @@ class WebBridge:
         receipt = state["requests"].get(f"{request['chat_id']}:{request_id}")
         if not receipt:
             return _failure("request_not_found", 404)
-        return web.json_response({"request_id": request_id, "status": receipt["status"]})
+        return web.json_response(self._receipt_result(request_id, receipt))
+
+    @staticmethod
+    def _receipt_result(request_id: str, receipt: dict) -> dict:
+        result = {"request_id": request_id, "status": receipt["status"]}
+        # A fixed UI notice survives deletion of a temporary episode. It carries
+        # neither the user's symptoms nor a copy of the consultation.
+        if receipt.get("notice") == "urgent_help":
+            result["notice"] = "urgent_help"
+        return result
 
     async def _body(self, request, allowed: set):
         try:
@@ -857,8 +1007,8 @@ class WebBridge:
         if existing and existing["fingerprint"] != fingerprint:
             return key, fingerprint, _failure("request_id_conflict", 409)
         if existing:
-            return key, fingerprint, web.json_response({"request_id": body["request_id"],
-                                                       "status": existing["status"], "duplicate": True})
+            return key, fingerprint, web.json_response({
+                **self._receipt_result(body["request_id"], existing), "duplicate": True})
         return key, fingerprint, None
 
     def _reserve(self, key: str, fingerprint: str) -> None:
@@ -871,10 +1021,12 @@ class WebBridge:
                 state["requests"].pop(old, None)
         self.save(data)
 
-    def _set_status(self, key: str, status: str) -> None:
+    def _set_status(self, key: str, status: str, *, notice=None) -> None:
         data, state = self._read()
         if key in state["requests"]:
             state["requests"][key]["status"] = status
+            if notice == "urgent_help":
+                state["requests"][key]["notice"] = "urgent_help"
             self.save(data)
 
     def _schedule(self, chat_id: int, body: dict, kind: str, key: str) -> web.Response:
@@ -893,6 +1045,8 @@ class WebBridge:
             return _failure("command_not_allowed", 403)
         if body["animal"] not in self.get_apps():
             return _failure("animal_unavailable", 503)
+        if body["animal"] == "salchicher" and command not in {"ayuda", "olvidar"}:
+            return _failure("consultation_required", 409)
         # /start for the owner would rebind legacy Castori/Mimosuga/Corte identities.
         if request["actor"] == "owner" and body["animal"] in {"castori", "mimosuga", "corte"}:
             return _failure("actor_not_supported", 403)
@@ -928,6 +1082,8 @@ class WebBridge:
         body = await self._body(request, {"animal", "event_id", "data", "request_id"})
         if body is None or not isinstance(body["event_id"], int) or isinstance(body["event_id"], bool):
             return _failure("invalid_callback")
+        if body["animal"] == "salchicher":
+            return _failure("consultation_action_required", 403)
         if request["actor"] == "owner" and body["animal"] in {"castori", "mimosuga", "corte"}:
             return _failure("actor_not_supported", 403)
         key, fingerprint, existing = self._existing(request["chat_id"], body, "callback")
@@ -946,8 +1102,19 @@ class WebBridge:
 
     async def _dispatch(self, chat_id: int, body: dict, kind: str, key: str) -> None:
         status = "uncertain"
+        urgent_candidate = False
+        retained = False
         try:
             async with self.locks.setdefault(chat_id, asyncio.Lock()):
+                if kind == "consultation-message":
+                    doctor = self.get_consultorio()
+                    active = doctor.active_consultation(chat_id) if doctor else None
+                    if active is None or active["id"] != body["consultation_id"]:
+                        status = "rejected"
+                        return
+                    from salchicher_service import urgent_signal
+                    urgent_candidate = urgent_signal(body["text"])
+                    retained = active.get("retained") is True
                 app = self.get_apps()[body["animal"]]
                 if id(app) not in self.observed_apps and hasattr(app, "add_error_handler"):
                     app.add_error_handler(self._on_application_error)
@@ -956,7 +1123,7 @@ class WebBridge:
                 chat = {"id": chat_id, "type": "private", "first_name": "Patita"}
                 update_id = -int(uuid4().int % (2**52)) - 1
                 payload = {"update_id": update_id}
-                if kind == "message":
+                if kind in {"message", "consultation-message"}:
                     text = body["text"]
                     if self._command(text) == "olvidar":
                         self.forget(body["animal"], chat_id)
@@ -991,7 +1158,18 @@ class WebBridge:
         except Exception as exc:
             logger.warning("Web dispatch outcome uncertain: %s", type(exc).__name__)
         finally:
-            self._set_status(key, status)
+            notice = None
+            if urgent_candidate:
+                doctor_state = self.load().get("salchicher", {})
+                current = doctor_state.get("sessions", {}).get(str(chat_id), {})
+                record = doctor_state.get("consultations", {}).get(str(chat_id), {}).get(body["consultation_id"])
+                closed = current.get("consultation_id") != body["consultation_id"]
+                if closed and ((record or {}).get("closure_reason") == "urgent_help" or not retained):
+                    notice = "urgent_help"
+                    # Even a failed Telegram send must not leave the deleted
+                    # temporary episode's user text in the transient mirror.
+                    self.maintenance()
+            self._set_status(key, status, notice=notice)
 
 
 class RecordingExtBot(ExtBot):
@@ -1004,6 +1182,10 @@ class RecordingExtBot(ExtBot):
         object.__setattr__(self, "_web_animal", animal_key)
 
     async def send_message(self, chat_id, text, *args, **kwargs):
+        consultation_id = session_id = _UNSPECIFIED_CONSULTATION
+        if self._web_animal == "salchicher":
+            session = self._web_bridge.load().get("salchicher", {}).get("sessions", {}).get(str(chat_id), {})
+            consultation_id, session_id = session.get("consultation_id"), session.get("session_id")
         result = await super().send_message(chat_id, text, *args, **kwargs)
         try:
             if self._web_animal == "centralita":
@@ -1011,7 +1193,8 @@ class RecordingExtBot(ExtBot):
                     message_id=result.message_id, reply_markup=result.reply_markup)
             else:
                 self._web_bridge.record(self._web_animal, result.chat_id, result.text or text,
-                                        message_id=result.message_id, reply_markup=result.reply_markup)
+                                        message_id=result.message_id, reply_markup=result.reply_markup,
+                                        expected_consultation_id=consultation_id, expected_session_id=session_id)
         except Exception as exc:
             # Mirroring failure cannot turn a successful Telegram send into a retry.
             logger.warning("Web mirror failed after Telegram delivery: %s", type(exc).__name__)
