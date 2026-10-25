@@ -10,6 +10,7 @@ from typing import Any
 
 from openai import AsyncOpenAI
 from character_voice import character_instructions
+from salchicher_copy import REPLIES, assistant_texts, select_reply
 from salchicher_triage import urgent_signal
 from salchicher_vademecum import CARE, DIAGNOSES, catalog_for_prompt, render_storybook
 
@@ -28,29 +29,16 @@ PROFESSIONAL_TEXT = (
     "a tu médico o farmacéutico. Yo no cambiaré sus indicaciones. Aquí te guardo "
     "el sillón y un abrazo de perro, con las orejitas por fuera."
 )
-UNAVAILABLE_TEXT = (
-    "Ay, Patita, se me ha escondido el lápiz debajo de la bata. Mientras lo encuentro, "
-    "queda reservado el sillón de las plumitas y un abrazo de perro, si te apetece."
-)
-CHAT_TEXT = (
-    "Pasa, Patita. Me ajusto las gafitas y te guardo el sillón más mullido. "
-    "Hoy el consultorio tiene las orejitas abiertas y los abrazos a punto."
-)
-IDENTITY_TEXT = (
-    "En nuestra historia soy el Doctor Salchicher, el perrito de las gafitas y la bata. "
-    "Atiendo patos con las plumas revueltas, receto mimos de cuento y firmo con una patita."
-)
-COMFORT_TEXT = (
-    "Ay, Patita. Te mando un abrazo de perro, suavecito y con las orejitas por fuera. "
-    "En mi receta de cuento caben una tarde sin recados y, si te apetecen, "
-    "dos cucharaditas imaginarias de «mojo de oso»: ¡de las que se dan en forma de achuchón!"
-)
+UNAVAILABLE_TEXT = REPLIES["unavailable"]["pause"]
+CHAT_TEXT = REPLIES["greeting"]["hello"]
+IDENTITY_TEXT = REPLIES["identity"]["doctor"]
+COMFORT_TEXT = REPLIES["comfort"]["quiet"]
 QUESTIONS = {
     "symptoms": "Vamos a mirar ese patito con calma: ¿qué parte te está dando guerra hoy, Patita?",
     "duration": "¿Desde cuándo te pasa, Patita?",
     "head_duration": "¿Desde cuándo te molesta la cabecita?",
     "evolution": "¿Hoy esa molestia está igual, un poquito más tranquila o más protestona?",
-    "beak": "Acerca un poquito el piquito a mis gafitas de cuento: ¿te molesta al hacer cuac o también cuando está descansando?",
+    "beak": "¿El piquito te molesta al hacer cuac o también cuando está descansando?",
     "webbing": "¿Cómo van las membranas de tus patitas: te molestan al caminar o también dentro del nido?",
     "wings": "¿Las alitas están cansadas de aletear o hay alguna que te molesta más, solete?",
     "egg_tooth": "Vamos con ese diente huevil de pato de cuento: ¿te molesta también cuando está quietecito, o solo con la merienda?",
@@ -88,32 +76,84 @@ def _ids(value, catalog, maximum):
     return list(dict.fromkeys(item for item in value if isinstance(item, str) and item in catalog))[:maximum]
 
 
-def render_decision(data: dict[str, Any], asked: list[str], *, history=None) -> tuple[str, list[str]]:
+def _current_turn(history):
+    texts = []
+    for message in reversed(history or []):
+        if message.get("role") == "assistant":
+            break
+        if message.get("role") == "user" and isinstance(message.get("content"), str):
+            texts.append(message["content"])
+    return "\n".join(reversed(texts))
+
+
+def _social_intent(text):
+    """Only complete social turns bypass selection; a new concern still gets read."""
+    value = re.sub(r"[¡!¿?.,;:…]+", " ", normalized(text)).strip()
+    value = re.sub(r"\b(?:doctor(?: salchicher)?|salchicher|amigo)\b", " ", value)
+    value = " ".join(value.split())
+    value = re.sub(r"^(?:(?:muchas|mil|muchisimas) )?gracias\s+(?=hasta|adios|buenas noches|me voy)", "", value)
+    if re.fullmatch(r"buenas noches|hasta manana|me voy a dormir", value):
+        return "goodnight"
+    if re.fullmatch(r"adios|hasta (?:luego|pronto)|nos vemos|me voy(?: a descansar)?", value):
+        return "farewell"
+    if re.fullmatch(r"(?:(?:muchas|mil|muchisimas) )?gracias(?: por (?:todo|escucharme|acompanarme|los mimos))?", value):
+        return "thanks"
+    if re.fullmatch(r"(?:hola|holi|buenas|buenos dias|buenas tardes)(?: como estas)?", value):
+        return "greeting"
+    return None
+
+
+def _blocked_questions(asked, history):
+    blocked = set(asked)
+    for turn in assistant_texts(history):
+        blocked.update(key for key, question in QUESTIONS.items() if question in turn)
+    for entry in history or []:
+        if entry.get("role") == "user" and isinstance(entry.get("content"), str):
+            blocked.update(_answered_in_current(entry["content"]))
+    # These IDs ask the same fact, even though one names the head explicitly.
+    if blocked.intersection(("duration", "head_duration")):
+        blocked.update(("duration", "head_duration"))
+    return blocked
+
+
+def render_decision(data: dict[str, Any], asked: list[str], *, history=None, style_history=None) -> tuple[str, list[str]]:
     """Only approved storybook prose is rendered, never model-supplied text."""
     action = data.get("action")
+    style = [*(style_history or []), *(history or [])]
+    comfort = lambda: (select_reply("comfort", style), [])
     # Emergency instructions are decided from the current explicit statement
     # before calling the storyteller. A model action alone cannot issue them.
     if action == "emergency":
-        return COMFORT_TEXT, []
+        return comfort()
     if action == "professional":
         return PROFESSIONAL_TEXT, []
     if action == "identity":
-        return IDENTITY_TEXT, []
+        return select_reply("identity", style), []
     if action == "chat":
-        return CHAT_TEXT, []
+        intent = _social_intent(_current_turn(history)) or ("acknowledgment" if history else "greeting")
+        return select_reply(intent, style), []
     if action == "comfort":
-        return COMFORT_TEXT, []
+        return comfort()
     if action == "ask":
-        ids = [question for question in _ids(data.get("questions"), QUESTIONS, 4)
-               if question not in asked][:2]
+        blocked = _blocked_questions(asked, history)
+        ids = []
+        for question in _ids(data.get("questions"), QUESTIONS, 4):
+            if question in blocked:
+                continue
+            ids.append(question)
+            blocked.add(question)
+            if question in ("duration", "head_duration"):
+                blocked.update(("duration", "head_duration"))
+            if len(ids) == 2:
+                break
         # Old screening IDs (including context) can never escape into a reply.
         if not ids:
-            return COMFORT_TEXT, []
-        return "Me ajusto las gafitas, Patita. " + "\n\n".join(QUESTIONS[key] for key in ids), ids
+            return comfort()
+        return "\n\n".join(QUESTIONS[key] for key in ids), ids
     if action not in {"care", "storybook"}:
-        return COMFORT_TEXT, []
+        return comfort()
 
-    return render_storybook(data, excluded=history), []
+    return render_storybook(data, excluded=style), []
 
 
 def _conversation_for_story(history):
@@ -138,30 +178,31 @@ def _answered_in_current(text: str) -> list[str]:
     """Do not ask again for facts plainly volunteered in the current turn."""
     value = normalized(text)
     answered = []
-    if re.search(r"\bdesde (?!cuando\b)\S|\bhace (?:\d+|un[oa]?|dos|tres|varios?|pocos?) "
+    if re.search(r"\bdesde (?!cuando\b)\S|^(?:ayer|anteayer|esta manana|anoche)[.! ]*$|\bhace (?:\d+|un[oa]?|dos|tres|varios?|pocos?) "
                  r"(?:rato|dia|hora|semana|minuto|mes)", value):
         answered.extend(("duration", "head_duration"))
-    if re.search(r"\b(?:cabecita|cabeza|pico|piquito|membrana|alita|ala|tripita|tripa|diente huevil)\b", value):
+    if re.search(r"\b(?:cabecita|cabeza|pico|piquito|membranas?|alitas?|alas?|tripita|tripa|barriga|diente huevil|mocos?|garganta|cansad[ao]|cansancio)\b", value):
         answered.append("symptoms")
+    if re.search(r"\b(?:sigue? igual|estoy igual|va (?:mejor|peor)|mas tranquil[ao]|ha (?:mejorado|empeorado))\b", value):
+        answered.append("evolution")
     if re.search(r"(?:poc|baj|falt|agotad|llenas?|complet|much|vaci)\w*.{0,28}mojo|"
                  r"mojo.{0,28}(?:poc|baj|falt|agotad|llenas?|complet|much|vaci)", value):
         answered.append("mojo")
     return answered
 
 
-async def generate_care_reply(history: list[dict[str, str]], asked: list[str]) -> tuple[str, list[str]]:
-    latest_user_messages = []
-    for message in reversed(history):
-        if message.get("role") == "assistant":
-            break
-        if message.get("role") == "user":
-            latest_user_messages.append(message.get("content", ""))
-    current = "\n".join(reversed(latest_user_messages))
+async def generate_care_reply(history: list[dict[str, str]], asked: list[str], *, style_history=None) -> tuple[str, list[str]]:
+    current = _current_turn(history)
     if urgent_signal(current):
         return EMERGENCY_TEXT, []
     if real_medical_request(current):
         return PROFESSIONAL_TEXT, []
-    answered = _answered_in_current(current)
+    style = [*(style_history or []), *history]
+    social = _social_intent(current)
+    if social:
+        return select_reply(social, style), []
+    answered = sorted(_blocked_questions([], history))
+    blocked = _blocked_questions(asked, history)
     if not os.getenv("OPENAI_API_KEY"):
         raise RuntimeError("OPENAI_API_KEY missing")
     persona = LORE_FILE.read_text(encoding="utf-8")
@@ -190,6 +231,7 @@ No inventes curación ni afirmes que un problema real es leve.
 Devuelve solo JSON. No se utiliza ningún campo de texto libre.
 action: chat | identity | comfort | ask | storybook | professional.
 - chat para saludo, gracias o despedida; identity si pregunta quién eres.
+  Responde al momento de la charla: dar las gracias no es volver a entrar por la puerta.
 - comfort para acompañar sin preguntar ni inventar un diagnóstico.
 - ask para explorar lo que cuenta en lenguaje de pato, máximo dos preguntas por turno.
   questions: symptoms | duration | head_duration | evolution | beak | webbing | wings | egg_tooth |
@@ -205,7 +247,11 @@ action: chat | identity | comfort | ask | storybook | professional.
   diagnosis: {family, metaphor, detail}; family corresponde a la zona o situación
   contada, metaphor y detail son IDs de ESA familia en diagnosis_families.
   care: hasta 4 objetos {id, flourish}; id pertenece a care y flourish es opcional,
-  de care_flourishes. opening y closing son IDs de openings y closings.
+  de care_flourishes. opening y closing son IDs de openings y closings; direct
+  omite el gesto o la despedida. presentation puede ser recipe o direct.
+  Una continuación suele ir directa al cuidado: no inaugures el consultorio,
+  saques el sello ni ajustes las gafas en cada respuesta. La personalidad no
+  requiere una ceremonia. El catálogo aparta gestos recientes, no solo sus palabras.
   También se aceptan los IDs antiguos de legacy_diagnoses, pero prefiere una
   composición nueva del vademécum. El texto de los campos lo pone el consultorio;
   no escribas prosa libre ni inventes IDs.
@@ -240,11 +286,11 @@ Ejemplo JSON de una receta, sin copiarlo en todas las consultas:
 {"id":"bear_relay","flourish":"bear_envelope"}],"opening":"bookmark","closing":"glasses"}.
 """
     payload = {"persona": persona,
-               "questions_already_asked": [q for q in asked if q in QUESTIONS],
+               "questions_already_asked": [q for q in QUESTIONS if q in blocked and q not in answered],
                "questions_already_answered": answered,
                "question_catalog": {key: text for key, text in QUESTIONS.items()
-                                    if key not in asked and key not in answered},
-               "vademecum": catalog_for_prompt(history),
+                                    if key not in blocked},
+               "vademecum": catalog_for_prompt(style),
                "conversation": _conversation_for_story(history)}
     async with AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"), timeout=45, max_retries=1) as client:
         response = await client.responses.create(
@@ -261,7 +307,7 @@ Ejemplo JSON de una receta, sin copiarlo en todas las consultas:
         # A mistaken provider classification must not turn an ordinary complaint
         # into a 112 instruction. Explicit urgent statements returned above.
         relevant = "head_duration" if re.search(r"\b(?:cabeza|cabecita)\b", normalized(current)) else "symptoms"
-        available = [q for q in (relevant, "evolution") if q not in asked and q not in answered]
+        available = [q for q in (relevant, "evolution") if q not in blocked]
         data = {"action": "ask", "questions": available[:1]} if available else {
             "action": "storybook", "diagnosis": "busy_head" if relevant == "head_duration" else "ruffled_feathers"}
-    return render_decision(data, [*asked, *answered], history=history)
+    return render_decision(data, list(blocked), history=history, style_history=style_history)

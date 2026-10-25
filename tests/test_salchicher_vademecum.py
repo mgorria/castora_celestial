@@ -5,7 +5,7 @@ import unicodedata
 
 from salchicher_vademecum import (
     CARE, CARE_FLOURISHES, DIAGNOSES, DIAGNOSIS_FAMILIES,
-    catalog_for_prompt, render_storybook,
+    catalog_for_prompt, recipe_style_history, recipe_style_ids, render_storybook,
 )
 
 
@@ -15,6 +15,89 @@ def plain(text):
 
 
 class VademecumTests(unittest.TestCase):
+    def test_direct_presentation_keeps_selected_care_without_a_ceremony(self):
+        reply = render_storybook({"diagnosis": "busy_head", "presentation": "direct",
+            "opening": "notebook", "closing": "glasses",
+            "care": [{"id": "fluids", "flourish": "paw_seal"}, "silence_concert"]})
+        self.assertTrue(reply.startswith("Diagnóstico de cuento: " + DIAGNOSES["busy_head"]))
+        self.assertIn(CARE["fluids"], reply)
+        self.assertIn(CARE["silence_concert"], reply)
+        self.assertIn("Tú eliges lo que te apetece", reply)
+        self.assertNotRegex(reply, r"(?m)^\d+\. ")
+        self.assertNotIn("gafitas", reply)
+        self.assertFalse(any(fragment in reply for fragment in CARE_FLOURISHES.values()))
+
+    def test_a_recipe_followup_is_direct_instead_of_rotating_another_ritual(self):
+        data = {"diagnosis": "busy_head", "presentation": "recipe", "opening": "notebook",
+                "closing": "paw", "care": [{"id": "fluids", "flourish": "ear_ribbon"}]}
+        first = render_storybook(data)
+        second = render_storybook(data, excluded=[{"role": "assistant", "content": first}])
+        self.assertIn("Me ajusto las gafitas", first)
+        self.assertRegex(first, r"(?m)^1\. ")
+        self.assertTrue(second.startswith("Diagnóstico de cuento:"))
+        self.assertNotRegex(second, r"(?m)^\d+\. ")
+        self.assertNotIn("Mi receta para Patita", second)
+        self.assertNotIn("gafitas", second)
+        self.assertFalse(any(fragment in second for fragment in CARE_FLOURISHES.values()))
+        self.assertIn(CARE["fluids"], second)
+        self.assertEqual(set(catalog_for_prompt([first])["presentations"]), {"direct"})
+
+    def test_recent_glasses_gesture_excludes_other_wordings_and_the_closing(self):
+        history = [{"role": "assistant", "content": "Me ajusto las gafitas, Patita. ¿Desde cuándo te pasa?"}]
+        catalog = catalog_for_prompt(history)
+        self.assertNotIn("notebook", catalog["openings"])
+        self.assertNotIn("spectacles", catalog["openings"])
+        self.assertNotIn("glasses", catalog["closings"])
+        self.assertIn("bookmark", catalog["openings"])
+        self.assertIn("direct", catalog["openings"])
+        reply = render_storybook({"diagnosis": "busy_head", "presentation": "recipe",
+            "opening": "spectacles", "closing": "glasses", "care": ["fluids"]}, excluded=history)
+        self.assertNotIn("gafitas", reply)
+        self.assertTrue(reply.startswith("Diagnóstico de cuento:"))
+
+    def test_same_gesture_is_not_repeated_inside_one_reply(self):
+        reply = render_storybook({"diagnosis": "busy_head", "presentation": "recipe",
+            "opening": "notebook", "closing": "glasses", "care": ["fluids"]})
+        self.assertEqual(reply.count("gafitas"), 1)
+        self.assertNotIn("siguen en mi nariz", reply)
+        self.assertFalse(any(fragment in reply for fragment in CARE_FLOURISHES.values()))
+
+    def test_user_quoting_a_gesture_does_not_consume_the_doctors_style(self):
+        history = [{"role": "user", "content": "Me ajusto las gafitas, Patita."}]
+        catalog = catalog_for_prompt(history)
+        self.assertIn("notebook", catalog["openings"])
+        reply = render_storybook({"diagnosis": "busy_head", "presentation": "recipe",
+            "opening": "notebook", "care": ["fluids"]}, excluded=history)
+        self.assertIn("Me ajusto las gafitas", reply)
+
+    def test_recent_assistant_memory_is_not_evicted_by_many_user_messages(self):
+        first = render_storybook({"diagnosis": "busy_head", "opening": "notebook", "care": ["fluids"]})
+        history = [{"role": "assistant", "content": first}] + [{"role": "user", "content": "Otra nota"}] * 30
+        catalog = catalog_for_prompt(history)
+        self.assertNotIn("notebook", catalog["openings"])
+        second = render_storybook({"diagnosis": "busy_head", "care": ["fluids"]}, excluded=history)
+        self.assertNotIn(DIAGNOSES["busy_head"], second)
+        self.assertIn(CARE["fluids"], second)
+
+    def test_cross_visit_style_memory_contains_only_fixed_framing(self):
+        reply = render_storybook({"diagnosis": "busy_head", "opening": "notebook", "closing": "paw",
+                                  "care": ["fluids"]})
+        identifiers = recipe_style_ids(reply + "PRIVATE_PATIENT_WORDS")
+        self.assertTrue(identifiers)
+        self.assertTrue(all(key.startswith("recipe:") for key in identifiers))
+        history = recipe_style_history([*identifiers, "PRIVATE_PATIENT_WORDS", {"content": "untrusted"}])
+        stored = json.dumps(history)
+        self.assertNotIn("PRIVATE_PATIENT_WORDS", stored)
+        self.assertNotIn(DIAGNOSES["busy_head"], stored)
+        self.assertNotIn(CARE["fluids"], stored)
+        self.assertNotIn("notebook", catalog_for_prompt(history)["openings"])
+        self.assertEqual(recipe_style_ids(None), [])
+        self.assertEqual(recipe_style_history("recipe:opening:notebook"), [])
+        repeated = recipe_style_history(["recipe:presentation:recipe", "recipe:presentation:direct",
+                                         "recipe:presentation:recipe"])
+        self.assertEqual(len(repeated), 3)
+        self.assertEqual(set(catalog_for_prompt(repeated)["presentations"]), {"direct"})
+
     def test_each_family_has_many_coherent_combinations(self):
         expected = {"head": "cabecita", "beak": "pico", "wings": "alitas",
                     "webbing": "membranas", "egg_tooth": "diente huevil",
@@ -95,6 +178,25 @@ class VademecumTests(unittest.TestCase):
         self.assertEqual(len(re.findall(r"(?m)^\d+\. ", reply)), 4)
         self.assertEqual(reply.count(CARE["rest"]), 1)
         self.assertNotIn(CARE["fluids"], reply)
+
+    def test_equivalent_errand_recipes_keep_only_the_first_choice_without_replacement(self):
+        for selected in (("pocket_sunday", "errand_retirement"), ("errand_retirement", "pocket_sunday"),
+                         ("rest", "unfinished_page"), ("unfinished_page", "rest")):
+            with self.subTest(selected=selected):
+                reply = render_storybook({"care": [{"id": selected[0]}, selected[1]]})
+                self.assertIn(CARE[selected[0]], reply)
+                self.assertEqual(len(re.findall(r"(?m)^\d+\. ", reply)), 1)
+                for other, text in CARE.items():
+                    if other != selected[0]:
+                        self.assertNotIn(text, reply)
+
+    def test_semantic_dedup_keeps_different_rest_choices_and_uses_remaining_slots(self):
+        reply = render_storybook({"care": ["rest", "unfinished_page", "whisper_library",
+                                           "silence_concert", "fluids"]})
+        self.assertNotIn(CARE["unfinished_page"], reply)
+        for key in ("rest", "whisper_library", "silence_concert", "fluids"):
+            self.assertIn(CARE[key], reply)
+        self.assertEqual(len(re.findall(r"(?m)^\d+\. ", reply)), 4)
 
     def test_repeated_story_uses_other_fragments_within_same_family(self):
         data = {"diagnosis": {"family": "egg_tooth", "metaphor": "supper_complaint", "detail": "tiny_signature"},

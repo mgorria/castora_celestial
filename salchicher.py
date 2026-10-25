@@ -10,24 +10,16 @@ from uuid import uuid4
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from salchicher_service import CARE, EMERGENCY_TEXT, UNAVAILABLE_TEXT, generate_care_reply, urgent_signal
-from salchicher_copy import retired_automatic_message
+from salchicher_service import CARE, EMERGENCY_TEXT, generate_care_reply, urgent_signal, _answered_in_current
+from salchicher_copy import REPLIES, retired_automatic_message, select_reply, reply_style_ids, reply_style_history
+from salchicher_vademecum import recipe_style_ids, recipe_style_history
 
 logger = logging.getLogger("control-castora.salchicher")
 RETENTION_SECONDS = 48 * 60 * 60
 INACTIVITY_SECONDS = 30 * 24 * 60 * 60
 MAX_MESSAGES = 24
-CONSULTATION_GREETING = (
-    "¡Adelante, Patita! Te guardé el sillón junto a la ventana. Me pongo las gafitas "
-    "y abro mi cuaderno de patos. Cuéntame qué les pasa hoy a esas plumitas "
-    "y desde cuándo; iremos pasito a pasito."
-)
-INTRO = (
-    "¡Adelante, Patita! Soy el Doctor Salchicher. Me acomodo las gafitas y abro "
-    "el consultorio de cuento: aquí cuidamos picos, alas y plumitas con mucha atención. "
-    "Tengo el sillón preparado y el sello de las recetas de mimos sobre la mesa. "
-    "Cuando quieras, puedes pasar."
-)
+CONSULTATION_GREETING = REPLIES["consultation"]["listen"]
+INTRO = REPLIES["invitation"]["door"]
 
 
 class Salchicher:
@@ -52,6 +44,29 @@ class Salchicher:
 
     def enabled(self) -> bool:
         return bool(self.state().get("enabled", True))
+
+    def _style_history(self, chat_id: int) -> list[dict]:
+        ids = self.state().get("voice_memory", {}).get(str(chat_id), [])
+        if not isinstance(ids, list):
+            return []
+        return [entry for key in ids[-24:] for entry in
+                (*reply_style_history([key]), *recipe_style_history([key]))]
+
+    @staticmethod
+    def _remember_style(state: dict, chat_id: int, text: str) -> None:
+        ids = reply_style_ids(text) + recipe_style_ids(text)
+        if not ids:
+            return
+        memory = state.setdefault("voice_memory", {})
+        previous = memory.get(str(chat_id), [])
+        previous = [key for key in previous[-24:] if reply_style_history([key]) or recipe_style_history([key])] if isinstance(previous, list) else []
+        # No patient text, anatomy, diagnosis or prescribed care crosses visits.
+        memory[str(chat_id)] = (previous + ids)[-24:]
+
+    def _remember_delivered_style(self, chat_id: int, text: str) -> None:
+        state = self.state()
+        self._remember_style(state, chat_id, text)
+        self.store(state)
 
     def session(self, chat_id: int) -> dict | None:
         self._expire_consultations()
@@ -169,16 +184,17 @@ class Salchicher:
         self._cancel_worker(chat_id)
         now = time.time()
         consultation_id = uuid4().hex
+        greeting = select_reply("consultation", self._style_history(chat_id))
         record = {
             "id": consultation_id, "title": "Una visita al doctor de patos", "status": "active",
             "retained": retain_history, "created_at": now, "updated_at": now,
             "closed_at": None, "closure_reason": None, "care_summary": [],
-            "messages": [{"role": "assistant", "content": CONSULTATION_GREETING, "created_at": now}],
+            "messages": [{"role": "assistant", "content": greeting, "created_at": now}],
         }
         session = {
             "consultation_id": consultation_id, "session_id": consultation_id,
             "retained": retain_history, "shared": False,
-            "history": [{"role": "assistant", "content": CONSULTATION_GREETING}],
+            "history": [{"role": "assistant", "content": greeting}],
             "asked": [], "updated_at": now, "version": time.time_ns(), "pending": False,
         }
         if retain_history:
@@ -186,6 +202,7 @@ class Salchicher:
         else:
             session["consultation"] = record
         state.setdefault("sessions", {})[key] = session
+        self._remember_style(state, chat_id, greeting)
         self.store(state)
         return self._public_consultation(record)
 
@@ -230,6 +247,10 @@ class Salchicher:
         now = time.time()
         session["history"] = (session["history"] + [{"role": role, "content": content}])[-MAX_MESSAGES:]
         session["updated_at"] = now
+        if role == "user":
+            session["answered"] = list(dict.fromkeys(session.get("answered", []) + _answered_in_current(content)))
+        elif role == "assistant":
+            self._remember_style(state, chat_id, content)
         record = self._consultation_record(state, chat_id, session)
         if record:
             record["messages"].append({"role": role, "content": content, "created_at": now})
@@ -253,6 +274,7 @@ class Salchicher:
         state = self.state()
         state.setdefault("sessions", {}).pop(str(chat_id), None)
         state.get("consultations", {}).pop(str(chat_id), None)
+        state.get("voice_memory", {}).pop(str(chat_id), None)
         self.store(state)
 
     def set_enabled(self, enabled: bool) -> None:
@@ -290,16 +312,16 @@ class Salchicher:
             return
         current = self.active_consultation(update.effective_chat.id)
         if current:
-            await update.effective_chat.send_message(
-                "Tu sillón sigue reservado, Patita. He dejado el cuaderno abierto por "
-                "nuestra página y tengo las orejitas atentas. Seguimos por donde íbamos: "
-                "¿cómo van hoy esas plumitas?"
-            )
+            text = select_reply("resume", self._style_history(update.effective_chat.id))
+            await update.effective_chat.send_message(text)
+            self._remember_delivered_style(update.effective_chat.id, text)
             return
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("Pasar al sillón", callback_data="salchicher:private")],
         ])
-        await update.effective_chat.send_message(INTRO, reply_markup=keyboard)
+        text = select_reply("invitation", self._style_history(update.effective_chat.id))
+        await update.effective_chat.send_message(text, reply_markup=keyboard)
+        self._remember_delivered_style(update.effective_chat.id, text)
 
     async def consent(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not self.allowed(update) or not update.callback_query:
@@ -318,7 +340,9 @@ class Salchicher:
             "updated_at": time.time(), "version": time.time_ns(), "pending": False,
         })
         await query.edit_message_reply_markup(reply_markup=None)
-        await self.send(chat_id, CONSULTATION_GREETING)
+        greeting = select_reply("consultation", self._style_history(chat_id))
+        await self.send(chat_id, greeting)
+        self._remember_delivered_style(chat_id, greeting)
 
     async def reset(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not self.allowed(update):
@@ -396,14 +420,16 @@ class Salchicher:
                 consultation_id = session.get("consultation_id")
                 session_id = session["session_id"]
                 history = session["history"]
+                style_history = self._style_history(chat_id)
+                asked = list(dict.fromkeys(session["asked"] + session.get("answered", [])))
                 try:
                     reply, questions = await asyncio.wait_for(
-                        generate_care_reply(history, session["asked"]), timeout=70,
+                        generate_care_reply(history, asked, style_history=style_history), timeout=70,
                     )
                 except Exception as exc:
                     # Do not log health text, model bodies, or provider exception messages.
                     logger.warning("Salchicher generation failed: %s", type(exc).__name__)
-                    reply, questions = UNAVAILABLE_TEXT, []
+                    reply, questions = select_reply("unavailable", [*style_history, *history]), []
                 current = self.session(chat_id)
                 if not current or not self.enabled():
                     return

@@ -7,6 +7,7 @@ to vary the next page; no conversation text is interpolated into a prescription.
 
 from collections.abc import Mapping
 from random import SystemRandom
+import re
 from typing import Any
 
 
@@ -236,6 +237,12 @@ _CARE_GROUPS = {
     "food": "snack", "fluids": "snack", "warm_drink": "snack", "bath": "play",
     **{key: item[2] for key, item in _NEW_CARE.items()},
 }
+# Only near-identical practical suggestions belong here. The wider "rest"
+# category also includes stories, silence and a comfortable place: those are
+# distinct choices and must not disappear merely because another rest item won.
+_CARE_EQUIVALENTS = {key: "postpone_tasks" for key in (
+    "rest", "errand_retirement", "pocket_sunday", "unfinished_page",
+)}
 CARE_FLOURISHES = {
     "paw_seal": "En el papel queda un sello torcido con forma de patita.",
     "ear_ribbon": "Le ato al expediente una cinta dibujada con orejitas de perro.",
@@ -247,6 +254,7 @@ CARE_FLOURISHES = {
     "optional_ribbon": "La cinta del paquete dice «a tu gusto, sin obligación».",
 }
 _OPENINGS = {
+    "direct": "",
     "notebook": "Me ajusto las gafitas y abro el cuaderno de los patos.",
     "stamp": "Saco mi sello de patita y aparto los recados del escritorio.",
     "chair": "Acerca esas plumitas al sillón; ya tengo el lápiz detrás de la oreja.",
@@ -257,6 +265,7 @@ _OPENINGS = {
     "paperclip": "Sujeto la página con un clip de patito y me aclaro el cuac; el mío sigue sonando a perro.",
 }
 _CLOSINGS = {
+    "direct": "",
     "paw": "Firmado con una patita: Doctor Salchicher. ✧",
     "nest": "El nido queda oficialmente en modo mimo.",
     "bear": "Le pongo un sello al sobre para el Oso: «encargo de cariño, sin prisas».",
@@ -266,21 +275,92 @@ _CLOSINGS = {
     "glasses": "Doy por terminada la ceremonia y vuelvo a buscar las gafitas, que siguen en mi nariz.",
     "seal": "Sello de perro, borde de plumas y una esquina reservada para la firma de Patita.",
 }
+_PRESENTATIONS = {
+    "recipe": "Receta con nombres de cuidados y una lista breve.",
+    "direct": "Cuidados en párrafos directos, sin entrada, firma ni adornos.",
+}
+_RECIPE_HEADING = "Mi receta para Patita. Tú eliges lo que te apetece; también vale dejarla para otro rato:"
+_DIRECT_HEADING = "Tú eliges lo que te apetece; también vale dejarlo para otro rato:"
+_STYLE_TEXTS = {
+    **{f"recipe:opening:{key}": text for key, text in _OPENINGS.items() if text},
+    **{f"recipe:closing:{key}": text for key, text in _CLOSINGS.items() if text},
+    "recipe:presentation:recipe": _RECIPE_HEADING,
+    "recipe:presentation:direct": _DIRECT_HEADING,
+}
+_GESTURES = {
+    "glasses": r"\bgaf(?:as|itas)\b",
+    "seal": r"\bsellos?\b|\bfirm(?:o|a|ado|ar)\b|\biniciales\b",
+    "notebook": r"\bcuaderno\b|\bexpedientes?\b|\bmarcap[aá]ginas\b|\bclip\b",
+    "drawer": r"\bcaj[oó]n\b",
+    "costume": r"\bbata\b",
+    "ear": r"\borej(?:a|as|ita|itas)\b",
+    "chair": r"\bsill[oó]n\b",
+}
 
 
-def _history_text(excluded: Any) -> str:
-    """Accept previous rendered replies or chat history, never echo either."""
+def recipe_style_ids(text: Any) -> list[str]:
+    """Recognize framing only; never retain symptoms, diagnoses or care choices."""
+    if not isinstance(text, str):
+        return []
+    return [key for key, literal in _STYLE_TEXTS.items() if literal in text]
+
+
+def recipe_style_history(ids: Any) -> list[dict[str, str]]:
+    """Expand only known style IDs into fixed assistant prose for novelty checks."""
+    if not isinstance(ids, (list, tuple)):
+        return []
+    return [{"role": "assistant", "content": _STYLE_TEXTS[key]}
+            for key in ids[-24:] if isinstance(key, str) and key in _STYLE_TEXTS]
+
+
+def _history_replies(excluded: Any) -> list[str]:
+    """Take assistant turns before applying the limit; user prose is not style."""
     if isinstance(excluded, (str, Mapping)):
         excluded = [excluded]
     if not isinstance(excluded, (list, tuple)):
-        return ""
+        return []
     texts = []
-    for item in excluded[-24:]:
+    for item in excluded:
         if isinstance(item, Mapping):
             item = item.get("content") if item.get("role") == "assistant" else None
         if isinstance(item, str):
             texts.append(item[:16000])
-    return "\n".join(texts)
+    return texts[-24:]
+
+
+def _history_text(excluded: Any) -> str:
+    """Accept previous rendered replies or chat history, never echo either."""
+    return "\n".join(_history_replies(excluded))
+
+
+def _gestures(text: str) -> set[str]:
+    return {key for key, pattern in _GESTURES.items() if re.search(pattern, text, re.IGNORECASE)}
+
+
+def _stage_options(catalog: dict[str, str], seen: str) -> dict[str, str]:
+    """Drop a repeated gesture, not just its exact wording. Silence is valid."""
+    gestures = _gestures(seen)
+    return {key: text for key, text in catalog.items()
+            if not text or text not in seen and not (_gestures(text) & gestures)}
+
+
+def _stage_text(catalog: dict[str, str], preferred: Any, seen: str) -> str:
+    # No random substitute when a scene is missing or worn out. The reply can
+    # simply continue, instead of replacing one automatic ritual with another.
+    if not isinstance(preferred, str):
+        return ""
+    return _stage_options(catalog, seen).get(preferred, "")
+
+
+def _presentation(data: Mapping, replies: list[str]) -> str:
+    # A freshly requested recipe may use a list, but following one with another
+    # automatic introduction would recreate the same ceremony with new nouns.
+    if replies and _RECIPE_HEADING in replies[-1]:
+        return "direct"
+    preferred = data.get("presentation")
+    if isinstance(preferred, str) and preferred in _PRESENTATIONS:
+        return preferred
+    return "direct" if replies else "recipe"
 
 
 def _available(catalog: dict[str, str], seen: str) -> dict[str, str]:
@@ -329,11 +409,16 @@ def _care_choices(data: Mapping, seen: str) -> list[tuple[str, str | None]]:
     raw = data.get("care")
     selected = []
     requested = set()
+    meanings = set()
     for item in raw[:16] if isinstance(raw, list) else []:
         key = item.get("id") if isinstance(item, Mapping) else item
         if not isinstance(key, str) or key not in CARE or key in requested:
             continue
         requested.add(key)
+        meaning = _CARE_EQUIVALENTS.get(key, key)
+        if meaning in meanings:
+            continue
+        meanings.add(meaning)
         # The selector knows the context: water must not turn into a snack, nor
         # quiet company into an embrace. Vary the ceremony, not this choice.
         flourish = item.get("flourish") if isinstance(item, Mapping) else None
@@ -357,26 +442,36 @@ def render_storybook(data: Any, excluded: Any = None) -> str:
     Legacy diagnosis/category and string care IDs remain accepted.
     """
     data = data if isinstance(data, Mapping) else {}
-    seen = _history_text(excluded)
-    opening = _OPENINGS[_pick(_OPENINGS, data.get("opening"), seen)]
-    closing = _CLOSINGS[_pick(_CLOSINGS, data.get("closing"), seen)]
-    lines = [opening, "", "Diagnóstico de cuento: " + _diagnosis(data, seen), "",
-             "Mi receta para Patita. Tú eliges lo que te apetece; también vale dejarla para otro rato:"]
+    replies = _history_replies(excluded)
+    seen = "\n".join(replies)
+    presentation = _presentation(data, replies)
+    stage_seen = "\n".join(replies[-4:])
+    opening = _stage_text(_OPENINGS, data.get("opening"), stage_seen) if presentation == "recipe" else ""
+    diagnosis = "Diagnóstico de cuento: " + _diagnosis(data, seen)
+    lines = [opening, ""] if opening else []
+    lines.extend((diagnosis, "", _RECIPE_HEADING if presentation == "recipe" else _DIRECT_HEADING))
+    stage_seen += "\n" + opening + "\n" + diagnosis
     for number, (key, flourish) in enumerate(_care_choices(data, seen), 1):
-        line = f"{number}. {_CARE_NAMES[key]}: {CARE[key]}"
-        if flourish is not None or number == 1:
-            flourish = _pick(CARE_FLOURISHES, flourish, seen)
-            decoration = CARE_FLOURISHES[flourish]
+        line = f"{number}. {_CARE_NAMES[key]}: {CARE[key]}" if presentation == "recipe" else CARE[key]
+        stage_seen += "\n" + line
+        decoration = _stage_text(CARE_FLOURISHES, flourish, stage_seen) if presentation == "recipe" else ""
+        if decoration:
             line += " " + decoration
-            seen += "\n" + decoration
+            stage_seen += "\n" + decoration
+        if presentation == "direct":
+            lines.append("")
         lines.append(line)
-    lines.extend(("", closing))
+    closing = _stage_text(_CLOSINGS, data.get("closing"), stage_seen) if presentation == "recipe" else ""
+    if closing:
+        lines.extend(("", closing))
     return "\n".join(lines)
 
 
 def catalog_for_prompt(excluded: Any = None) -> dict[str, Any]:
     """Return fresh, JSON-compatible catalog data, preferring unused fragments."""
     seen = _history_text(excluded)
+    replies = _history_replies(excluded)
+    stage_seen = "\n".join(replies[-4:])
     # Refresh exhausted kinds separately, so using every companionship option
     # does not remove companionship while unrelated snacks remain unused.
     available_care = {}
@@ -391,7 +486,9 @@ def catalog_for_prompt(excluded: Any = None) -> dict[str, Any]:
         "legacy_diagnoses": dict(_LEGACY_DIAGNOSES),
         "care": {key: {"name": _CARE_NAMES[key], "text": text, "group": _CARE_GROUPS[key]}
                  for key, text in available_care.items()},
-        "care_flourishes": _available(CARE_FLOURISHES, seen),
-        "openings": _available(_OPENINGS, seen),
-        "closings": _available(_CLOSINGS, seen),
+        "care_flourishes": _stage_options(CARE_FLOURISHES, stage_seen),
+        "openings": _stage_options(_OPENINGS, stage_seen),
+        "closings": _stage_options(_CLOSINGS, stage_seen),
+        "presentations": {key: text for key, text in _PRESENTATIONS.items()
+                          if key != "recipe" or not replies or _RECIPE_HEADING not in replies[-1]},
     }

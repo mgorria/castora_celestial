@@ -60,11 +60,11 @@ class ServiceTests(unittest.TestCase):
     def test_duck_questions_are_relevant_bounded_and_not_repeated(self):
         reply, questions = render_decision({"action": "ask", "questions": [
             "duration", "head_duration", "head_duration", "mojo", "context", "wings"]}, ["duration"])
-        self.assertEqual(questions, ["head_duration", "mojo"])
-        self.assertIn("cabecita", reply)
+        self.assertEqual(questions, ["mojo", "wings"])
+        self.assertNotIn("Desde cuándo", reply)
         self.assertIn("mojo de oso", reply)
         self.assertNotIn("embaraz", normalized(reply))
-        self.assertNotIn("alitas", reply)
+        self.assertIn("alitas", reply)
 
     def test_retired_screening_or_exhausted_questions_fall_back_to_mimos(self):
         for ids, asked in ((["context", "honey", "severity", "breathing"], []),
@@ -94,7 +94,7 @@ class ServiceTests(unittest.TestCase):
         reply, questions = render_decision({"action": "comfort", "category": "abdominal_pain",
             "questions": ["context"], "care": ["jalea_real"], "reply": "Es una molestia leve: toma jalea real."}, [])
         self.assertEqual((reply, questions), (COMFORT_TEXT, []))
-        self.assertIn("imaginarias", reply)
+        self.assertNotIn("diagnóstico", reply)
         self.assertNotIn("leve", reply)
 
     def test_only_actual_medical_requests_use_real_care_exit(self):
@@ -107,6 +107,24 @@ class ServiceTests(unittest.TestCase):
     def test_provider_action_alone_cannot_issue_emergency_instructions(self):
         reply, _ = render_decision({"action": "emergency", "reply": "Llama al 112"}, [])
         self.assertNotIn("112", reply)
+
+    def test_questions_start_directly_and_duration_aliases_never_repeat(self):
+        reply, ids = render_decision({"action": "ask", "questions": ["head_duration", "duration", "evolution"]}, [])
+        self.assertEqual(ids, ["head_duration", "evolution"])
+        self.assertTrue(reply.startswith("¿Desde cuándo"))
+        self.assertNotIn("gafitas", reply)
+        next_reply, next_ids = render_decision({"action": "ask", "questions": ["duration", "head_duration", "mojo"]}, [],
+            history=[{"role": "assistant", "content": reply}, {"role": "user", "content": "Desde ayer; hoy sigue igual."}])
+        self.assertEqual(next_ids, ["mojo"])
+        self.assertNotIn("Desde cuándo", next_reply)
+
+    def test_repeat_comfort_changes_structure_without_clinical_free_prose(self):
+        first, _ = render_decision({"action": "comfort"}, [])
+        second, _ = render_decision({"action": "comfort", "reply": "Toma un medicamento"}, [],
+            history=[{"role": "assistant", "content": first}, {"role": "user", "content": "Un poquito más de compañía"}])
+        self.assertNotEqual(second, first)
+        self.assertNotIn("medicamento", second)
+        self.assertNotIn("gafitas", first + second)
 
 
 class ProviderTests(unittest.IsolatedAsyncioTestCase):
@@ -128,6 +146,45 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
             ], [])
         self.assertEqual((reply, questions), (EMERGENCY_TEXT, []))
         provider.assert_not_called()
+
+    async def test_social_turns_answer_their_context_without_another_ceremony(self):
+        import os
+        cases = [("Hola, doctor", "Hola"), ("Muchas gracias, Salchicher", "De nada"),
+                 ("Hasta luego", "Hasta luego"), ("Gracias, hasta mañana", "Buenas noches")]
+        with patch.dict(os.environ, {"OPENAI_API_KEY": ""}), patch("salchicher_service.AsyncOpenAI") as provider:
+            for text, expected in cases:
+                reply, questions = await generate_care_reply([
+                    {"role": "assistant", "content": "Me ajusto las gafitas y preparo una receta."},
+                    {"role": "user", "content": text}], [])
+                self.assertTrue(reply.startswith(expected), reply)
+                self.assertEqual(questions, [])
+                self.assertNotIn("gafitas", reply)
+        provider.assert_not_called()
+
+    async def test_thanks_with_a_new_concern_still_uses_context_and_previous_answers(self):
+        import os
+        client, manager = self.provider({"action": "ask", "questions": ["head_duration", "duration", "evolution"]})
+        history = [{"role": "user", "content": "Me duele la cabecita desde ayer."},
+                   {"role": "assistant", "content": "Te escucho."},
+                   {"role": "user", "content": "Gracias, pero hoy sigue igual."}]
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "synthetic"}), patch("salchicher_service.AsyncOpenAI", return_value=manager):
+            reply, questions = await generate_care_reply(history, [])
+        client.responses.create.assert_awaited_once()
+        self.assertEqual(questions, [])
+        self.assertNotIn("Desde cuándo", reply)
+        payload = json.loads(client.responses.create.call_args.kwargs["input"].split("\n", 1)[1])
+        for key in ("head_duration", "duration", "evolution", "symptoms"):
+            self.assertNotIn(key, payload["question_catalog"])
+
+    async def test_style_memory_changes_copy_but_never_enters_medical_conversation(self):
+        import os
+        client, manager = self.provider({"action": "comfort"})
+        history = [{"role": "user", "content": "Solo quiero compañía"}]
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "synthetic"}), patch("salchicher_service.AsyncOpenAI", return_value=manager):
+            reply, _ = await generate_care_reply(history, [], style_history=[{"role": "assistant", "content": COMFORT_TEXT}])
+        self.assertNotEqual(reply, COMFORT_TEXT)
+        payload = json.loads(client.responses.create.call_args.kwargs["input"].split("\n", 1)[1])
+        self.assertEqual(payload["conversation"], history)
 
     async def test_explicit_medication_question_does_not_become_duck_prescription(self):
         import os
@@ -293,7 +350,7 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         started = asyncio.Event()
         release = asyncio.Event()
         calls = []
-        async def generate(history, asked):
+        async def generate(history, asked, **kwargs):
             calls.append(history)
             if len(calls) == 1:
                 started.set()
@@ -312,7 +369,7 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
     async def test_off_cancels_inflight_reply_and_on_does_not_replay(self):
         self.seed()
         started = asyncio.Event()
-        async def generate(*args):
+        async def generate(*args, **kwargs):
             started.set()
             await asyncio.Event().wait()
         with patch("salchicher.generate_care_reply", generate):

@@ -5,6 +5,7 @@ from itertools import permutations
 
 from salchicher_copy import (
     LEGACY_GREETING, LEGACY_INTRO, LEGACY_QUESTIONS, retired_automatic_message,
+    REPLIES, select_reply, reply_style_ids, reply_style_history,
 )
 
 
@@ -36,6 +37,24 @@ class RetiredCopyTests(unittest.TestCase):
             self.assertFalse(retired_automatic_message({"role": "assistant", "text": text}))
         for message in (None, {}, {"role": "assistant", "text": None}):
             self.assertFalse(retired_automatic_message(message))
+
+
+class ConversationalCopyTests(unittest.TestCase):
+    def test_variation_uses_assistant_history_not_user_quotations(self):
+        first = select_reply("comfort")
+        self.assertEqual(select_reply("comfort", [{"role": "user", "content": first}]), first)
+        second = select_reply("comfort", [{"role": "assistant", "content": first}])
+        self.assertNotEqual(second, first)
+        history = [{"role": "assistant", "content": text} for text in REPLIES["comfort"].values()]
+        self.assertNotEqual(select_reply("comfort", history), history[-1]["content"])
+        self.assertNotIn("gafitas", first + second)
+
+    def test_style_memory_contains_only_fixed_copy_ids(self):
+        sentence = select_reply("greeting")
+        ids = reply_style_ids(sentence + " Me duele la cabeza desde ayer. TEXTO_PERSONAL")
+        self.assertEqual(ids, ["greeting:hello"])
+        self.assertEqual(reply_style_history([*ids, "TEXTO_PERSONAL", "unknown:head", {}]),
+                         [{"role": "assistant", "content": sentence}])
 
 
 if __name__ == "__main__":

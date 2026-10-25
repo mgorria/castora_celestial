@@ -85,6 +85,57 @@ class ConsultationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.bot.get_consultation(1, next_episode["id"])["messages"]), 1)
         self.send.assert_not_awaited()
 
+    async def test_next_visit_varies_greeting_with_style_ids_only_and_forget_resets_them(self):
+        from salchicher_vademecum import render_storybook
+        first = self.bot.start_consultation(1, retain_history=False)
+        session = self.bot.session(1)
+        self.bot._save_message(1, session, "user", "SINTOMA_PRIVADO: me duele la cabecita desde ayer")
+        recipe = render_storybook({"diagnosis": "busy_head", "care": ["food"],
+                                   "presentation": "recipe", "opening": "stamp", "closing": "paw"})
+        self.bot._save_message(1, self.bot.session(1), "assistant", recipe)
+        self.bot.close_consultation(1, first["id"])
+        serialized = str(self.data)
+        self.assertNotIn("SINTOMA_PRIVADO", serialized)
+        self.assertNotIn("busy_head", serialized)
+        self.assertNotIn(CARE["food"], serialized)
+        self.assertTrue(self.bot.state()["voice_memory"]["1"])
+        await self.bot.close()
+        self.bot = self.new_bot()
+        second = self.bot.start_consultation(1, retain_history=False)
+        self.assertNotEqual(first["messages"][0]["content"], second["messages"][0]["content"])
+        self.assertNotIn("gafitas", second["messages"][0]["content"])
+        self.assertNotIn("SINTOMA_PRIVADO", str(self.bot._style_history(1)))
+        self.bot.forget(1)
+        self.assertNotIn("1", self.bot.state().get("voice_memory", {}))
+        third = self.bot.start_consultation(1, retain_history=False)
+        self.assertEqual(third["messages"][0]["content"], first["messages"][0]["content"])
+
+    async def test_user_quotes_never_update_cross_visit_style_and_memory_stays_bounded(self):
+        from salchicher_copy import REPLIES
+        self.bot.start_consultation(1, retain_history=True)
+        before = copy.deepcopy(self.bot.state()["voice_memory"])
+        self.bot._save_message(1, self.bot.session(1), "user", REPLIES["thanks"]["welcome"])
+        self.assertEqual(self.bot.state()["voice_memory"], before)
+        for index in range(30):
+            self.bot._save_message(1, self.bot.session(1), "assistant", REPLIES["thanks"]["welcome"])
+        self.assertLessEqual(len(self.bot.state()["voice_memory"]["1"]), 24)
+        self.assertTrue(all(isinstance(value, str) for value in self.bot.state()["voice_memory"]["1"]))
+
+    async def test_answered_facts_remain_in_this_episode_after_context_rolls_over(self):
+        self.bot.start_consultation(1, retain_history=True)
+        self.bot._save_message(1, self.bot.session(1), "user", "Me duele la cabecita desde ayer; hoy sigue igual")
+        for index in range(30):
+            self.bot._save_message(1, self.bot.session(1), "assistant", f"Mensaje de compañía {index}")
+        self.assertNotIn("desde ayer", str(self.bot.session(1)["history"]))
+        with patch("salchicher.generate_care_reply", AsyncMock(return_value=("Sigo aquí.", []))) as provider:
+            await self.bot.receive(incoming("Otro poquito de compañía"), None)
+            await self.finish()
+        blocked = provider.call_args.args[1]
+        self.assertTrue({"duration", "head_duration", "symptoms", "evolution"}.issubset(blocked))
+        self.bot.close_consultation(1, self.bot.active_consultation(1)["id"])
+        self.bot.start_consultation(1, retain_history=True)
+        self.assertEqual(self.bot.session(1).get("answered", []), [])
+
     async def test_explicit_history_choice_and_private_by_default(self):
         for choice in (None, 0, 1, "true", "false"):
             with self.subTest(choice=choice), self.assertRaisesRegex(ValueError, "consent_required"):
@@ -109,7 +160,8 @@ class ConsultationTests(unittest.IsolatedAsyncioTestCase):
                 sent = update.effective_chat.send_message.call_args
                 text = sent.args[0]
                 self.assertNotIn("reply_markup", sent.kwargs)
-                self.assertIn("plumitas", text)
+                self.assertIn("Patita", text)
+                self.assertNotIn("¿", text, "Returning to help does not repeat the intake question")
                 for forbidden in ("compart", "copia", "privad", "Sandra", "Miguel", "embarazo", "profesional", "112"):
                     self.assertNotIn(forbidden, text)
 
@@ -222,7 +274,7 @@ class ConsultationTests(unittest.IsolatedAsyncioTestCase):
                 started = asyncio.Event()
                 release = asyncio.Event()
 
-                async def generate(*args):
+                async def generate(*args, **kwargs):
                     started.set()
                     await release.wait()
                     return "obsolete reply", []
