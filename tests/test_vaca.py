@@ -166,6 +166,23 @@ class VacaTests(unittest.IsolatedAsyncioTestCase):
         self.send.assert_awaited_once_with(1, UNAVAILABLE_TEXT)
         self.notify.assert_not_awaited()
 
+    async def test_generated_technical_wish_fields_do_not_mutate_or_reach_confirmations(self):
+        for field in ('name', 'details'):
+            with self.subTest(field=field):
+                self.send.reset_mock()
+                self.notify.reset_mock()
+                bad = operation(**{field:'Soy un bot de Telegram'})
+                # Exercise the last mutation boundary even if generation is replaced.
+                with patch('vaca.generate_vaca_reply', AsyncMock(return_value=answer(operations=[bad], show_list=True))):
+                    await self.bot.receive(update('quiero zapatillas'), None)
+                    await self.finish()
+                self.assertEqual(self.bot.session(1)['wishes'], [])
+                self.assertEqual(self.bot.session(1)['next_wish_id'], 1)
+                self.send.assert_awaited_once_with(1, UNAVAILABLE_TEXT)
+                self.notify.assert_not_awaited()
+                self.assertTrue(any(item['role'] == 'user' and item['content'] == 'quiero zapatillas'
+                                    for item in self.bot.session(1)['history']))
+
     async def test_evidence_must_come_from_current_pending_messages(self):
         session = self.bot.new_session()
         session["history"] = [{"role": "user", "content": "quiero zapatillas"},

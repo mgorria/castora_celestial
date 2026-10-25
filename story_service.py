@@ -4,6 +4,7 @@ import os
 from typing import Any
 
 from openai import AsyncOpenAI
+from character_voice import character_instructions, breaks_character
 
 from lore_utils import (
     read_core_lore,
@@ -87,7 +88,7 @@ def openai_available() -> bool:
 
 def _client() -> AsyncOpenAI:
     if not openai_available():
-        raise StoryGenerationError("OPENAI_API_KEY no configurada")
+        raise StoryGenerationError("El cuaderno no está disponible en este momento.")
     return AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
@@ -100,27 +101,34 @@ def _extract_json(text: str) -> dict[str, Any]:
     try:
         return json.loads(cleaned)
     except json.JSONDecodeError as exc:
-        logger.error("Respuesta IA no parseable como JSON: %s", text[:500])
-        raise StoryGenerationError("La IA no devolvio JSON valido") from exc
+        logger.warning("La respuesta narrativa no tiene el formato esperado.")
+        raise StoryGenerationError("No se ha podido preparar una respuesta completa.") from exc
 
 
 async def _generate_json(prompt: str) -> dict[str, Any]:
     try:
         response = await _client().responses.create(
             model=OPENAI_MODEL,
+            instructions=character_instructions(),
             input=prompt,
             text={"format": {"type": "json_object"}},
+            store=False,
         )
     except Exception as exc:
-        logger.exception("Error llamando a OpenAI con modelo %s", OPENAI_MODEL)
-        raise StoryGenerationError(
-            f"Error llamando a OpenAI con modelo {OPENAI_MODEL}: {exc}"
-        ) from exc
+        logger.warning("No se pudo preparar la respuesta narrativa (%s).", type(exc).__name__)
+        raise StoryGenerationError("No se ha podido preparar la respuesta. Inténtalo en un ratito.") from None
 
     if not response.output_text:
-        logger.error("OpenAI devolvio una respuesta sin output_text: %s", response)
-        raise StoryGenerationError("OpenAI devolvio una respuesta vacia")
+        logger.warning("La respuesta narrativa llegó vacía.")
+        raise StoryGenerationError("La respuesta ha llegado vacía. Inténtalo de nuevo.")
     return _extract_json(response.output_text)
+
+
+def _require_voice(*values: str) -> None:
+    if any(breaks_character(value) for value in values):
+        # Do not ship a contaminated story, option or verdict; callers keep their
+        # existing review/fallback flow and no technical prose is exposed.
+        raise StoryGenerationError("La respuesta necesita otra vuelta de pluma antes de enviarse.")
 
 
 def _recent_text(recent_summaries: list[Any]) -> str:
@@ -245,7 +253,11 @@ Formato JSON exacto:
     data = await _generate_json(prompt)
     options = data.get("options", [])
     if not isinstance(options, list) or len(options) != 2:
-        raise StoryGenerationError("La IA no devolvio dos opciones")
+        raise StoryGenerationError("Mimosuga todavía no ha preparado las dos historias.")
+    for option in options:
+        if not isinstance(option, dict):
+            raise StoryGenerationError("Las opciones de cuento no están completas.")
+        _require_voice(str(option.get("title", "")), str(option.get("teaser", "")))
     return [
         {
             "title": str(option.get("title", "")).strip(),
@@ -364,7 +376,8 @@ Formato JSON exacto:
     data = await _generate_json(prompt)
     required = ["title", "full_text", "summary"]
     if any(not str(data.get(key, "")).strip() for key in required):
-        raise StoryGenerationError("La IA devolvio un cuento incompleto")
+        raise StoryGenerationError("El cuento todavía no está completo.")
+    _require_voice(str(data["title"]), str(data["full_text"]), str(data["summary"]))
     return {
         "title": str(data["title"]).strip(),
         "full_text": str(data["full_text"]).strip(),
@@ -509,7 +522,8 @@ Formato JSON exacto:
     should_reply = bool(data.get("should_reply", False))
     reason = str(data.get("reason", "")).strip()
     if should_reply and not reply:
-        raise StoryGenerationError("La IA no devolvio respuesta automatica")
+        raise StoryGenerationError("Mimosuga no ha podido terminar su respuesta.")
+    _require_voice(reply)
     return {
         "should_reply": should_reply,
         "reply": reply,
@@ -667,6 +681,8 @@ Usa status "sentence" por defecto. Usa "continue" solo para pausar por prudencia
         raise StoryGenerationError("La Corte no devolvio respuesta")
     if not personal_assessment:
         raise StoryGenerationError("La Corte no devolvio valoracion personal del juez")
+    _require_voice(decision_text, personal_assessment, str(data.get("verdict", "")),
+                   str(data.get("sentence", "")), str(data.get("judge", judge_name)))
     reply = (
         f"JUEZ PONENTE: {judge_name}\n\n"
         "VALORACION PERSONAL DEL JUEZ\n"
@@ -751,6 +767,7 @@ Formato JSON exacto:
     question = str(data.get("question", "")).strip()
     if not question:
         raise StoryGenerationError("La Corte no devolvio pregunta de interrogatorio")
+    _require_voice(question, str(data.get("judge", judge_name)))
     return {
         "question": question,
         "judge": str(data.get("judge", judge_name)).strip() or judge_name,

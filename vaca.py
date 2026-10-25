@@ -7,7 +7,7 @@ import re
 import time
 from typing import Callable
 
-from vaca_service import cow_voice, generate_vaca_reply
+from vaca_service import cow_voice, generate_vaca_reply, validate_generated_wish_text
 from vaca_campaigns import public_chat_anticipation
 
 logger = logging.getLogger("control-castora.vaca")
@@ -348,6 +348,7 @@ class Vaca:
             if action == "add":
                 if identity:
                     raise ValueError("new wish id must be empty")
+                validate_generated_wish_text(operation)
                 wish = self._new_wish(session, operation["name"], operation["details"],
                                       operation["url"], bool(favorite))
                 confirmations.append(f"Apuntado: {wish['id']}. {wish['name']}")
@@ -355,6 +356,7 @@ class Vaca:
             wish = next((item for item in wishes if item["id"] == identity), None)
             if not wish:
                 raise ValueError("unknown wish id")
+            validate_generated_wish_text(operation, wish)
             if action == "remove":
                 wishes.remove(wish)
                 confirmations.append(f"Quitado: {wish['id']}. {wish['name']}")

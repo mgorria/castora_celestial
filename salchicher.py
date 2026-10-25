@@ -22,13 +22,13 @@ CONSULTATION_GREETING = (
     "y vamos pasito a pasito."
 )
 INTRO = (
-    "Soy el Doctor Salchicher, patita: personaje de cuidados y mimos. Puedo hacerte "
-    "unas preguntas y proponerte cuidados generales; no soy un medico ni hago diagnosticos.\n\n"
-    "Tus mensajes se procesan con IA de OpenAI. La consulta se conserva en el servidor "
-    "hasta 48 horas desde tu ultimo mensaje y no pasa a cuentos ni lore. Puedes borrarla "
-    "con /olvidar (no borra las copias que queden en Telegram ni los registros del proveedor). "
-    "Tu eliges si el Oso, administrador, recibe copia.\n\n"
-    "Si es una urgencia, no esperes a este chat: llama al 112."
+    "¡Adelante, patita! Soy el Doctor Salchicher. Me acomodo las gafitas y te guardo "
+    "el sillón de los cuidados y los mimos. Aquí buscamos un poquito de comodidad; "
+    "para saber qué te pasa o decidir un tratamiento hace falta un profesional sanitario.\n\n"
+    "Este cuaderno se conserva hasta 48 horas desde tu último mensaje y no pasa a "
+    "los cuentos. Puedes borrarlo con /olvidar; eso no borra las copias que ya existan "
+    "fuera de mi cuaderno ni otros registros del servicio. Tú eliges si el Oso recibe copia.\n\n"
+    "Si es una urgencia, busca ayuda sin esperar y llama al 112."
 )
 
 
@@ -298,7 +298,7 @@ class Salchicher:
                 "y puedes continuar contándome por aquí o desde la web.\n\n"
                 + retention + " No envío copia al Oso. Puedes cerrar la consulta en la web "
                 "cuando te encuentres mejor, o borrar todas tus consultas con /olvidar. "
-                "Las copias de los chats de Telegram se borran desde Telegram."
+                "Las copias que guardes en otros lugares se borran allí por separado."
             )
             return
         keyboard = InlineKeyboardMarkup([
@@ -331,8 +331,8 @@ class Salchicher:
             return
         self.forget(update.effective_chat.id)
         await update.effective_chat.send_message(
-            "He borrado tus consultas y su historial de mi memoria, patita. Las copias en Telegram siguen "
-            "en sus chats. Cuando quieras, podemos abrir otra con /consulta."
+            "He borrado tus consultas y su historial de mi memoria, patita. Las copias que ya tengas "
+            "en otros lugares siguen allí. Cuando quieras, podemos abrir otra con /consulta."
         )
 
     async def receive(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -365,8 +365,8 @@ class Salchicher:
                 await self.safe_notify("Doctor Salchicher ha indicado buscar ayuda urgente.\n" + text[:2500])
             return
         if not self.enabled():
-            await self.send(chat_id, "El consultorio automatico esta pausado, patita. Si necesitas "
-                            "consejo sanitario, contacta con un profesional; no esperes al bot.")
+            await self.send(chat_id, "El sillón del consultorio está descansando un ratito, patita. Si necesitas "
+                            "consejo sanitario, contacta con un profesional; no esperes a que vuelva a abrir.")
             return
         session = self.session(chat_id)
         if not session:

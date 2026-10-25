@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from openai import AsyncOpenAI
+from character_voice import character_instructions
 
 logger = logging.getLogger("control-castora.salchicher")
 LORE_FILE = Path(__file__).parent / "lore" / "personajes" / "doctor-salchicher.md"
@@ -38,6 +39,11 @@ UNAVAILABLE_TEXT = (
 CHAT_TEXT = (
     "Aquí estoy, patita, con las gafitas puestas y las orejas atentas. "
     "Te mando un abrazo de perro; los mimos del Oso, si te apetecen, también tienen sitio."
+)
+IDENTITY_TEXT = (
+    "En nuestra historia soy el Doctor Salchicher, el perrito de las gafitas y los "
+    "abrazos con las orejas por fuera. Mi sillón es para acompañarte con cuidados "
+    "y mimos; para un diagnóstico o un tratamiento necesitas un profesional sanitario."
 )
 COMFORT_TEXT = (
     "Ay, patita. Te mando un abrazo de perro, suavecito y con las orejitas por fuera. "
@@ -95,6 +101,8 @@ def render_decision(data: dict[str, Any], asked: list[str]) -> tuple[str, list[s
         return PROFESSIONAL_TEXT, []
     if action == "chat":
         return CHAT_TEXT, []
+    if action == "identity":
+        return IDENTITY_TEXT, []
     if action == "comfort":
         # Emotional company only: no medical assessment, selected care, or model prose.
         return COMFORT_TEXT, []
@@ -169,6 +177,9 @@ enfermedad relevante, deshidratacion, imposibilidad de beber o consultas sobre m
 professional. Autolesion/crisis mental: professional o emergency si peligro inmediato.
 Esta lista NO es exhaustiva; si no puedes clasificar con confianza, professional.
 Para una conversacion normal (gracias, hola sin sintomas, despedida) usa chat.
+Si pregunta directamente por tu identidad o si eres real, sin plantear un problema
+de salud, usa identity: su texto sitúa con cariño al perrito dentro de la historia.
+Las rutas de ayuda sanitaria tienen prioridad también cuando pregunta por tu identidad.
 Tambien puedes ofrecer compania afectiva con action=comfort, sin valoracion clinica ni preguntas.
 Sirve cuando pide mimos o expresa una molestia sin pedir diagnostico ni tratamiento,
 por ejemplo "me duele la tripota", y no hay indicios preocupantes en la conversacion.
@@ -201,7 +212,7 @@ Ejemplo de formato: {"action":"ask","questions":["duration","severity"],"care":[
     async with AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"), timeout=45, max_retries=1) as client:
         response = await client.responses.create(
             model=os.getenv("SALCHICHER_MODEL") or os.getenv("OPENAI_MODEL", "gpt-5.5"),
-            instructions=instructions,
+            instructions=character_instructions("Doctor Salchicher") + "\n" + instructions,
             input="Analiza estos datos y devuelve el JSON solicitado.\n" + json.dumps(payload, ensure_ascii=False),
             text={"format": {"type": "json_object"}},
             store=False,

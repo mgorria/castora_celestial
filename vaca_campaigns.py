@@ -6,11 +6,17 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
+from character_voice import breaks_character
+
 
 EVENTS = ("pista1", "pista2", "manana")
 FINAL_EVENTS = {"sent", "uncertain", "sending"}
 MAX_LATENESS = timedelta(hours=2)
 SEND_TIMEOUT_SECONDS = 30
+VOICE_REVIEW_MESSAGE = (
+    "Ese texto sale de la voz de la Vaca Mágica. Revísalo antes de preparar la visita; "
+    "no se ha enviado nada a Sandra."
+)
 
 
 def public_chat_anticipation(data: dict, chat_id: int, *, now: datetime | None = None) -> dict:
@@ -121,6 +127,13 @@ class VacaCampaigns:
         plan["status"] = "draft"
         plan["revision"] = plan.get("revision", 0) + 1
 
+    @staticmethod
+    def pending_voice_issue(plan: dict) -> bool:
+        # Previously sent letters stay intact. Only text still eligible for a
+        # future delivery needs a fresh review before it can leave the desk.
+        return any(event.get("status") == "pending" and breaks_character(event.get("text", ""))
+                   for event in plan["events"].values())
+
     def display_time(self, value: str) -> str:
         return datetime.fromisoformat(value).astimezone(self.timezone).strftime("%d/%m/%Y %H:%M")
 
@@ -206,6 +219,8 @@ class VacaCampaigns:
                         event["status"] = "expired"
                 if not any(e["status"] == "pending" for e in plan["events"].values()):
                     raise ValueError("La visita no tiene mensajes futuros pendientes.")
+                if self.pending_voice_issue(plan):
+                    raise ValueError(VOICE_REVIEW_MESSAGE)
                 plan["recipient_id"] = int(recipient)
                 plan["status"] = "active"
             elif command == "/vaca_cancelar":
@@ -221,6 +236,8 @@ class VacaCampaigns:
                 event = self.editable_event(plan, fields[1])
                 if len(text.strip()) > 3500:
                     raise ValueError("El texto puede tener como máximo 3500 caracteres.")
+                if breaks_character(text.strip()):
+                    raise ValueError(VOICE_REVIEW_MESSAGE)
                 event["text"] = text.strip()
                 self.make_draft(plan)
             elif command == "/vaca_hora":
@@ -284,6 +301,8 @@ class VacaCampaigns:
         except Exception:
             await self.reply(update, "No he podido preparar los tres mensajes. No se ha creado ninguna visita; vuelve a intentarlo.")
             return
+        if any(breaks_character(text) for text in texts.values()):
+            raise ValueError(VOICE_REVIEW_MESSAGE)
         # Generation may take time; validate again and reload before persisting.
         if delivery <= self.now():
             raise ValueError("La fecha ha pasado mientras preparaba los mensajes. Elige otra fecha.")
@@ -319,6 +338,17 @@ class VacaCampaigns:
                     continue
                 if state.get("paused") or self.paused() or plan["status"] != "active":
                     continue
+                if self.pending_voice_issue(plan):
+                    # Old approved plans may predate the voice check. Preserve
+                    # their exact text, pause the whole plan and require review.
+                    self.make_draft(plan)
+                    self.store(state)
+                    await self.safe_notify(
+                        f"Visita {plan_id}: un texto pendiente sale de la voz de la Vaca Mágica. "
+                        "La visita ha vuelto a borrador sin enviar ese texto. "
+                        "Revísalo con /vaca_texto y vuelve a activar la visita."
+                    )
+                    break
                 if event["status"] != "pending":
                     continue
                 if self.recipient() != plan.get("recipient_id"):

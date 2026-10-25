@@ -28,6 +28,7 @@ from telegram.ext import (
 from telegram.request import HTTPXRequest
 
 import database
+from character_voice import has_out_of_character_language
 from salchicher import Salchicher
 from vaca import Vaca
 from vaca_campaigns import VacaCampaigns
@@ -447,6 +448,8 @@ def mark_schedule_before_send(schedule_id: str, today: str) -> dict[str, Any] | 
     for schedule in schedules:
         if schedule["id"] != schedule_id:
             continue
+        if schedule.get("blocked_reason") == "character_voice":
+            return None
 
         if schedule.get("kind", "weekly") == "weekly":
             if schedule.get("last_sent_date") == today:
@@ -507,10 +510,13 @@ def format_schedule(schedule: dict[str, Any]) -> str:
         when = f"cada {weekday} a las {schedule['time']}"
     else:
         when = f"el {schedule['date']} a las {schedule['time']}"
-    return f"{schedule['id']} - {display_name} - {when} - {schedule['text']}"
+    blocked = " [Detenido: revisar la voz del personaje]" if schedule.get("blocked_reason") == "character_voice" else ""
+    return f"{schedule['id']} - {display_name} - {when} - {schedule['text']}{blocked}"
 
 
 def next_schedule_time(schedule: dict[str, Any], now: datetime) -> datetime | None:
+    if schedule.get("blocked_reason") == "character_voice":
+        return None
     try:
         hour, minute = parse_schedule_time(schedule["time"])
     except (KeyError, ValueError):
@@ -805,6 +811,12 @@ async def central_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if not text:
         await update.effective_chat.send_message("El mensaje no puede estar vacio.")
         return
+    if has_out_of_character_language(text):
+        await update.effective_chat.send_message(
+            "Este mensaje contiene una explicación ajena a la voz del personaje. "
+            "Reescríbelo desde su papel antes de programarlo para Sandra. No se ha guardado."
+        )
+        return
 
     now = datetime.now(APP_TIMEZONE)
     when_text = context.args[1].lower()
@@ -1002,6 +1014,12 @@ async def central_accuse(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     accusation = " ".join(context.args).strip()
+    if has_out_of_character_language(accusation):
+        await update.effective_chat.send_message(
+            "La acusación contiene una explicación ajena a la voz de la Corte. "
+            "Reescríbela dentro de la historia; no se ha abierto ninguna causa ni enviado nada a Sandra."
+        )
+        return
     if not accusation:
         await update.effective_chat.send_message(
             "Uso: /acusar <hechos>\n"
@@ -1293,7 +1311,9 @@ async def story_request(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             ],
         ]
     )
-    topic_line = f"Sobre: {requested_topic}\n\n" if requested_topic else ""
+    # Keep the original request for generation, without parroting a technical
+    # instruction back to Patita as if Mimosuga were saying it.
+    topic_line = f"Sobre: {requested_topic}\n\n" if requested_topic and not has_out_of_character_language(requested_topic) else ""
     message = (
         "Ven, patita, que Mimosuga tiene dos cuentos preparados. "
         "Elige el que te llame mas suave:\n\n"
@@ -1825,6 +1845,10 @@ async def send_auto_reply_draft(draft_id: int, admin_user_id: int) -> tuple[bool
         return False, f"Esa respuesta ya no esta pendiente. Estado actual: {status}."
 
     animal_key = draft["animal_key"]
+    if has_out_of_character_language(draft.get("proposed_text", "")):
+        await database.release_auto_reply_draft(draft_id)
+        return False, ("Este borrador contiene una explicación ajena a la voz de Mimosuga. "
+                       "Revísalo antes de enviarlo; se conserva pendiente y Sandra no lo ha recibido.")
     animal_app = animal_apps.get(animal_key)
     partner_chat_id = get_partner_chat_id(animal_key)
     if not animal_app or not partner_chat_id:
@@ -1874,6 +1898,12 @@ async def send_as_animal(
     if not text:
         await update.effective_chat.send_message(f"Uso: /{command} <mensaje>")
         return
+    if has_out_of_character_language(text):
+        await update.effective_chat.send_message(
+            "Este mensaje se sale de la voz del personaje. Reescríbelo desde su papel "
+            "antes de enviarlo a Sandra. No se ha enviado ni cambiado tu texto."
+        )
+        return
 
     partner_chat_id = get_partner_chat_id(animal_key)
     if animal_key == "vaca":
@@ -1916,6 +1946,22 @@ async def send_scheduled_message(schedule: dict[str, Any]) -> bool:
         return False
 
     text = schedule["text"]
+    if has_out_of_character_language(text):
+        schedules = get_schedules()
+        newly_blocked = False
+        for stored in schedules:
+            if stored["id"] == schedule["id"] and stored.get("blocked_reason") != "character_voice":
+                stored["blocked_reason"] = "character_voice"
+                newly_blocked = True
+        if newly_blocked:
+            save_schedules(schedules)
+            if centralita_app:
+                await centralita_app.bot.send_message(
+                    chat_id=owner_chat_id(),
+                    text=(f"Programación {schedule['id']} detenida: su texto se sale de la voz "
+                          "del personaje. Cancélala y prepara una nueva versión; el texto original se conserva.")
+                )
+        return False
     await animal_app.bot.send_chat_action(partner_chat_id, ChatAction.TYPING)
     await animal_app.bot.send_message(chat_id=partner_chat_id, text=text)
     append_history(animal_key, "out", text)

@@ -9,6 +9,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from openai import AsyncOpenAI
+from character_voice import character_instructions, breaks_character
 
 
 logger = logging.getLogger("control-castora.vaca")
@@ -112,7 +113,7 @@ VISIT_SCHEMA = {
 }
 
 PUBLIC_INSTRUCTIONS = """
-Eres la Vaca Mágica, también llamada la Mugidora, que conversa con Patita en su rincón y por Telegram.
+Eres la Vaca Mágica, también llamada la Mugidora, que conversa con Patita en su rincón.
 Patita es Sandra, una mujer adulta que disfruta de esta tradición mágica con su pareja.
 Habla con cariño, complicidad, humor suave y pequeñas travesuras; nunca la trates como
 una niña real ni describas a Sandra literalmente como un animal. Usa español natural.
@@ -208,12 +209,12 @@ No hagas hablar a Patita ni inventes reacciones. No la infantilices.
 
 async def _generate(instructions: str, payload: dict, schema: dict, name: str) -> dict:
     if not os.getenv("OPENAI_API_KEY"):
-        raise VacaGenerationError("La Vaca no tiene configurado el acceso a la IA.")
+        raise VacaGenerationError("La Vaca está desenredando su cuaderno. Prueba en un ratito.")
     try:
         async with AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"), timeout=40, max_retries=1) as client:
             response = await client.responses.create(
                 model=os.getenv("VACA_MODEL") or os.getenv("OPENAI_MODEL") or "gpt-5.5",
-                instructions=instructions,
+                instructions=character_instructions("La Vaca Mágica, la Mugidora") + "\n" + instructions,
                 input=json.dumps(payload, ensure_ascii=False),
                 text={"format": {"type": "json_schema", "name": name,
                                  "schema": schema, "strict": True}},
@@ -256,15 +257,34 @@ def _recent_user_block(conversation: list[dict]) -> str:
     return "\n".join(reversed(pending))
 
 
+def validate_generated_wish_text(operation: dict, existing: dict | None = None) -> None:
+    """Check newly generated prose before it can enter confirmations or lists.
+
+    Existing, unchanged wishes and user-authored messages are not rewritten or
+    reclassified. Removing a wish does not introduce any new prose.
+    """
+    if operation["action"] not in {"add", "update"}:
+        return
+    for key in ("name", "details"):
+        value = operation[key]
+        if existing is not None and value == existing.get(key, ""):
+            continue
+        if breaks_character(value):
+            raise ValueError("Generated wish text breaks character")
+
+
 def _validate_reply(data: dict, payload: dict) -> dict:
     if set(data) != {"reply", "operations", "show_list"} or type(data["show_list"]) is not bool:
         raise ValueError("Invalid reply fields")
     reply = _bounded_text(data["reply"], MAX_REPLY)
+    if breaks_character(reply):
+        raise ValueError("Character voice mismatch")
     operations = data["operations"]
     if not isinstance(operations, list) or len(operations) > MAX_OPERATIONS:
         raise ValueError("Invalid operations")
     recent = _recent_user_block(payload["conversation"])
     known_ids = {wish["id"] for wish in payload["wishes"]}
+    known_wishes = {wish["id"]: wish for wish in payload["wishes"]}
     targeted_ids = set()
     for operation in operations:
         if not isinstance(operation, dict) or set(operation) != set(OPERATION_SCHEMA["required"]):
@@ -288,6 +308,7 @@ def _validate_reply(data: dict, payload: dict) -> dict:
             targeted_ids.add(operation["id"])
             if action == "update" and not operation["name"].strip():
                 raise ValueError("Missing wish name")
+        validate_generated_wish_text(operation, known_wishes.get(operation["id"]))
         if operation["url"]:
             parsed = urlsplit(operation["url"])
             if parsed.scheme not in {"http", "https"} or not parsed.netloc or any(c.isspace() for c in operation["url"]):
@@ -318,6 +339,8 @@ async def generate_visit_messages(gifts: str) -> dict:
         if set(data) != {"clues", "morning"} or not isinstance(data["clues"], list) or len(data["clues"]) != 2:
             raise ValueError("Invalid visit fields")
         texts = [_bounded_text(value, MAX_MESSAGE) for value in [*data["clues"], data["morning"]]]
+        if any(breaks_character(text) for text in texts):
+            raise ValueError("Character voice mismatch")
         if any(re.search(r"https?://|www\.|\d", text, flags=re.IGNORECASE) for text in texts):
             raise ValueError("Visit contains a link or number")
         # Review remains necessary for semantic spoilers; these are drafts, never sends.

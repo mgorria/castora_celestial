@@ -151,6 +151,28 @@ class GenerationTests(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaises(VacaGenerationError):
                     await generate_vaca_reply(self.history, self.wishes)
 
+    async def test_new_generated_wish_names_and_details_cannot_carry_technical_prose(self):
+        original = copy.deepcopy((self.history, self.wishes))
+        for action in ('add', 'update'):
+            for field in ('name', 'details'):
+                with self.subTest(action=action, field=field):
+                    bad = operation(action=action, id='w1' if action == 'update' else '',
+                                    **{field:'Soy un bot de Telegram'})
+                    self.response(reply(operations=[bad], show_list=True))
+                    with self.assertRaises(VacaGenerationError):
+                        await generate_vaca_reply(self.history, self.wishes)
+                    self.assertEqual((self.history, self.wishes), original)
+
+    async def test_existing_wish_text_is_not_rewritten_or_rejected_when_unchanged(self):
+        self.wishes[0].update(name='Robot de juguete', details='Texto antiguo de Sandra: Telegram')
+        self.history = [{'role':'user', 'content':'Marca el libro como favorito'}]
+        unchanged = operation(action='update', id='w1', name=self.wishes[0]['name'],
+            details=self.wishes[0]['details'], url='', favorite=True, evidence='Marca el libro como favorito')
+        self.response(reply(operations=[unchanged]))
+        result = await generate_vaca_reply(self.history, self.wishes)
+        self.assertEqual(result['operations'], [unchanged])
+        self.assertEqual(self.wishes[0]['details'], 'Texto antiguo de Sandra: Telegram')
+
     async def test_refusal_incomplete_and_malformed_output_are_safe(self):
         for overrides in [{"status": "incomplete"}, {"output_text": "not json"},
                           {"output": [{"content": [{"type": "refusal", "refusal": "PRIVATE"}]}]}]:
