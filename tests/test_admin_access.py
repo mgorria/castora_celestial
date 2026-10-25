@@ -146,6 +146,37 @@ class AdminAccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(fresh["session_token"], original["session_token"])
         self.assertTrue((await self.service.status(OWNER, fresh["session_token"]))["unlocked"])
 
+    async def test_single_character_password_setup_and_unlock_keep_hashing_and_exact_match(self):
+        original = await self.service.setup(OWNER, "x")
+        self.assertTrue(self.pool.data["passwords"][22].startswith("$argon2id$"))
+        await self.service.lock(OWNER, original["session_token"])
+        with self.assertRaises(AdminAccessError) as wrong:
+            await self.service.unlock(OWNER, "y")
+        self.assertEqual((wrong.exception.code, wrong.exception.status), ("invalid_admin_password", 401))
+        fresh = await self.service.unlock(OWNER, "x")
+        self.assertTrue((await self.service.status(OWNER, fresh["session_token"]))["unlocked"])
+        self.assertFalse((await self.service.status(OWNER, original["session_token"]))["unlocked"])
+
+    async def test_empty_oversized_and_nonstring_passwords_rejected_before_storage(self):
+        for method in (self.service.setup, self.service.unlock):
+            for password in ("", "x" * 129, None, 123):
+                with self.subTest(method=method.__name__, password_type=type(password).__name__):
+                    with self.assertRaises(AdminAccessError) as invalid:
+                        await method(OWNER, password)
+                    self.assertEqual((invalid.exception.code, invalid.exception.status), ("invalid_password", 400))
+        self.assertFalse(self.pool.data["passwords"])
+        self.assertFalse(self.pool.data["sessions"])
+
+    async def test_128_characters_are_accepted_without_trimming_spaces(self):
+        password = " " + "x" * 126 + " "
+        original = await self.service.setup(OWNER, password)
+        await self.service.lock(OWNER, original["session_token"])
+        with self.assertRaises(AdminAccessError) as trimmed:
+            await self.service.unlock(OWNER, password.strip())
+        self.assertEqual(trimmed.exception.code, "invalid_admin_password")
+        fresh = await self.service.unlock(OWNER, password)
+        self.assertTrue((await self.service.status(OWNER, fresh["session_token"]))["unlocked"])
+
     async def test_session_expiry_identity_binding_revocation_and_owner_rebinding(self):
         session = await self.service.setup(OWNER, PASSWORD)
         token = session["session_token"]
@@ -164,7 +195,7 @@ class AdminAccessTests(unittest.IsolatedAsyncioTestCase):
     async def test_rate_limit_persists_and_cannot_be_evaded_with_gateway_identity(self):
         for attempt in range(RATE_LIMIT):
             with self.assertRaises(AdminAccessError) as invalid:
-                await self.service.unlock("gateway-" + str(attempt), "short")
+                await self.service.unlock("gateway-" + str(attempt), "")
             self.assertEqual(invalid.exception.code, "invalid_password")
         restarted = AdminAccessService(self.actors.get, pool=self.pool, clock=lambda: self.now)
         with self.assertRaises(AdminAccessError) as limited:
@@ -219,7 +250,7 @@ class AdminAccessTransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.pool.data["passwords"])
 
     async def test_setup_unlock_lock_expiry_and_request_receipt_enforced_by_transport(self):
-        response = await self.client.post("/castori-web/admin-auth", headers=HEADERS, json={"action": "setup", "password": PASSWORD})
+        response = await self.client.post("/castori-web/admin-auth", headers=HEADERS, json={"action": "setup", "password": "x"})
         self.assertEqual(response.status, 200)
         session = await response.json()
         headers = {**HEADERS, "X-Castori-Admin-Session": session["session_token"]}
@@ -234,10 +265,21 @@ class AdminAccessTransportTests(unittest.IsolatedAsyncioTestCase):
         response = await self.client.post("/castori-web/admin-auth", headers=headers, json={"action": "lock"})
         self.assertEqual(await response.json(), {"configured": True, "unlocked": False, "expires_at": None})
         self.assertEqual((await self.client.get("/castori-web/admin-state", headers=headers)).status, 423)
-        response = await self.client.post("/castori-web/admin-auth", headers=HEADERS, json={"action": "unlock", "password": PASSWORD})
+        response = await self.client.post("/castori-web/admin-auth", headers=HEADERS, json={"action": "unlock", "password": "x"})
+        self.assertEqual(response.status, 200)
         fresh = await response.json()
         self.now += SESSION_LIFETIME
         self.assertEqual((await self.client.get("/castori-web/admin-state", headers={**HEADERS, "X-Castori-Admin-Session": fresh["session_token"]})).status, 423)
+
+    async def test_transport_rejects_empty_and_oversized_passwords(self):
+        for action in ("setup", "unlock"):
+            for password in ("", "x" * 129):
+                response = await self.client.post("/castori-web/admin-auth", headers=HEADERS,
+                    json={"action": action, "password": password})
+                self.assertEqual(response.status, 400)
+                self.assertEqual(await response.json(), {"error": "invalid_password"})
+        self.assertFalse(self.pool.data["passwords"])
+        self.assertFalse(self.pool.data["sessions"])
 
     async def test_auth_exact_body_owner_identity_and_storage_errors(self):
         for body in ({"action": "setup", "password": PASSWORD, "owner": "spoof"}, {"action": "reset", "password": PASSWORD},

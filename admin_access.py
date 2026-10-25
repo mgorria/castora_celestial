@@ -67,7 +67,7 @@ class AdminAccessService:
 
     @staticmethod
     def _password(value):
-        if not isinstance(value, str) or not 12 <= len(value) <= 128:
+        if not isinstance(value, str) or not 1 <= len(value) <= 128:
             raise AdminAccessError("invalid_password")
         return value
 

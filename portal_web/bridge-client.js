@@ -19,7 +19,7 @@
       let data;
       try { data = await response.json(); }
       catch (_) { const error = new Error(options.body ? 'No se ha podido confirmar el envío. Comprueba su estado antes de volver a enviarlo.' : 'La puerta necesita un momentito. Vuelve a intentarlo en un ratito.'); error.status = response.status; error.uncertain = Boolean(options.body && (response.ok || response.status >= 500)); throw error; }
-      if (!response.ok || data?.error) { const error = new Error(messages[data?.error] || (response.status === 401 || response.status === 403 ? messages.unauthorized : 'No pudimos abrir la puerta. Vuelve a intentarlo.')); error.code = data?.error; error.status = response.status; error.uncertain = Boolean(options.body && response.status >= 500); throw error; }
+      if (!response.ok || data?.error) { const error = new Error((options.adminAuth && data?.error === 'invalid_password' ? 'Escribe una contraseña de hasta 128 caracteres.' : messages[data?.error]) || (response.status === 401 || response.status === 403 ? messages.unauthorized : 'No pudimos abrir la puerta. Vuelve a intentarlo.')); error.code = data?.error; error.status = response.status; error.uncertain = Boolean(options.body && response.status >= 500); throw error; }
       return data;
     } catch (error) {
       if (options.signal?.aborted) { error.cancelled = true; throw error; }
