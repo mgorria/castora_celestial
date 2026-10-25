@@ -111,9 +111,8 @@ class AccountService:
         return value
 
     @staticmethod
-    def _password(value, actor="sandra"):
-        minimum = 1 if actor == "owner" else 12
-        if not isinstance(value, str) or not minimum <= len(value) <= 128:
+    def _password(value):
+        if not isinstance(value, str) or not 1 <= len(value) <= 128:
             raise AccountError("invalid_password")
         return value
 
@@ -304,7 +303,7 @@ class AccountService:
                 or proposed["expires_at"] <= self._now()):
             raise AccountError("invalid_invitation")
         chat_id = proposed["chat_id"]
-        password = self._password(password, actor)
+        password = self._password(password)
         password_hash = await self._hash(password)
         async with self.get_pool().acquire() as conn:
             async with conn.transaction():
@@ -350,13 +349,13 @@ class AccountService:
             normalized, invalid_username = "invalid", True
         await self._rate_limit("login", ip, normalized)
         try:
-            password = self._password(password, "owner")
+            password = self._password(password)
         except AccountError:
             raise AccountError("invalid_credentials", 401) from None
         async with self.get_pool().acquire() as conn:
             account = await conn.fetchrow("select * from portal_accounts where username = $1", normalized)
         actor = self._bound_actor(account)
-        if invalid_username or actor is None or actor == "sandra" and len(password) < 12:
+        if invalid_username or actor is None:
             account = None
         valid = await self._verify(account["password_hash"] if account else await self._dummy(), password)
         if not account or not valid:

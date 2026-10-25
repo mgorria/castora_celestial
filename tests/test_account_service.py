@@ -289,7 +289,7 @@ class AccountTests(unittest.IsolatedAsyncioTestCase):
         invite = await self.service.create_invitation()
         for username in ("ab", "bad user", "x" * 33):
             await self.assert_error("invalid_username", self.service.register(invite["code"], username, PASSWORD))
-        for password in ("x" * 11, "x" * 129):
+        for password in ("", "x" * 129, None, 123):
             await self.assert_error("invalid_password", self.service.register(invite["code"], "patita", password))
         self.assertFalse(self.pool.data["accounts"])
 
@@ -379,8 +379,9 @@ class AccountTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("patita", str(self.pool.data["limits"]))
         self.assertNotIn("203.0.113.1", str(self.pool.data["limits"]))
 
-    async def test_both_people_have_distinct_accounts_roles_and_password_policies(self):
-        sandra_invite, sandra = await self.register()
+    async def test_both_people_have_distinct_roles_and_can_register_with_one_character_passwords(self):
+        sandra_invite = await self.service.create_invitation()
+        sandra = await self.service.register(sandra_invite["code"], "patita", "ñ", "192.0.2.1")
         owner_invite = await self.service.create_invitation(actor="owner")
         owner = await self.service.register(owner_invite["code"], "miguel", "x", "192.0.2.2")
         self.assertEqual(owner["actor"], "owner")
@@ -388,11 +389,27 @@ class AccountTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.service.get_session(owner["token"]))["chat_id"], 22)
         self.assertEqual((await self.service.get_session(sandra["token"]))["chat_id"], 11)
         self.assertEqual((await self.service.login("miguel", "x"))["actor"], "owner")
-        self.assertEqual((await self.service.login("patita", PASSWORD))["actor"], "sandra")
+        self.assertEqual((await self.service.login("patita", "ñ"))["actor"], "sandra")
         self.assertEqual(len(self.pool.data["accounts"]), 2)
         await self.assert_error("account_exists", self.service.create_invitation(actor="owner"), 409)
         await self.assert_error("account_identity_unavailable", self.service.create_invitation(actor="visitor"), 503)
         await self.assert_error("invalid_credentials", self.service.login("miguel", ""), 401)
+
+    async def test_both_people_can_recover_with_short_passwords_preserved_exactly(self):
+        for actor, username in (("sandra", "patita"), ("owner", "miguel")):
+            with self.subTest(actor=actor):
+                invitation = await self.service.create_invitation(actor=actor)
+                first = await self.service.register(invitation["code"], username, "  ñ  ")
+                await self.assert_error("invalid_credentials", self.service.login(username, "ñ"), 401)
+                self.assertEqual((await self.service.login(username, "  ñ  "))["actor"], actor)
+                recovery = await self.service.create_invitation(reset=True, actor=actor)
+                for invalid in ("", "x" * 129):
+                    await self.assert_error("invalid_password", self.service.register(recovery["code"], username, invalid))
+                renewed = await self.service.register(recovery["code"], username, "z")
+                self.assertEqual(renewed["actor"], actor)
+                self.assertIsNone(await self.service.get_session(first["token"]))
+                await self.assert_error("invalid_credentials", self.service.login(username, "  ñ  "), 401)
+                self.assertEqual((await self.service.login(username, "z"))["actor"], actor)
 
     async def test_owner_invitation_does_not_replace_sandras_and_revocation_is_scoped(self):
         sandra_invite = await self.service.create_invitation()
@@ -435,7 +452,8 @@ class AccountTests(unittest.IsolatedAsyncioTestCase):
         from portal import COOKIE
         from web_bridge import WebBridge
 
-        await self.register()
+        sandra_invite = await self.service.create_invitation()
+        await self.service.register(sandra_invite["code"], "patita", "s")
         owner_invite = await self.service.create_invitation(actor="owner")
         await self.service.register(owner_invite["code"], "miguel", "x")
         bridge_data = {}
@@ -449,7 +467,7 @@ class AccountTests(unittest.IsolatedAsyncioTestCase):
         client = TestClient(TestServer(bridge.create_app()))
         await client.start_server()
         try:
-            for username, password, role in (("patita", PASSWORD, "sandra"), ("miguel", "x", "owner")):
+            for username, password, role in (("patita", "s", "sandra"), ("miguel", "x", "owner")):
                 response = await client.post("/api/account/login", json={"username": username, "password": password},
                                              headers={"Origin": "https://casa.example"})
                 self.assertEqual(response.status, 200)
