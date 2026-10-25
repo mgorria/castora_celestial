@@ -1,0 +1,137 @@
+/* A little more ink and breathing room, without changing the house's colours. */
+body { font-size: 15px; font-weight: 450; line-height: 1.65; }
+body[data-palette="celestial"]:not(.moon) { --muted: #6b7465; }
+body :is(h1, h2, h3, .hero h1 em, .experience-hero h1 em, .control-hero h1 em,
+  .account-art-copy h2 em, .account-card h1 em, .admin-lock h1 em,
+  .vaca-chat-intro h2 em, .admin-console .section-heading h2) { font-weight: 500; }
+body :is(.nav-item, .friend-link .friend-name, .wish-entry > span:nth-child(2)) {
+  font-size: 14px; font-weight: 550; line-height: 1.45;
+}
+body :is(.friend-link, .profile) { min-width: 0; }
+body :is(.friend-link > span, .profile > span:nth-child(2)) { min-width: 0; overflow-wrap: break-word; }
+body .friend-link { align-items: flex-start; gap: 10px; }
+body .friend-link .online-dot { margin-top: 11px; flex-shrink: 0; }
+body .profile > span:nth-child(2) { font-size: 13px; font-weight: 550; line-height: 1.45; }
+body :is(.nav-label, .eyebrow, .story-feature .eyebrow, .admin-record .eyebrow,
+  .consultation-summary .eyebrow, .experience-hero .eyebrow, .account-art-copy .eyebrow) {
+  font-size: 11px; font-weight: 600; line-height: 1.6; letter-spacing: 1.3px;
+}
+body :is(.brand small, .account-brand small) { font-size: 9px; font-weight: 550; letter-spacing: 1.5px; }
+body :is(.friend-link small, .wish-entry small, .profile small, .friends-heading > span,
+  .breadcrumb, .demo-tag, .section-heading p, .character-card p, .card-bottom,
+  .story-feature p, .page-footer, .chat-header p, .chat-date, .message-date,
+  .message-meta, .composer-note, .book-info p, .memory-meta, .wish-aside small,
+  .connection-banner p, .history-control, .history-control small, .story-date,
+  .archive-end, .sample-library summary span, .control-topline, .control-metrics span,
+  .admin-bot-list small, .admin-setting small, .admin-record small, .admin-draft small,
+  .admin-draft > p strong, .admin-wish small, .admin-visit-events small, .admin-event-meta,
+  .admin-command-help span, .account-field-note, .account-footnote, .invitation-note,
+  .invitation-secret > small, .invitation-address > span, .admin-lock-hint,
+  .admin-lock-footnote, .experience-private, .experience-demo, .consultation-date,
+  .consultation-status, .consultation-room-label, .consultation-speaker time,
+  .consultation-note, .summary-meta > span, .wish-card-top > span,
+  .wish-card-bottom > span, .vaca-promise, .letter-date, .vaca-wish-form label small) {
+  font-size: 12px; font-weight: 500; line-height: 1.65; color: var(--muted);
+}
+body :is(.button, .text-button, .suggestion, .message-choice, .history-button,
+  .admin-action-button, .control-tabs > button, .account-tabs > button,
+  .experience-tabs > button, .admin-form .button, .consultation-footer .button,
+  .account-password > button, .account-logout, .palette-toggle) {
+  font-size: 13px; font-weight: 600; line-height: 1.5;
+}
+body :is(.button, .suggestion, .message-choice, .admin-action-button) { white-space: normal; }
+body :is(.button, .message-choice) { min-height: 42px; }
+body .text-button { text-align: inherit; }
+body :is(.connection-banner strong, .admin-bot-list strong, .admin-setting strong,
+  .admin-visit-events strong, .invitation-status strong, .consultation-speaker) {
+  font-size: 14px; font-weight: 600; line-height: 1.5;
+}
+body :is(.hero p, .page-title p, .companion-panel p, .list-card p, .empty-state p,
+  .chat-empty p, .library-live p, .delivered-story p, .archive-notice p,
+  .sample-library > p, .control-hero p, .admin-card-note, .admin-empty, .admin-notice,
+  .admin-send-preview, .admin-record p, .admin-draft > p, .admin-wish p, .admin-visit > p,
+  .admin-visit-events p, .admin-edit-visits > p, .admin-console .section-heading p,
+  .admin-feed-empty p, .admin-delivery, .account-intro, .account-art-copy p,
+  .account-opening p, .account-help, .account-error, .account-wait p, .invitation-intro,
+  .invitation-status p, .invitation-secret > p, .invitation-address p,
+  .admin-lock-intro, .admin-lock-wait, .experience-hero-copy > p, .experience-notice,
+  .care-path p, .care-paper p, .care-paper small, .experience-empty p,
+  .consultation-heading > p, .consultation-welcome p, .consultation-footer > span,
+  .consultation-summary > p, .consultation-summary li, .summary-meta > strong,
+  .consultation-closed p, .consultation-consent p, .consultation-consent small,
+  .consultation-consent .consent-temporary, .experience-modal-note,
+  .wish-card > p:not(.wish-card-flower), .vaca-letter p, .vaca-chat-intro p) {
+  font-size: 14px; font-weight: 450; line-height: 1.8;
+}
+body :is(.admin-form label, .account-form > label, .invitation-secret > label,
+  .admin-lock-form label, .vaca-wish-form label, .consultation-consent strong) {
+  font-size: 14px; font-weight: 550; line-height: 1.6;
+}
+body :is(.composer textarea, .consultation-composer textarea, .admin-form input,
+  .admin-form select, .admin-form textarea, .admin-console-form input,
+  .account-form input, .admin-lock-form input, .wish-form input,
+  .wish-search input, .vaca-wish-form input) { font-size: 16px; font-weight: 450; line-height: 1.6; }
+body .account-form input::placeholder { font-size: 13px; font-weight: 450; }
+body :is(.invitation-secret input, .admin-command-help code) { font-size: 13px; line-height: 1.75; }
+body :is(.message, .consultation-message > p, .admin-event-text) {
+  font-size: 16px; font-weight: 450; line-height: 1.85;
+}
+body .message { padding: 14px 18px; }
+body :is(.delivery-status, .toast, .admin-confirm-preview pre) { font-size: 14px; font-weight: 500; line-height: 1.7; }
+body :is(.admin-command-help > summary, .admin-confirm-preview strong) { font-size: 14px; font-weight: 550; }
+body :is(.character-card h3, .portrait-symbol .symbol-label) { font-size: 17px; font-weight: 500; line-height: 1.4; }
+body :is(.little-note, .hero-caption, .section-heading .aside-note) { font-size: 14px; font-weight: 500; line-height: 1.6; }
+body :is(.daily-note blockquote, .companion-quote, .memory-card blockquote,
+  .admin-draft blockquote, .wish-aside p, .summary-doctor > span) { font-size: 19px; font-weight: 500; line-height: 1.75; }
+body dialog p { font-size: 15px; font-weight: 450; line-height: 1.8; }
+body dialog .story-text { font-size: 19px; font-weight: 500; line-height: 1.9; }
+body dialog .story-signature { font-weight: 500; }
+body .doctor-sign small { font-size: 9px; font-weight: 550; letter-spacing: 1.2px; }
+body .summary-doctor strong { font-weight: 500; }
+body .palette-name { font-weight: 500; }
+body :is(.palette-description, .palette-selected, .appearance-picker .appearance-note) {
+  font-size: 12px; font-weight: 500; line-height: 1.65;
+}
+/* Larger text can wrap freely in actions and the small illustrated cards. */
+body :is(.section-heading, .experience-section-heading, .consultation-topline,
+  .consultation-footer, .control-topline-actions, .wish-toolbar) { flex-wrap: wrap; }
+body .hero p { max-width: 330px; }
+body .character-card p { min-height: 3.3em; margin-inline: 8px; }
+body .card-bottom { min-height: 46px; }
+body .consultation-footer > span { max-width: 260px; }
+body .consultation-row { flex-wrap: wrap; }
+body .palette-options { gap: 10px; }
+body .palette-description { margin-bottom: 11px; }
+body .palette-selected { padding-top: 8px; }
+body .appearance-picker > h2 { margin-bottom: 10px; }
+body .appearance-picker .appearance-note { margin-bottom: 12px; }
+@media (min-width: 701px) and (max-width: 1100px) {
+  body .sidebar { width: 240px; padding-inline: 16px; }
+  body .workspace { margin-left: 240px; }
+  body .brand > span:last-child { font-size: 19px; }
+  body .brand small { font-size: 8px; }
+}
+@media (max-width: 700px) {
+  body .topbar { gap: 10px; }
+  body .breadcrumb { font-size: 11px; gap: 8px; min-width: 0; }
+  body #breadcrumb-current { overflow-wrap: anywhere; }
+  body .top-actions { gap: 7px; flex-shrink: 0; }
+  body .demo-tag { font-size: 11px; padding: 6px 9px; }
+  body .hero-content { padding-bottom: 44px; }
+  body .hero p { max-width: 300px; }
+  body .character-card h3 { font-size: 17px; }
+  body .message-content { max-width: 90%; }
+  body .chat-suggestions { gap: 8px; }
+  body .suggestion { padding: 9px 12px; }
+  body .consultation-footer .button { flex-shrink: 1; }
+  body .wish-search input { width: 100%; }
+  body .experience-tabs > button { padding-inline: 10px; }
+  body .page-footer { flex-wrap: wrap; gap: 8px; }
+  body dialog { padding: 30px 23px; }
+  body .appearance-picker > h2 { font-size: 29px; }
+}
+@media (max-width: 400px) {
+  body .top-actions .demo-tag { max-width: 88px; line-height: 1.35; }
+  body .breadcrumb .tiny-spark, body .breadcrumb-slash { display: none; }
+  body .palette-option { column-gap: 12px; grid-template-columns: 73px minmax(0, 1fr); }
+}
