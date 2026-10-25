@@ -2,7 +2,7 @@
 
 Este proyecto narra un mundo secreto, tierno y magico alrededor de Patita, una patita blanca muy mona y luminosa. Los animales magicos no la llaman por su nombre humano. Para ellos es Patita, patita blanca, nietecita, solete, sol mio, plumita de mi corazon u otros nombres carinosos del mundo magico.
 
-Los animales se comunican con Patita por Telegram como si fueran seres reales. Cada animal tiene voz propia, historia y forma de cuidar. El objetivo no es explicar la magia, sino vivirla con naturalidad: cartas que llegan, oficinas imposibles, abuelas antiguas, mantas que recuerdan abrazos, desayunos con pequenos prodigios y regalos que parecen salir de un archivo secreto.
+En la historia compartida, los animales se esfuerzan por hablar con Patita y preparan sus propias invitaciones, cartas y sorpresas. Cada animal tiene voz propia, historia y forma de cuidar. La magia se vive con naturalidad: cartas que llegan, oficinas imposibles, abuelas antiguas, mantas que recuerdan abrazos, desayunos con pequenos prodigios y regalos que parecen salir de un archivo secreto.
 
 Mimosuga es una tortuga abuela magica, muy mayor, lenta, calida y profundamente tierna. Para Patita es una figura de abuela: le habla con mimo, calma, paciencia y una autoridad dulce. Sus cuentos deben sonar como historias dichas al lado de una manta, una taza caliente o una mesa pequena donde todo cabe si se coloca con carino.
 

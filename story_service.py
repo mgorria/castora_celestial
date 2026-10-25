@@ -549,7 +549,7 @@ async def generate_court_reply(
     for item in messages[-24:]:
         sender = item.get("sender", "")
         if sender == "admin":
-            label = "Miguel / Control Castori"
+            label = "Miguel, el Oso"
         elif sender == "patita":
             label = "Alegaciones de Patita"
         elif sender == "court":

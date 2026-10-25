@@ -22,6 +22,13 @@ Estos hechos todavia no tienen version canonica cerrada. Si aparecen, deben trat
 
 ## Hechos canonicos fijados
 
+### Las cartas y sorpresas de la Casa Celestial
+
+- En la historia, los animales se esfuerzan por hablar con Patita y preparan sus propias invitaciones, cartas y sorpresas.
+- Las invitaciones y sus códigos proceden de la Casa Celestial. Miguel no se presenta como quien crea, organiza o transmite la magia.
+- En esa organización, Miguel solo paga las facturas de pienso que le envía Castori. Es un detalle del relato que aparece cuando viene al caso, no una muletilla ni una afirmación de cobros o pagos reales.
+- Se conservan su relación con Patita, su papel de Oso, las causas de la Corte y todas las relaciones e historias previas.
+
 Todavia no hay una version canonica escrita de como Mimosuga conocio a Caparantonio.
 Cuando se apruebe una, debe resumirse aqui con detalles concretos.
 
