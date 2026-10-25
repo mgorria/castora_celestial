@@ -2754,7 +2754,8 @@ async def start_app(app: Application) -> None:
     await app.start()
     if not app.updater:
         raise RuntimeError("La aplicacion no tiene updater configurado")
-    await app.updater.start_polling(drop_pending_updates=True)
+    # Keep messages that arrived while the previous deployment was stopping.
+    await app.updater.start_polling(drop_pending_updates=False)
     logger.info("%s escuchando Telegram", app.bot.name)
 
 
