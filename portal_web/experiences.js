@@ -145,7 +145,7 @@
       acknowledgeVisible();
     }
     function acknowledgeVisible() {
-      if (ctx.mode() !== 'live' || readOnly() || ctx.modalOpen?.() || document.visibilityState !== 'visible' || (document.hasFocus && !document.hasFocus())) return;
+      if (ctx.mode() !== 'live' || readOnly() || ctx.modalOpen?.() || document.visibilityState !== 'visible' || ctx.readingForeground?.() === false) return;
       if (['clinic', 'consultation'].includes(route) && document.visibilityState === 'visible') {
         const notes = document.getElementById('salchicher-notes');
         const bounds = notes?.getBoundingClientRect?.();
@@ -162,14 +162,18 @@
       }
       if (route !== 'consultation' || detail?.id !== selectedId) return;
       const log = document.getElementById('consultation-transcript');
-      if (!log || log.scrollHeight - log.scrollTop - log.clientHeight > 24) return;
+      if (!log || log.scrollHeight - log.scrollTop - log.clientHeight > 24 || ctx.readingEndVisible?.(log) === false) return;
       ctx.acknowledgeRead?.('salchicher', readCursor, selectedId);
     }
     function refreshUnread() {
       if (route === 'clinic') refreshClinic();
       if (route === 'consultation' && detail?.id === selectedId) {
         const log = document.getElementById('consultation-transcript');
-        if (log) { const scroll = log.scrollTop; log.innerHTML = transcript(detail); log.scrollTop = scroll; }
+        if (log) {
+          const scroll = log.scrollTop, height = log.scrollHeight, atBottom = height - scroll - log.clientHeight <= 24;
+          log.innerHTML = transcript(detail);
+          log.scrollTop = atBottom ? log.scrollHeight : Math.max(0, scroll + log.scrollHeight - height);
+        }
         const badge = document.getElementById('consultation-unread'); if (badge) badge.innerHTML = unreadBadge(selectedId);
       }
       const noteBadge = document.getElementById('salchicher-notes-unread'); if (noteBadge) noteBadge.innerHTML = unreadBadge(null);

@@ -78,6 +78,16 @@
   const deskChatVisible = () => view === 'control' && adminTab === 'chats' && canUseControl();
   const chatVisible = id => view === 'chat' && activeId === id || deskChatVisible() && deskAnimal === id;
   const isSandra = () => serverState.actor === 'sandra' || serverState.actor?.role === 'sandra';
+  const installedApp = () => window.navigator?.standalone === true || Boolean(window.matchMedia?.('(display-mode: standalone)').matches);
+  // In an installed app, visibility is the foreground signal even when WebKit
+  // does not report keyboard focus. Ordinary unfocused windows still wait.
+  const readingForeground = () => document.visibilityState === 'visible' && (!document.hasFocus || document.hasFocus() || installedApp());
+  function readingEndVisible(log) {
+    if (!installedApp()) return true;
+    const bounds = log?.getBoundingClientRect?.(), viewport = window.visualViewport;
+    const top = viewport?.offsetTop || 0, bottom = top + (viewport?.height || window.innerHeight || document.documentElement?.clientHeight || 0);
+    return Boolean(bounds && bounds.width > 0 && bounds.height > 0 && bounds.bottom > top && bounds.bottom <= bottom + 1);
+  }
   const unreadKey = (animal, consultationId = null) => animal + ':' + (consultationId || '');
   const nonnegative = value => Number.isSafeInteger(value) && value >= 0 ? value : 0;
   function unreadAnimal(id) { return mode === 'live' ? serverState.unread?.animals?.[id] || {} : {}; }
@@ -92,13 +102,11 @@
   function unreadBoundary(animal, consultationId = null) {
     if (mode !== 'live') return null;
     const key = unreadKey(animal, consultationId);
-    if (!unreadBoundaries.has(key)) {
-      const item = unreadAnimal(animal);
-      const scope = item.scopes?.find(scope => (scope.consultation_id || null) === (consultationId || null));
-      const cursor = scope?.read_id ?? (consultationId == null ? item.read_id : undefined);
-      if (!Number.isSafeInteger(cursor) || cursor < 0) return null;
-      unreadBoundaries.set(key, cursor);
-    }
+    const item = unreadAnimal(animal);
+    const scope = item.scopes?.find(scope => (scope.consultation_id || null) === (consultationId || null));
+    const cursor = scope?.read_id ?? (consultationId == null ? item.read_id : undefined);
+    if (Number.isSafeInteger(cursor) && cursor >= 0) unreadBoundaries.set(key, Math.max(unreadBoundaries.get(key) || 0, cursor));
+    if (!unreadBoundaries.has(key)) return null;
     return unreadBoundaries.get(key);
   }
   function isUnreadMessage(animal, message, consultationId = null) {
@@ -118,8 +126,8 @@
       if (count) button.insertAdjacentHTML('beforeend', unreadBadge(count, 'nav-unread'));
     }
   }
-  function applyUnread(unread) {
-    if (!unread || typeof unread.animals !== 'object' || !unread.animals) return;
+  function normalizeUnread(unread) {
+    if (!unread || typeof unread.animals !== 'object' || !unread.animals) return unread;
     const animals = {};
     for (const [id, item] of Object.entries(unread.animals)) {
       if (!item || typeof item !== 'object') continue;
@@ -129,12 +137,27 @@
       }) : null;
       animals[id] = scopes ? { ...item, scopes, count: scopes.reduce((n, scope) => n + nonnegative(scope.count), 0), has_new: scopes.some(scope => nonnegative(scope.count) > 0) } : item;
     }
-    unread = { ...unread, animals };
+    return { ...unread, animals };
+  }
+  function applyUnread(unread) {
+    if (!unread || typeof unread.animals !== 'object' || !unread.animals) return;
+    unread = normalizeUnread(unread);
     const changed = JSON.stringify(serverState.unread) !== JSON.stringify(unread);
     serverState.unread = unread;
     if (mode !== 'live' || !changed) return;
     renderFriends(); syncNotifications();
+    refreshUnreadViews();
+  }
+  function refreshUnreadViews() {
     if (view === 'home' || view === 'conversations') main.innerHTML = view === 'home' ? home() : conversations();
+    if (view === 'chat') {
+      const log = document.getElementById('chat-messages'), html = renderMessages(activeId);
+      if (log && log.innerHTML !== html) {
+        const top = log.scrollTop, height = log.scrollHeight, atBottom = height - top - log.clientHeight <= 24;
+        log.innerHTML = html;
+        log.scrollTop = atBottom ? log.scrollHeight : Math.max(0, top + log.scrollHeight - height);
+      }
+    }
     if (view === 'clinic' || view === 'consultation') experiences?.refreshUnread?.();
   }
   function syncNotifications() {
@@ -152,7 +175,7 @@
     unreadPollTimer = setTimeout(run, 12000);
   }
   async function acknowledgeRead(animal, eventId, consultationId = null) {
-    if (mode !== 'live' || !isSandra() || document.visibilityState !== 'visible' || (document.hasFocus && !document.hasFocus()) || !bridge.read
+    if (mode !== 'live' || !isSandra() || !readingForeground() || !bridge.read
         || !Number.isSafeInteger(eventId) || eventId <= 0) return;
     const key = animal + ':' + (consultationId || ''), epoch = liveEpoch;
     if ((readReceipts.get(key) || 0) >= eventId || readRequests.has(key)) return;
@@ -170,7 +193,7 @@
   function acknowledgeChatRead() {
     if (view !== 'chat' || mode !== 'live' || modal.open) return;
     const log = document.getElementById('chat-messages');
-    if (!log || log.scrollHeight - log.scrollTop - log.clientHeight > 24) return;
+    if (!log || log.scrollHeight - log.scrollTop - log.clientHeight > 24 || !readingEndVisible(log)) return;
     // A global polling cursor can include other animals or messages not shown.
     // Only the latest actual assistant message rendered in this chat is read.
     const latest = chatHistory(activeId).filter(m => m.role === 'assistant')
@@ -204,7 +227,7 @@
   const notifications = window.CastoriNotifications?.create({ bridge, toast });
   const experiences = window.CastoriExperiences?.create({ bridge, esc, icon, portrait, formatDate, formatTime, uid,
     mode: () => mode, epoch: () => liveEpoch, ready, readOnly, navigate, toast, showModal, closeModal: () => modal.close(), submitLive,
-    refreshState: refreshServerState, acknowledgeRead, updateUnread: applyUnread, unreadCount, unreadBadge, isUnreadMessage, unreadBoundary, modalOpen: () => modal.open,
+    refreshState: refreshServerState, acknowledgeRead, readingForeground, readingEndVisible, updateUnread: applyUnread, unreadCount, unreadBadge, isUnreadMessage, unreadBoundary, modalOpen: () => modal.open,
     wishes: () => mode === 'demo' ? state.wishes.map(w => ({ ...w, name: w.text })) : (serverState.wishes || []),
     demoWish: (action, wish) => { if (mode !== 'demo') return; if (action === 'add') state.wishes.push(wish); else if (action === 'remove') state.wishes = state.wishes.filter(w => w.id !== wish.id); else { const w = state.wishes.find(w => w.id === wish.id); if (w) w.favorite = !w.favorite; } persist(); }
   });
@@ -941,13 +964,12 @@
     const nextActor = JSON.stringify(data.actor);
     const actorChanged = actorKey !== undefined && actorKey !== nextActor;
     if (actorChanged) clearLiveState();
-    const unreadChanged = JSON.stringify(serverState.unread) !== JSON.stringify(data.unread);
-    actorKey = nextActor; serverState = data;
+    const unread = normalizeUnread(data.unread), unreadChanged = JSON.stringify(serverState.unread) !== JSON.stringify(unread);
+    actorKey = nextActor; serverState = { ...data, unread };
     if (actorChanged && mode === 'live') { navigate(view, activeId, false); return data; }
     if (mode === 'live') {
       renderFriends(); syncNotifications();
-      if (unreadChanged && (view === 'home' || view === 'conversations')) main.innerHTML = view === 'home' ? home() : conversations();
-      if (unreadChanged && (view === 'clinic' || view === 'consultation')) experiences?.refreshUnread?.();
+      if (unreadChanged) refreshUnreadViews();
       if (view === 'wishes') document.getElementById('wish-list').innerHTML = wishRows();
       if (view === 'vaca') experiences?.refreshWishes();
       if (view === 'chat') {
@@ -1171,6 +1193,9 @@
   modal.addEventListener('close', acknowledgeVisibleRead);
   document.addEventListener('visibilitychange', () => { acknowledgeVisibleRead(); if (document.visibilityState === 'visible' && mode === 'live') refreshServerState().catch(() => {}); });
   window.addEventListener('focus', acknowledgeVisibleRead);
+  window.addEventListener('resize', acknowledgeVisibleRead);
+  window.visualViewport?.addEventListener('resize', acknowledgeVisibleRead);
+  window.visualViewport?.addEventListener('scroll', acknowledgeVisibleRead);
   document.addEventListener('scroll', acknowledgeVisibleRead, true);
   modal.addEventListener('click', e => { if (e.target === modal) { const r = modal.getBoundingClientRect(); if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) modal.close(); } });
   document.getElementById('mobile-menu').setAttribute('aria-expanded', 'false');
@@ -1178,5 +1203,5 @@
   document.getElementById('mobile-shade').addEventListener('click', closeMenu);
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMenu(); });
   function fromHash() { if (accountLocked()) return; const path = location.hash.slice(1).split('/'); if (path[0] === 'consultation' && path[1]) { let id; try { id = decodeURIComponent(path[1]); } catch (_) { navigate('clinic', null, false); return; } navigate('consultation', id, false); } else if (path[0] === 'carta' && path[1] === 'vaca') navigate('chat', 'vaca', false, true); else if (path[0] === 'chat' && ids.includes(path[1])) navigate('chat', path[1], false); else navigate(['conversations', 'library', 'memories', 'wishes', 'control', 'clinic', 'vaca'].includes(path[0]) ? path[0] : 'home', null, false); }
-  window.addEventListener('hashchange', fromHash); window.addEventListener('pageshow', event => { if (mode === 'live') startUnreadPolling(); if (event.persisted && account.portal && isOwner() && view === 'control') { adminAuth.portalPrepared = false; loadAdminAuth(); } }); window.addEventListener('pagehide', () => { if (account.portal && isOwner() && view === 'control') lockPortalDesk(); stopUnreadPolling(); stopPolling(); stopAdminReads(); cancelArchiveReads(); clearInvitationSecret(); }); bridge.onUnauthorized?.(expireAccountSession); applyTheme(); bootstrapAccount();
+  window.addEventListener('hashchange', fromHash); window.addEventListener('pageshow', event => { if (mode === 'live') { startUnreadPolling(); acknowledgeVisibleRead(); } if (event.persisted && account.portal && isOwner() && view === 'control') { adminAuth.portalPrepared = false; loadAdminAuth(); } }); window.addEventListener('pagehide', () => { if (account.portal && isOwner() && view === 'control') lockPortalDesk(); stopUnreadPolling(); stopPolling(); stopAdminReads(); cancelArchiveReads(); clearInvitationSecret(); }); bridge.onUnauthorized?.(expireAccountSession); applyTheme(); bootstrapAccount();
 }());

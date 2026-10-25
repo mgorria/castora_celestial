@@ -2967,7 +2967,7 @@ async def main() -> None:
             history_provider=history_provider, get_admin_app=lambda: centralita_app,
             admin_state_provider=admin_provider, admin_actor_id=admin_chat_id,
             account_service=accounts, portal_origin=portal_origin, get_consultorio=lambda: salchicher,
-            admin_access=admin_access)
+            admin_access=admin_access, portal_origin_aliases=os.getenv("CASTORI_PORTAL_ORIGIN_ALIASES"))
         if web_bridge.portal:
             from web_push import WebPushService
             web_bridge.push_service = WebPushService(load_data, save_data, resolve_web_actor)

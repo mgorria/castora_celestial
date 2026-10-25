@@ -8,11 +8,13 @@ from unittest.mock import AsyncMock
 
 from aiohttp.test_utils import TestClient, TestServer
 
-from portal import COOKIE, canonical_origin
+from portal import COOKIE, canonical_origin, origin_aliases
 from web_bridge import WebBridge
 
 TOKEN = "internal-token-only-never-sent-to-a-browser-12345"
 ORIGIN = "https://casa.example"
+ALIAS = "https://old-office.up.railway.app"
+ALIAS_HOST = "old-office.up.railway.app"
 OWNER = {"Authorization": "Bearer " + TOKEN, "X-Castori-Actor": "owner", "X-Castori-Owner-Id": "owner-test"}
 SESSION = "session-for-test"
 OWNER_SESSION = "owner-session-for-test"
@@ -55,6 +57,7 @@ class PortalTests(unittest.IsolatedAsyncioTestCase):
         self.bridge = WebBridge(lambda: copy.deepcopy(self.data), lambda data: setattr(self, "data", data),
                                 lambda: {}, lambda role: {"owner": 22, "sandra": 11}.get(role), token=TOKEN,
                                 account_service=self.accounts, portal_origin=ORIGIN, portal_root=self.root,
+                                portal_origin_aliases=ALIAS,
                                 admin_access=self.access, get_admin_app=lambda: object(),
                                 admin_state_provider=lambda: {"animal_count": 5})
         self.client = TestClient(TestServer(self.bridge.create_app()))
@@ -204,6 +207,48 @@ class PortalTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(cookie["domain"])
         self.assertLessEqual(int(cookie["max-age"]), 604800)
         self.assertEqual(response.headers["Cache-Control"], "no-store")
+
+    async def test_explicit_alias_same_host_reuses_sessions_and_still_requires_authentication(self):
+        response = await self.client.post("/api/bridge/read", headers={"Origin": ALIAS, "Host": ALIAS_HOST}, json={})
+        self.assertEqual(response.status, 401)
+        self.assertEqual(await response.json(), {"error": "sign_in_required"})
+        response = await self.client.post("/api/bridge/read", headers=self.cookie(Origin=ALIAS, Host=ALIAS_HOST), json={})
+        self.assertEqual(response.status, 400, "A valid session reaches body validation through the alias")
+        self.assertEqual(await response.json(), {"error": "invalid_read"})
+        response = await self.client.post("/api/bridge/read", headers=self.owner_cookie(Origin=ALIAS, Host=ALIAS_HOST), json={})
+        self.assertEqual(response.status, 403)
+        self.assertEqual(await response.json(), {"error": "read_only"})
+        self.assertNotIn("Access-Control-Allow-Origin", response.headers)
+        self.assertEqual(self.bridge.portal.origin, ORIGIN)
+
+    async def test_alias_cannot_authorize_primary_other_hosts_or_forwarded_host(self):
+        for host in ("casa.example", "evil.example", ALIAS_HOST + ".evil.example", ALIAS_HOST + ":443"):
+            response = await self.client.post("/api/bridge/read", json={}, headers=self.cookie(
+                Origin=ALIAS, Host=host, **{"X-Forwarded-Host": ALIAS_HOST, "X-Forwarded-Proto": "https"}))
+            self.assertEqual(response.status, 403)
+            self.assertEqual(await response.json(), {"error": "origin_not_allowed"})
+        self.accounts.get_session.assert_not_awaited()
+
+    async def test_alias_rejects_nonexact_missing_null_and_duplicate_origins(self):
+        cases = ([], [("Origin", "null")], [("Origin", ALIAS + "/")],
+                 [("Origin", ALIAS + ".evil.example")], [("Origin", "https://not-configured.example")],
+                 [("Origin", ALIAS), ("Origin", ALIAS)], [("Origin", ALIAS), ("Origin", ORIGIN)])
+        for origins in cases:
+            response = await self.client.post("/api/bridge/read", json={},
+                headers=[("Host", ALIAS_HOST), ("Cookie", f"{COOKIE}={SESSION}"), *origins])
+            self.assertEqual(response.status, 403)
+            self.assertEqual(await response.json(), {"error": "origin_not_allowed"})
+        self.accounts.get_session.assert_not_awaited()
+
+    def test_alias_configuration_is_explicit_https_without_wildcards_or_hidden_authority(self):
+        self.assertEqual(origin_aliases(None), {})
+        self.assertEqual(origin_aliases(" " + ALIAS + "/, https://second.example "),
+                         {ALIAS: ALIAS_HOST, "https://second.example": "second.example"})
+        for value in ("http://legacy.example", "null", "*", "https://*.example", "https://x:y@legacy.example",
+                      "https://legacy.example/path", "https://legacy.example?token=x", "https://legacy.example#x",
+                      "https://legacy.example:bad", "https://legacy.example:", "https://leg\tacy.example"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                origin_aliases(value)
 
     async def test_registration_accepts_only_exact_body_and_never_accepts_role_or_chat_id(self):
         good = {"code": "invitation", "username": "patita", "password": "a long password"}

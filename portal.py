@@ -29,14 +29,38 @@ def canonical_origin(value):
     return value.rstrip("/")
 
 
+def origin_aliases(value):
+    """Parse only explicit HTTPS origins from the operator's comma-separated list."""
+    if not value:
+        return {}
+    if not isinstance(value, str):
+        raise ValueError("CASTORI_PORTAL_ORIGIN_ALIASES must be a comma-separated list")
+    aliases = {}
+    for raw in value.split(","):
+        raw = raw.strip()
+        if not raw:
+            continue
+        if "*" in raw or any(ord(char) <= 32 or ord(char) == 127 for char in raw):
+            raise ValueError("CASTORI_PORTAL_ORIGIN_ALIASES must contain explicit HTTPS origins")
+        origin = canonical_origin(raw)
+        parsed = urlsplit(origin)
+        # Evaluate port validation too; an alias may never hide an invalid netloc.
+        _ = parsed.port
+        if parsed.netloc.endswith(":"):
+            raise ValueError("CASTORI_PORTAL_ORIGIN_ALIASES contains an invalid host")
+        aliases[origin] = parsed.netloc
+    return aliases
+
+
 def failure(code, status=400):
     return web.json_response({"error": code}, status=status)
 
 
 class Portal:
-    def __init__(self, bridge, accounts, origin, root=None):
+    def __init__(self, bridge, accounts, origin, root=None, *, aliases=None):
         self.bridge, self.accounts = bridge, accounts
         self.origin = canonical_origin(origin)
+        self.origin_aliases = origin_aliases(aliases)
         self.root = Path(root or Path(__file__).parent / "portal_web").resolve()
 
     @staticmethod
@@ -65,13 +89,23 @@ class Portal:
             details["origin_kind"] = origin_kind
         logger.warning(json.dumps(details, sort_keys=True))
 
+    def _allowed_origin(self, request, origins):
+        # Preserve the canonical origin's existing reverse-proxy behavior. An
+        # installed app on an explicitly configured older origin is restricted
+        # to that same host; forwarded headers never authorize the alias.
+        if origins == [self.origin]:
+            return True
+        if len(origins) != 1 or origins[0] not in self.origin_aliases:
+            return False
+        return request.headers.getall("Host", []) == [self.origin_aliases[origins[0]]]
+
     async def authenticate(self, request, handler):
         try:
             if request.method not in {"GET", "HEAD", "POST"}:
                 return self.protect(failure("method_not_allowed", 405))
             if request.method == "POST":
                 origins = request.headers.getall("Origin", [])
-                if origins != [self.origin]:
+                if not self._allowed_origin(request, origins):
                     origin_kind = ("missing" if not origins else "duplicate" if len(origins) > 1
                                    else "null" if origins == ["null"] else "mismatch")
                     self._log_rejection(request, "origin_not_allowed", origin_kind=origin_kind)

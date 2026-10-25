@@ -99,7 +99,8 @@ class WebBridge:
                  history_provider=None, get_admin_app: Callable | None = None,
                  admin_state_provider: Callable | None = None, admin_actor_id: Callable | None = None,
                  account_service=None, portal_origin: str | None = None, portal_root=None,
-                 get_consultorio: Callable | None = None, admin_access=None):
+                 get_consultorio: Callable | None = None, admin_access=None,
+                 portal_origin_aliases: str | None = None):
         self.load, self.save = load, save
         self.get_apps, self.resolve_actor = get_apps, resolve_actor
         self.token = token if token is not None else os.getenv("CASTORI_WEB_TOKEN", "")
@@ -116,7 +117,8 @@ class WebBridge:
         if portal_origin:
             from portal import Portal
             try:
-                self.portal = Portal(self, account_service, portal_origin, root=portal_root)
+                self.portal = Portal(self, account_service, portal_origin, root=portal_root,
+                                     aliases=portal_origin_aliases)
             except ValueError:
                 logger.warning("Portal desactivado: origen HTTPS no valido")
         # Centralita can contain gifts and consented health notifications. Its
