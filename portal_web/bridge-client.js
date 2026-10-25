@@ -13,7 +13,7 @@
     if (options.signal) { options.signal.addEventListener('abort', abort, { once: true }); if (options.signal.aborted) controller.abort(); }
     const timer = setTimeout(abort, 15000);
     try {
-      const response = await fetch((options.prefix || '/api/bridge') + path, { method: options.body ? 'POST' : 'GET', credentials: 'same-origin', cache: 'no-store', headers: { Accept: 'application/json', ...(options.body ? { 'Content-Type': 'application/json' } : {}) }, ...(options.body ? { body: JSON.stringify(options.body) } : {}), signal: controller.signal });
+      const response = await fetch((options.prefix || '/api/bridge') + path, { method: options.body ? 'POST' : 'GET', credentials: 'same-origin', cache: 'no-store', ...(options.keepalive ? { keepalive: true } : {}), headers: { Accept: 'application/json', ...(options.body ? { 'Content-Type': 'application/json' } : {}) }, ...(options.body ? { body: JSON.stringify(options.body) } : {}), signal: controller.signal });
       if (options.portalProbe && response.status === 404) return { portal: false };
       if (!options.prefix && !options.adminAuth && response.status === 401) unauthorizedHandler?.();
       let data;
@@ -40,7 +40,7 @@
     consultationMessage: body => request('/consultation-message', { body }),
     adminState: signal => request('/admin-state', { signal }),
     adminAuth: signal => request('/admin-auth', { signal, adminAuth: true }),
-    adminAuthAction: (body, signal) => request('/admin-auth', { body, signal, adminAuth: true }),
+    adminAuthAction: (body, signal) => request('/admin-auth', { body, signal, adminAuth: true, keepalive: body?.action === 'lock' }),
     adminEvents: (after, signal) => request('/admin-events?after=' + encodeURIComponent(after ?? '0'), { signal }),
     adminAction: body => request('/admin-action', { body }),
     adminCallback: body => request('/admin-callback', { body }),

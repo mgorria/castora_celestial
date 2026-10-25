@@ -517,7 +517,7 @@ class WebBridge:
         if self.get_admin_app() is None:
             return _failure("centralita_unavailable", 503)
         self._reserve(key, fingerprint, admin=True)
-        return self._schedule_admin(request["chat_id"], body, "admin_action", key)
+        return self._schedule_admin(request["chat_id"], body, "admin_action", key, self._portal_admin_session(request))
 
     def _find_admin_callback(self, body):
         self._clean_admin()
@@ -546,21 +546,33 @@ class WebBridge:
         if self.get_admin_app() is None:
             return _failure("centralita_unavailable", 503)
         self._reserve(key, fingerprint, admin=True)
-        return self._schedule_admin(request["chat_id"], body, "admin_callback", key)
+        return self._schedule_admin(request["chat_id"], body, "admin_callback", key, self._portal_admin_session(request))
 
-    def _schedule_admin(self, chat_id, body, kind, key):
-        task = asyncio.create_task(self._dispatch_admin(chat_id, body, kind, key))
+    def _portal_admin_session(self, request):
+        # Kept only by the in-flight task, never persisted in a receipt or event.
+        return ((self.portal._session_token(request), request["portal_session"]["desk_version"])
+                if request.get("portal_owner") is True else None)
+
+    def _schedule_admin(self, chat_id, body, kind, key, portal_session=None):
+        task = asyncio.create_task(self._dispatch_admin(chat_id, body, kind, key, portal_session))
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
         return web.json_response({"request_id": body["request_id"], "status": "pending", "duplicate": False}, status=202)
 
-    async def _dispatch_admin(self, chat_id, body, kind, key):
+    async def _dispatch_admin(self, chat_id, body, kind, key, portal_session=None):
         status = "uncertain"
         try:
             async with self.locks.setdefault(chat_id, asyncio.Lock()):
                 if not self._is_admin_owner(chat_id):
                     status = "rejected"
                     return
+                if portal_session is not None:
+                    token, version = portal_session
+                    live = await self.account_service.get_session(token)
+                    if (not live or live["actor"] != "owner" or live["chat_id"] != chat_id
+                            or not live.get("desk_expires_at") or live.get("desk_version") != version):
+                        status = "rejected"
+                        return
                 app = self.get_admin_app()
                 if app is None:
                     status = "rejected"
@@ -650,8 +662,7 @@ class WebBridge:
     async def _admin_access_status(self, request):
         from admin_access import AdminAccessError
         if request.get("portal_owner") is True and self._admin_authorized(request):
-            return {"configured": True, "unlocked": True,
-                    "expires_at": request["portal_session"]["expires_at"], "permission_based": True}
+            return await self.account_service.desk_status(self.portal._session_token(request))
         if self.admin_access is None:
             raise AdminAccessError("admin_auth_unavailable", 503)
         if len(request.headers.getall("X-Castori-Owner-Id", [])) != 1:
@@ -680,9 +691,28 @@ class WebBridge:
         if request.query:
             return _failure("invalid_admin_query")
         if request.get("portal_owner") is True:
-            if request.method != "GET":
-                return _failure("account_logout_required", 400)
-            return web.json_response(await self._admin_access_status(request), headers={"Cache-Control": "no-store"})
+            from account_service import AccountError
+            try:
+                if request.method == "GET":
+                    result = await self._admin_access_status(request)
+                elif request.method == "POST":
+                    try:
+                        body = await request.json()
+                    except (ValueError, UnicodeError):
+                        return _failure("invalid_admin_auth")
+                    if not isinstance(body, dict) or body.get("action") not in ("unlock", "lock"):
+                        return _failure("invalid_admin_auth")
+                    action = body["action"]
+                    if set(body) != ({"action"} if action == "lock" else {"action", "password"}):
+                        return _failure("invalid_admin_auth")
+                    token = self.portal._session_token(request)
+                    result = (await self.account_service.lock_desk(token) if action == "lock"
+                              else await self.account_service.unlock_desk(token, body["password"], ip=request.remote or "unknown"))
+                else:
+                    return _failure("invalid_admin_auth")
+                return web.json_response(result, headers={"Cache-Control": "no-store"})
+            except AccountError as exc:
+                return _failure(exc.code, exc.status)
         try:
             # Validate the trusted identity and storage even for mutations. A
             # missing password never makes any other admin endpoint public.

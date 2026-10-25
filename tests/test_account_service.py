@@ -10,7 +10,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
-from account_service import AccountError, AccountService, INVITATION_LIFETIME, RATE_WINDOW, SESSION_LIFETIME
+from account_service import AccountError, AccountService, DESK_LIFETIME, INVITATION_LIFETIME, RATE_WINDOW, SESSION_LIFETIME
 
 
 PASSWORD = "Un secreto de prueba 2026!"
@@ -76,7 +76,13 @@ class Connection:
             if token_hash in self.data["sessions"]:
                 raise AssertionError("Unique session constraint")
             self.data["sessions"][token_hash] = dict(token_hash=token_hash, account_id=account_id,
-                auth_version=auth_version, created_at=created_at, expires_at=expires_at, revoked_at=None)
+                auth_version=auth_version, created_at=created_at, expires_at=expires_at, revoked_at=None,
+                desk_expires_at=None, desk_version=0)
+        elif query.startswith("update portal_sessions set desk_expires_at"):
+            row = self.data["sessions"].get(args[0])
+            if row:
+                row["desk_expires_at"] = args[1] if len(args) > 1 else None
+                row["desk_version"] += 1
         elif query.startswith("update portal_sessions set revoked_at"):
             key = "token_hash" if "where token_hash" in query else "account_id"
             for row in self.data["sessions"].values():
@@ -119,6 +125,8 @@ class Connection:
             return copy.deepcopy(rows[0]) if rows else None
         if query.startswith("select * from portal_invitations"):
             return copy.deepcopy(self.data["invitations"].get(args[0]))
+        if query.startswith("select * from portal_sessions"):
+            return copy.deepcopy(self.data["sessions"].get(args[0]))
         if query.startswith("select expires_at, reset from portal_invitations"):
             rows = [row for row in self.data["invitations"].values() if row["chat_id"] == args[0]
                     and row["consumed_at"] is None and row["revoked_at"] is None and row["expires_at"] > args[1]]
@@ -149,7 +157,8 @@ class Connection:
             account = self.data["accounts"].get(session["account_id"])
             if not account or account["auth_version"] != session["auth_version"]:
                 return None
-            return dict(username=account["username"], chat_id=account["chat_id"], expires_at=session["expires_at"], actor=account["actor"])
+            return dict(username=account["username"], chat_id=account["chat_id"], expires_at=session["expires_at"], actor=account["actor"],
+                        desk_expires_at=session.get("desk_expires_at"), desk_version=session.get("desk_version", 0))
         raise AssertionError(f"Unexpected fetchrow: {query}")
 
 
@@ -197,6 +206,110 @@ class AccountTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(raised.exception.code, code)
         if status:
             self.assertEqual(raised.exception.status, status)
+
+    async def owner_session(self):
+        invitation = await self.service.create_invitation(actor="owner")
+        return await self.service.register(invitation["code"], "miguel", "x")
+
+    async def test_desk_unlock_is_same_password_per_session_persisted_and_time_bounded(self):
+        owner = await self.owner_session()
+        second = await self.service.login("miguel", "x")
+        self.assertFalse((await self.service.desk_status(owner["token"]))["unlocked"])
+        await self.assert_error("invalid_credentials", self.service.unlock_desk(owner["token"], "wrong"), 401)
+        unlocked = await self.service.unlock_desk(owner["token"], "x")
+        self.assertEqual(unlocked, {"configured": True, "unlocked": True,
+            "expires_at": (STAMP + DESK_LIFETIME).isoformat(), "reauthenticate": True})
+        self.assertEqual(await self.new_service().desk_status(owner["token"]), unlocked)
+        self.assertFalse((await self.service.desk_status(second["token"]))["unlocked"])
+        self.assertEqual(len(self.pool.data["sessions"]), 2, "Reauthentication never creates another account session")
+        locked = await self.service.lock_desk(owner["token"])
+        self.assertFalse(locked["unlocked"])
+        self.assertIsNotNone(await self.service.get_session(owner["token"]))
+        await self.service.unlock_desk(owner["token"], "x")
+        self.now += DESK_LIFETIME
+        self.assertFalse((await self.service.desk_status(owner["token"]))["unlocked"])
+        self.assertIsNotNone(await self.service.get_session(owner["token"]))
+        self.now = STAMP + SESSION_LIFETIME - timedelta(minutes=2)
+        near_expiry = await self.service.unlock_desk(owner["token"], "x")
+        self.assertEqual(near_expiry["expires_at"], owner["expires_at"])
+        self.now += timedelta(minutes=2)
+        await self.assert_error("sign_in_required", self.service.desk_status(owner["token"]), 401)
+
+    async def test_sandra_cannot_elevate_and_reset_or_logout_revokes_owner_elevation(self):
+        _, sandra = await self.register()
+        for call in (self.service.desk_status(sandra["token"]), self.service.unlock_desk(sandra["token"], PASSWORD),
+                     self.service.lock_desk(sandra["token"])):
+            await self.assert_error("owner_required", call, 403)
+        owner = await self.owner_session()
+        await self.service.unlock_desk(owner["token"], "x")
+        reset = await self.service.create_invitation(reset=True, actor="owner")
+        renewed = await self.service.register(reset["code"], "miguel", "z")
+        await self.assert_error("sign_in_required", self.service.desk_status(owner["token"]), 401)
+        self.assertFalse((await self.service.desk_status(renewed["token"]))["unlocked"])
+        await self.service.unlock_desk(renewed["token"], "z")
+        await self.service.logout(renewed["token"])
+        await self.assert_error("sign_in_required", self.service.desk_status(renewed["token"]), 401)
+
+    async def test_desk_rate_limit_is_shared_across_sessions_processes_and_ips(self):
+        owner = await self.owner_session()
+        other = await self.service.login("miguel", "x")
+        for index in range(10):
+            service = self.new_service()
+            token = owner["token"] if index % 2 else other["token"]
+            with patch.object(service, "_verify", AsyncMock(return_value=False)):
+                await self.assert_error("invalid_credentials", service.unlock_desk(token, "bad", f"192.0.2.{index + 1}"), 401)
+        await self.assert_error("rate_limited", self.service.unlock_desk(owner["token"], "x", "192.0.2.100"), 429)
+        self.now += RATE_WINDOW
+        self.assertTrue((await self.service.unlock_desk(owner["token"], "x"))["unlocked"])
+
+    async def test_lock_during_password_verification_prevents_late_unlock(self):
+        owner = await self.owner_session()
+        reached, release = asyncio.Event(), asyncio.Event()
+        verify = self.service._verify
+        async def gated(password_hash, password):
+            valid = await verify(password_hash, password)
+            reached.set()
+            await release.wait()
+            return valid
+        with patch.object(self.service, "_verify", gated):
+            pending = asyncio.create_task(self.service.unlock_desk(owner["token"], "x"))
+            await reached.wait()
+            await self.new_service().lock_desk(owner["token"])
+            release.set()
+            await self.assert_error("admin_locked", pending, 423)
+        self.assertFalse((await self.service.desk_status(owner["token"]))["unlocked"])
+
+    async def test_session_and_password_are_rechecked_after_desk_password_verification(self):
+        for mutation in ("logout", "reset", "expiry", "identity", "revoke"):
+            with self.subTest(mutation=mutation):
+                self.pool, self.now = MemoryPool(), STAMP
+                self.identities = {"sandra": 11, "owner": 22}
+                self.service = self.new_service()
+                owner = await self.owner_session()
+                reached, release = asyncio.Event(), asyncio.Event()
+                verify = self.service._verify
+                async def gated(password_hash, password):
+                    valid = await verify(password_hash, password)
+                    reached.set()
+                    await release.wait()
+                    return valid
+                with patch.object(self.service, "_verify", gated):
+                    pending = asyncio.create_task(self.service.unlock_desk(owner["token"], "x"))
+                    await reached.wait()
+                    if mutation == "logout":
+                        await self.new_service().logout(owner["token"])
+                    elif mutation == "reset":
+                        reset = await self.service.create_invitation(reset=True, actor="owner")
+                        await self.service.register(reset["code"], "miguel", "z")
+                    elif mutation == "expiry":
+                        self.now += SESSION_LIFETIME
+                    elif mutation == "identity":
+                        self.identities["owner"] = 33
+                    else:
+                        await self.service.revoke_sessions(actor="owner")
+                    release.set()
+                    await self.assert_error("sign_in_required", pending, 401)
+                self.assertFalse(any(row["desk_expires_at"] for row in self.pool.data["sessions"].values()))
 
     async def test_invitation_registration_hashes_and_server_bound_identity(self):
         invite, session = await self.register("  ＰＡＴＩＴＡ  ")
@@ -453,7 +566,6 @@ class AccountTests(unittest.IsolatedAsyncioTestCase):
         from web_bridge import WebBridge
 
         sandra_invite = await self.service.create_invitation()
-        await self.service.register(sandra_invite["code"], "patita", "s")
         owner_invite = await self.service.create_invitation(actor="owner")
         await self.service.register(owner_invite["code"], "miguel", "x")
         bridge_data = {}
@@ -467,7 +579,33 @@ class AccountTests(unittest.IsolatedAsyncioTestCase):
         client = TestClient(TestServer(bridge.create_app()))
         await client.start_server()
         try:
-            for username, password, role in (("patita", "s", "sandra"), ("miguel", "x", "owner")):
+            # Even choosing the owner's exact password cannot grant a newly
+            # registered Sandra account the owner's server-bound role.
+            registered = await client.post("/api/account/register", headers={"Origin": "https://casa.example"},
+                json={"code": sandra_invite["code"], "username": "patita", "password": "x"})
+            self.assertEqual(registered.status, 200)
+            self.assertEqual((await registered.json())["actor"], "sandra")
+            new_sandra = {"Cookie": f"{COOKIE}={registered.cookies[COOKIE].value}",
+                          "X-Castori-Actor": "owner", "X-Castori-Portal-Owner": "true"}
+            for route in ("admin-state", "admin-events", "admin-invitation", "admin-owner-invitation", "admin-auth"):
+                denied = await client.get("/api/bridge/" + route, headers=new_sandra)
+                self.assertEqual(denied.status, 403)
+                self.assertEqual(await denied.json(), {"error": "owner_required"})
+            with patch.object(self.service, "unlock_desk", wraps=self.service.unlock_desk) as verify:
+                for route, body in (("admin-auth", {"action": "unlock", "password": "x"}),
+                        ("admin-auth", {"action": "lock"}),
+                        ("admin-action", {"text": "/status", "request_id": "sandra-denied"}),
+                        ("admin-callback", {"event_id": 1, "data": "autoreply:1:send", "request_id": "sandra-callback"}),
+                        ("admin-invitation", {"action": "create"}),
+                        ("admin-owner-invitation", {"action": "create"})):
+                    denied = await client.post("/api/bridge/" + route,
+                        headers={**new_sandra, "Origin": "https://casa.example"}, json=body)
+                    self.assertEqual(denied.status, 403)
+                    self.assertEqual(await denied.json(), {"error": "owner_required"})
+                verify.assert_not_awaited()
+            self.assertEqual(bridge.admin_events, [])
+            self.assertEqual((await client.get("/api/bridge/state", headers=new_sandra)).status, 200)
+            for username, password, role in (("patita", "x", "sandra"), ("miguel", "x", "owner")):
                 response = await client.post("/api/account/login", json={"username": username, "password": password},
                                              headers={"Origin": "https://casa.example"})
                 self.assertEqual(response.status, 200)
@@ -476,13 +614,47 @@ class AccountTests(unittest.IsolatedAsyncioTestCase):
                 session = await client.get("/api/account/session", headers=cookie)
                 self.assertEqual((await session.json())["actor"], role)
                 desk = await client.get("/api/bridge/admin-state", headers={**cookie, "X-Castori-Actor": "owner"})
-                self.assertEqual(desk.status, 200 if role == "owner" else 403)
+                self.assertEqual(desk.status, 423 if role == "owner" else 403)
                 if role == "owner":
+                    status = await client.get("/api/bridge/admin-auth", headers=cookie)
+                    self.assertFalse((await status.json())["unlocked"])
+                    invalid = await client.post("/api/bridge/admin-auth", headers={**cookie, "Origin": "https://casa.example"},
+                                                json={"action": "unlock", "password": "wrong"})
+                    self.assertEqual(invalid.status, 401)
+                    unlocked = await client.post("/api/bridge/admin-auth", headers={**cookie, "Origin": "https://casa.example"},
+                                                 json={"action": "unlock", "password": password})
+                    self.assertEqual(unlocked.status, 200)
+                    self.assertTrue((await unlocked.json())["reauthenticate"])
+                    self.assertNotIn("Set-Cookie", unlocked.headers)
+                    desk = await client.get("/api/bridge/admin-state", headers=cookie)
+                    self.assertEqual(desk.status, 200)
                     self.assertEqual((await desk.json())["marker"], "owner-desk")
                     action = await client.post("/api/bridge/message", json={"animal": "mimosuga", "text": "test"},
                                                headers={**cookie, "Origin": "https://casa.example"})
                     self.assertEqual(action.status, 403)
                     self.assertEqual((await action.json())["error"], "read_only")
+                    dispatch_lock = bridge.locks.setdefault(22, asyncio.Lock())
+                    await dispatch_lock.acquire()
+                    try:
+                        queued = await client.post("/api/bridge/admin-action", headers={**cookie, "Origin": "https://casa.example"},
+                                                   json={"text": "/status", "request_id": "queued-desk"})
+                        self.assertEqual(queued.status, 202)
+                        locked = await client.post("/api/bridge/admin-auth", headers={**cookie, "Origin": "https://casa.example"},
+                                                   json={"action": "lock"})
+                        self.assertEqual(locked.status, 200)
+                    finally:
+                        dispatch_lock.release()
+                    if bridge.tasks:
+                        await asyncio.gather(*list(bridge.tasks))
+                    self.assertEqual(bridge_data["web_bridge"]["requests"]["22:queued-desk"]["status"], "rejected")
+                    self.assertEqual(bridge.admin_events, [])
+                    self.assertEqual((await client.get("/api/bridge/request?request_id=queued-desk", headers=cookie)).status, 423)
+                    self.assertEqual((await client.get("/api/bridge/state", headers=cookie)).status, 200)
+                    self.assertNotIn(cookie["Cookie"].split("=", 1)[1], str(bridge_data))
+                else:
+                    forbidden = await client.post("/api/bridge/admin-auth", headers={**cookie, "Origin": "https://casa.example"},
+                                                  json={"action": "unlock", "password": password})
+                    self.assertEqual(forbidden.status, 403)
                 logout = await client.post("/api/account/logout", json={},
                                            headers={**cookie, "Origin": "https://casa.example"})
                 self.assertEqual(logout.status, 200)

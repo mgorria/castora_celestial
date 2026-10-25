@@ -59,7 +59,8 @@
   const newPage = () => ({ items: [], loaded: false, loading: false, error: '', nextCursor: null, hasMore: false, available: true, version: 0, controller: null });
   let storyShelf = newPage(), storyController = null, storyVersion = 0;
   const admin = { data: null, events: [], cursor: '0', loading: false, error: '', busy: false, note: '', requestId: null, check: false, preview: null };
-  const adminAuth = { checked: false, configured: false, unlocked: false, expiresAt: null, loading: false, error: '', version: 0, controller: null, timer: null, requirePassword: false, revocationPending: false };
+  const adminAuth = { portalPrepared: false, checked: false, configured: false, unlocked: false, expiresAt: null, loading: false, error: '', version: 0, controller: null, timer: null, requirePassword: false, revocationPending: false };
+  let portalAuthQueue = Promise.resolve();
   const adminRequests = new Map();
   let adminTab = 'overview', adminController, adminPollController, adminTimer, adminVersion = 0;
   let demoAdminEvents = [], demoAdminSequence = 0;
@@ -100,7 +101,7 @@
     if (latest) acknowledgeRead(activeId, latest.id, latest.consultationId);
   }
   function acknowledgeVisibleRead() { acknowledgeChatRead(); experiences?.acknowledgeVisible(); }
-  const canUseControl = () => canOpenControl() && (mode === 'demo' || adminAuth.unlocked && Date.parse(adminAuth.expiresAt) > Date.now());
+  const canUseControl = () => canOpenControl() && (mode === 'demo' || adminAuth.unlocked && !adminAuth.requirePassword && !adminAuth.revocationPending && !adminAuth.loading && Date.parse(adminAuth.expiresAt) > Date.now());
   // Preview tools are available only on a local development host, never in Sandra's portal.
   const canExploreDemo = () => !account.portal && ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
   const accountLocked = () => !account.checked || account.portal && !account.authenticated;
@@ -375,10 +376,10 @@
   function adminDate(value) { if (!value) return 'Sin fecha disponible'; const date = new Date(value); return Number.isNaN(date.getTime()) ? 'Sin fecha disponible' : new Intl.DateTimeFormat('es-ES', { timeZone: controlData()?.timezone || 'Europe/Madrid', dateStyle: 'long', timeStyle: 'short' }).format(date); }
   const adminStatus = value => ({ pending: 'Pendiente', approved: 'Aprobado', rejected: 'Descartado', canon: 'Canon', draft: 'Borrador', active: 'Activa', cancelled: 'Cancelada', sent: 'Enviado', done: 'Completado', open: 'Abierto', review: 'Con revisión', auto: 'Automático' }[value] || value || 'Sin estado');
   function renderAdminLock() {
-    if (account.portal && isOwner()) return `<section class="admin-card admin-wide"><div class="eyebrow">${icon('key')} DESPACHO DEL CASTOR</div><h1>Tu mesa te espera.</h1><p>${adminAuth.loading ? 'Comprobando el permiso de tu usuario…' : 'Tu usuario de Miguel abre este despacho.'}</p>${adminAuth.error ? `<p role="alert">${esc(adminAuth.error)}</p>` : ''}${adminAuth.loading ? '' : '<button class="button" data-admin-auth-refresh>Comprobar mi acceso</button>'}</section>`;
-    const setup = adminAuth.checked && !adminAuth.configured;
-    const form = !adminAuth.checked ? `<div class="admin-lock-wait" role="status"><p>${adminAuth.loading ? 'Comprobando la cerradura de tu escritorio…' : 'Comprueba tu acceso para abrir el escritorio.'}</p>${adminAuth.loading ? '' : '<button class="button" data-admin-auth-refresh>Comprobar acceso</button>'}</div>` : `<form id="admin-auth-form" class="admin-lock-form"><label>${setup ? 'Elige tu contraseña' : 'Contraseña de la Centralita'}<input id="admin-auth-password" name="password" type="password" autocomplete="${setup ? 'new-password' : 'current-password'}" maxlength="128" required placeholder="Tu llave secreta" ${adminAuth.loading ? 'disabled' : ''}></label>${setup ? '<label>Repite la contraseña<input id="admin-auth-confirm" name="confirmation" type="password" autocomplete="new-password" maxlength="128" required placeholder="La misma llave, una vez más"></label><p class="admin-lock-hint">Elige la contraseña que prefieras. Guárdala en tu gestor de contraseñas.</p>' : ''}<button class="button" type="submit" ${adminAuth.loading ? 'disabled' : ''}>${adminAuth.loading ? 'Comprobando tu llave…' : setup ? 'Guardar mi contraseña y entrar' : 'Abrir mi Centralita'} ${icon('arrow')}</button></form>`;
-    return `<section class="admin-lock" aria-labelledby="admin-lock-title"><div class="admin-lock-art" aria-hidden="true"><span class="admin-lock-orbit">✧</span><div class="admin-lock-seal">${icon('key')}</div><span class="admin-lock-signature">centralita celestial</span></div><div class="admin-lock-content"><span class="eyebrow">EL ESCRITORIO PRIVADO DE MIGUEL</span><h1 id="admin-lock-title">La llave de<br><em>tu Centralita.</em></h1><p class="admin-lock-intro">${setup ? 'Elige una contraseña para cuidar las historias, los mensajes y las sorpresas que preparas para Sandra.' : 'Un pequeño secreto para entrar donde se preparan las cosas bonitas.'}</p>${adminAuth.error ? `<p class="account-error" role="alert">${esc(adminAuth.error)}</p>` : ''}${adminAuth.revocationPending ? `<button class="button secondary admin-lock-retry" data-admin-lock ${adminAuth.loading ? 'disabled' : ''}>${adminAuth.loading ? 'Cerrando la sesión…' : 'Reintentar cierre'}</button>` : ''}${form}<p class="admin-lock-footnote">${icon('key')} Tu acceso de ChatGPT y esta contraseña protegen el escritorio. Se cierra automáticamente a los 30 minutos.</p></div></section>`;
+    const portal = account.portal && isOwner(), setup = !portal && adminAuth.checked && !adminAuth.configured;
+    const waiting = !adminAuth.checked || adminAuth.revocationPending;
+    const form = waiting ? `<div class="admin-lock-wait" role="status"><p>${adminAuth.loading ? 'Cerrando la puerta antes de comprobar tu llave…' : 'Comprueba el cierre del escritorio para volver a entrar.'}</p>${adminAuth.loading || adminAuth.revocationPending ? '' : '<button class="button" data-admin-auth-refresh>Comprobar acceso</button>'}</div>` : `<form id="admin-auth-form" class="admin-lock-form"><label>${portal ? 'La misma contraseña de tu cuenta' : setup ? 'Elige tu contraseña' : 'Contraseña del Despacho'}<input id="admin-auth-password" name="password" type="password" autocomplete="${setup ? 'new-password' : 'current-password'}" maxlength="128" required placeholder="Tu llave secreta" ${adminAuth.loading ? 'disabled' : ''}></label>${setup ? '<label>Repite la contraseña<input id="admin-auth-confirm" name="confirmation" type="password" autocomplete="new-password" maxlength="128" required placeholder="La misma llave, una vez más"></label><p class="admin-lock-hint">Elige la contraseña que prefieras. Guárdala en tu gestor de contraseñas.</p>' : ''}<button class="button" type="submit" ${adminAuth.loading ? 'disabled' : ''}>${adminAuth.loading ? 'Comprobando tu llave…' : setup ? 'Guardar mi contraseña y entrar' : 'Abrir el Despacho del Castor'} ${icon('arrow')}</button></form>`;
+    return `<section class="admin-lock" aria-labelledby="admin-lock-title"><div class="admin-lock-art" aria-hidden="true"><span class="admin-lock-orbit">✧</span><div class="admin-lock-seal">${icon('key')}</div><span class="admin-lock-signature">despacho del castor</span></div><div class="admin-lock-content"><span class="eyebrow">EL ESCRITORIO PRIVADO DE MIGUEL</span><h1 id="admin-lock-title">La llave de<br><em>tu Despacho.</em></h1><p class="admin-lock-intro">${portal ? 'Vuelve a escribir la contraseña con la que entras en la Casa Celestial para abrir tu mesa de trabajo.' : setup ? 'Elige una contraseña para cuidar las historias, los mensajes y las sorpresas que preparas para Sandra.' : 'Un pequeño secreto para entrar donde se preparan las cosas bonitas.'}</p>${adminAuth.error ? `<p class="account-error" role="alert">${esc(adminAuth.error)}</p>` : ''}${adminAuth.revocationPending && !adminAuth.loading ? '<button class="button secondary admin-lock-retry" data-admin-lock>Reintentar cierre</button>' : ''}${form}<p class="admin-lock-footnote">${icon('key')} ${portal ? 'Usa la contraseña de tu cuenta. El Despacho se cierra al salir y, como máximo, a los 30 minutos. Tu sesión en la Casa permanece abierta.' : 'Tu acceso de ChatGPT y esta contraseña protegen el escritorio. Se cierra automáticamente a los 30 minutos.'}</p></div></section>`;
   }
   function refreshAdminGate() {
     if (view !== 'control' || !canOpenControl()) return;
@@ -386,28 +387,28 @@
   }
   function clearAdminAuth() {
     adminAuth.version++; adminAuth.controller?.abort(); clearTimeout(adminAuth.timer);
-    Object.assign(adminAuth, { checked: false, configured: false, unlocked: false, expiresAt: null, loading: false, error: '', controller: null, timer: null, requirePassword: false, revocationPending: false });
+    Object.assign(adminAuth, { portalPrepared: false, checked: false, configured: false, unlocked: false, expiresAt: null, loading: false, error: '', controller: null, timer: null, requirePassword: false, revocationPending: false });
   }
   function closeAdminGate(message = '') {
     adminAuth.version++; adminAuth.controller?.abort(); clearTimeout(adminAuth.timer);
     Object.assign(adminAuth, { unlocked: false, expiresAt: null, loading: false, error: message, controller: null, timer: null, requirePassword: true });
-    clearAdminState(); refreshAdminGate();
+    if (view === 'control') stopPolling(); clearAdminState(); refreshAdminGate();
   }
   function adminAccessError(error) {
     if (error.status !== 423 && error.code !== 'admin_locked') return false;
     closeAdminGate('Tu Centralita se ha cerrado. Introduce tu contraseña para continuar.'); return true;
   }
-  function applyAdminAuth(data) {
+  function applyAdminAuth(data, verified = false) {
     if (typeof data?.configured !== 'boolean' || typeof data.unlocked !== 'boolean') throw new Error('No se pudo comprobar la llave de tu Centralita.');
     const expires = Date.parse(data.expires_at);
     if (data.unlocked && (!data.configured || !Number.isFinite(expires) || expires <= Date.now())) throw new Error('La sesión de tu Centralita ha caducado. Vuelve a introducir tu contraseña.');
-    const permissionBased = account.portal && isOwner() && data.permission_based === true;
-    const unlocked = data.unlocked && (permissionBased || !adminAuth.requirePassword);
+    if (account.portal && (data.reauthenticate !== true || data.configured !== true)) throw new Error('No se pudo comprobar el acceso al Despacho.');
+    const unlocked = data.unlocked && !adminAuth.requirePassword && (!account.portal || verified);
     Object.assign(adminAuth, { checked: true, configured: data.configured, unlocked, expiresAt: unlocked ? data.expires_at : null });
     clearTimeout(adminAuth.timer);
     if (unlocked) {
       const version = adminAuth.version;
-      adminAuth.timer = setTimeout(() => { if (version !== adminAuth.version) return; if (permissionBased) expireAccountSession(); else closeAdminGate('Han pasado 30 minutos. Tu escritorio vuelve a estar cerrado.'); }, Math.min(expires - Date.now(), 2147483647));
+      adminAuth.timer = setTimeout(() => { if (version !== adminAuth.version) return; closeAdminGate('Han pasado 30 minutos. Tu escritorio vuelve a estar cerrado.'); }, Math.min(expires - Date.now(), 2147483647));
     } else clearAdminState();
   }
   function openAdminDesk() {
@@ -416,6 +417,7 @@
   }
   async function loadAdminAuth() {
     if (!canOpenControl() || mode !== 'live' || adminAuth.loading) return;
+    if (account.portal && (!adminAuth.portalPrepared || adminAuth.revocationPending)) return lockPortalDesk();
     const epoch = liveEpoch, version = ++adminAuth.version; adminAuth.loading = true; adminAuth.error = ''; adminAuth.controller = new AbortController(); refreshAdminGate();
     try {
       const data = await bridge.adminAuth(adminAuth.controller.signal);
@@ -423,33 +425,61 @@
       applyAdminAuth(data);
     } catch (error) {
       if (epoch !== liveEpoch || version !== adminAuth.version || error.cancelled) return;
+      if (account.portal && error.code === 'sign_in_required') { expireAccountSession(); return; }
+      if (account.portal) adminAuth.requirePassword = true;
       adminAuth.unlocked = false; adminAuth.expiresAt = null; clearAdminState(); adminAuth.error = error.message || 'No se pudo comprobar el acceso.';
     } finally { if (epoch === liveEpoch && version === adminAuth.version) { adminAuth.loading = false; adminAuth.controller = null; openAdminDesk(); } }
   }
   async function submitAdminAuth() {
-    if (!canOpenControl() || mode !== 'live' || adminAuth.loading || !adminAuth.checked || canUseControl()) return;
+    if (!canOpenControl() || mode !== 'live' || adminAuth.loading || adminAuth.revocationPending || !adminAuth.checked || canUseControl()) return;
     const input = document.getElementById('admin-auth-password'), confirmation = document.getElementById('admin-auth-confirm');
-    const password = input?.value || '', setup = !adminAuth.configured;
+    const password = input?.value || '', setup = !account.portal && !adminAuth.configured;
     if (!password.length || password.length > 128) { adminAuth.error = 'Escribe una contraseña de hasta 128 caracteres.'; refreshAdminGate(); return; }
     if (setup && password !== confirmation?.value) { adminAuth.error = 'Las dos contraseñas deben ser iguales.'; refreshAdminGate(); return; }
     if (input) input.value = ''; if (confirmation) confirmation.value = '';
     const epoch = liveEpoch, version = ++adminAuth.version; adminAuth.loading = true; adminAuth.error = ''; adminAuth.controller = new AbortController(); refreshAdminGate();
     try {
-      const data = await bridge.adminAuthAction({ action: setup ? 'setup' : 'unlock', password }, adminAuth.controller.signal);
+      const body = { action: setup ? 'setup' : 'unlock', password };
+      const data = await (account.portal ? queuePortalAuth(body, epoch) : bridge.adminAuthAction(body, adminAuth.controller.signal));
       if (epoch !== liveEpoch || version !== adminAuth.version || !canOpenControl() || mode !== 'live') return;
-      adminAuth.requirePassword = false; adminAuth.revocationPending = false; applyAdminAuth(data);
+      adminAuth.requirePassword = false; adminAuth.revocationPending = false; applyAdminAuth(data, true);
       if (!adminAuth.unlocked) throw new Error('No se pudo abrir la Centralita. Vuelve a comprobar tu llave.');
     } catch (error) {
       if (epoch !== liveEpoch || version !== adminAuth.version || error.cancelled) return;
+      if (account.portal && error.code === 'sign_in_required') { expireAccountSession(); return; }
+      if (account.portal) adminAuth.requirePassword = true;
       adminAuth.unlocked = false; adminAuth.expiresAt = null; clearAdminState();
       if (error.code === 'admin_already_configured') { adminAuth.checked = true; adminAuth.configured = true; }
       if (error.code === 'admin_setup_required') { adminAuth.checked = true; adminAuth.configured = false; }
-      adminAuth.error = error.code === 'invalid_admin_password' ? 'La contraseña no coincide. Prueba de nuevo.' : error.uncertain ? 'No pudimos confirmar la apertura. Comprueba el acceso antes de volver a intentarlo.' : error.message;
-      if (error.uncertain) adminAuth.checked = false;
+      adminAuth.error = ['invalid_admin_password', 'invalid_credentials'].includes(error.code) ? 'La contraseña no coincide. Prueba de nuevo.' : error.uncertain ? 'No pudimos confirmar la apertura. Comprueba el acceso antes de volver a intentarlo.' : error.message;
+      if (error.uncertain) { adminAuth.checked = false; if (account.portal) { adminAuth.portalPrepared = false; adminAuth.revocationPending = true; } }
     } finally { if (epoch === liveEpoch && version === adminAuth.version) { adminAuth.loading = false; adminAuth.controller = null; openAdminDesk(); } }
   }
+  function queuePortalAuth(body, epoch) {
+    const operation = portalAuthQueue.catch(() => {}).then(() => {
+      if (epoch !== liveEpoch || !account.portal || !isOwner()) throw Object.assign(new Error('La sesión ha cambiado.'), { cancelled: true });
+      return bridge.adminAuthAction(body);
+    });
+    portalAuthQueue = operation.catch(() => {});
+    return operation;
+  }
+  async function lockPortalDesk() {
+    if (!account.portal || !isOwner() || mode !== 'live') return;
+    closeAdminGate(); const epoch = liveEpoch, version = adminAuth.version;
+    Object.assign(adminAuth, { portalPrepared: false, checked: false, configured: true, loading: true, revocationPending: true }); refreshAdminGate();
+    try {
+      const data = await queuePortalAuth({ action: 'lock' }, epoch);
+      if (epoch !== liveEpoch || version !== adminAuth.version) return;
+      if (data?.unlocked !== false || data?.configured !== true || data?.reauthenticate !== true) throw new Error('No se pudo confirmar el cierre.');
+      Object.assign(adminAuth, { portalPrepared: true, checked: true, configured: true, revocationPending: false });
+    } catch (error) {
+      if (epoch !== liveEpoch || version !== adminAuth.version) return;
+      if (error.code === 'sign_in_required') { expireAccountSession(); return; }
+      adminAuth.error = 'El escritorio está oculto, pero no pudimos confirmar su cierre en el servidor. Reintenta el cierre para volver a entrar.';
+    } finally { if (epoch === liveEpoch && version === adminAuth.version) { adminAuth.loading = false; refreshAdminGate(); } }
+  }
   async function lockAdmin() {
-    if (account.portal && isOwner()) { navigate('home'); return; }
+    if (account.portal && isOwner()) { if (adminAuth.revocationPending) return lockPortalDesk(); const closing = lockPortalDesk(); navigate('home'); return closing; }
     if (!canOpenControl() || mode !== 'live') return;
     closeAdminGate(); const epoch = liveEpoch, version = adminAuth.version;
     adminAuth.loading = true; adminAuth.revocationPending = true; refreshAdminGate();
@@ -759,7 +789,8 @@
     if (experiences && next === 'wishes') next = 'vaca';
     const experienceId = next === 'consultation' ? (id && !ids.includes(id) ? id : experiences?.selectedId()) : null;
     experiences?.leave();
-    if (view === 'control' && next !== 'control') clearInvitationSecret();
+    if (view === 'control' && next !== 'control') { clearInvitationSecret(); if (account.portal && isOwner() && mode === 'live' && !(adminAuth.loading && adminAuth.revocationPending)) lockPortalDesk(); }
+    if (next === 'control' && view !== 'control' && account.portal && isOwner()) { adminAuth.portalPrepared = false; adminAuth.requirePassword = true; adminAuth.unlocked = false; adminAuth.checked = false; }
     stopPolling(); stopAdminReads(); cancelArchiveReads(); if (modal.open) modal.close(); if (next === 'chat' && !ids.includes(id)) next = 'home'; view = next; if (id && ids.includes(id)) activeId = id;
     if (next === 'clinic' || next === 'consultation') activeId = 'salchicher'; else if (next === 'vaca') activeId = 'vaca';
     const views = { home, conversations, library, memories, wishes, control }; main.innerHTML = experiences && ['clinic', 'consultation', 'vaca'].includes(next) ? experiences.render(next, experienceId) : next === 'chat' ? chat(activeId) : (views[next] || home)();
@@ -1037,5 +1068,5 @@
   document.getElementById('mobile-shade').addEventListener('click', closeMenu);
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMenu(); });
   function fromHash() { if (accountLocked()) return; const path = location.hash.slice(1).split('/'); if (path[0] === 'consultation' && path[1]) { let id; try { id = decodeURIComponent(path[1]); } catch (_) { navigate('clinic', null, false); return; } navigate('consultation', id, false); } else if (path[0] === 'carta' && path[1] === 'vaca') navigate('chat', 'vaca', false, true); else if (path[0] === 'chat' && ids.includes(path[1])) navigate('chat', path[1], false); else navigate(['conversations', 'library', 'memories', 'wishes', 'control', 'clinic', 'vaca'].includes(path[0]) ? path[0] : 'home', null, false); }
-  window.addEventListener('hashchange', fromHash); window.addEventListener('pagehide', () => { stopPolling(); stopAdminReads(); cancelArchiveReads(); clearInvitationSecret(); }); bridge.onUnauthorized?.(expireAccountSession); applyTheme(); bootstrapAccount();
+  window.addEventListener('hashchange', fromHash); window.addEventListener('pageshow', event => { if (event.persisted && account.portal && isOwner() && view === 'control') { adminAuth.portalPrepared = false; loadAdminAuth(); } }); window.addEventListener('pagehide', () => { if (account.portal && isOwner() && view === 'control') lockPortalDesk(); stopPolling(); stopAdminReads(); cancelArchiveReads(); clearInvitationSecret(); }); bridge.onUnauthorized?.(expireAccountSession); applyTheme(); bootstrapAccount();
 }());

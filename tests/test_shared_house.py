@@ -39,7 +39,9 @@ class SharedHouseTests(unittest.IsolatedAsyncioTestCase):
         self.sessions = {name: {"actor": name, "chat_id": chat, "username": name,
                               "expires_at": "2099-01-01T00:00:00+00:00"}
                          for name, chat in self.identities.items()}
-        self.accounts = SimpleNamespace(get_session=AsyncMock(side_effect=lambda token: self.sessions.get(token)))
+        self.accounts = SimpleNamespace(get_session=AsyncMock(side_effect=lambda token: self.sessions.get(token)),
+            desk_status=AsyncMock(return_value={"configured": True, "unlocked": False,
+                                               "expires_at": None, "reauthenticate": True}))
 
         def save(data):
             self.data = copy.deepcopy(data)
@@ -144,10 +146,13 @@ class SharedHouseTests(unittest.IsolatedAsyncioTestCase):
         self.bridge.record_admin(22, "Sorpresa reservada al propietario")
         valid = {"Cookie": COOKIE + "=owner", "X-Castori-Actor": "sandra"}
         response = await self.get("admin-state", valid, "/api/bridge/")
+        self.assertEqual(response.status, 423)
+        self.accounts.desk_status.return_value.update(unlocked=True, expires_at="2099-01-01T00:00:00+00:00")
+        response = await self.get("admin-state", valid, "/api/bridge/")
         self.assertEqual(response.status, 200)
         self.assertEqual((await response.json())["actor"], "owner")
         auth = await (await self.get("admin-auth", valid, "/api/bridge/")).json()
-        self.assertTrue(auth["permission_based"])
+        self.assertTrue(auth["reauthenticate"])
         self.assertTrue(auth["unlocked"])
         self.access.status.assert_not_awaited()
         for cookie, expected in (("sandra", 403), ("missing", 401)):

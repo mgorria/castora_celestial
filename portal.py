@@ -70,6 +70,10 @@ class Portal:
                 request["portal_owner"] = session["actor"] == "owner"
                 if route in ADMIN_GET + ADMIN_POST and not request["portal_owner"]:
                     return self.protect(failure("owner_required", 403))
+                if route in ADMIN_GET + ADMIN_POST and route != "admin-auth":
+                    denied = await self.bridge._admin_guard(request)
+                    if denied is not None:
+                        return self.protect(denied)
                 if route in PUBLIC_POST and request["portal_owner"]:
                     return self.protect(failure("read_only", 403))
             response = await handler(request)

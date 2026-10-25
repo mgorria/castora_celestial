@@ -25,10 +25,12 @@ import database
 
 INVITATION_LIFETIME = timedelta(hours=48)
 SESSION_LIFETIME = timedelta(days=7)
+DESK_LIFETIME = timedelta(minutes=30)
 RATE_WINDOW = timedelta(minutes=15)
 USERNAME = re.compile(r"^[a-z0-9_][a-z0-9_.-]{2,31}$")
 SECRET = re.compile(r"^[A-Za-z0-9_-]{43}$")
-RATE_LIMITS = {"login": {"ip": 40, "account": 10}, "register": {"ip": 20, "account": 5}}
+RATE_LIMITS = {"login": {"ip": 40, "account": 10}, "register": {"ip": 20, "account": 5},
+               "desk": {"ip": 40, "account": 10}}
 
 
 class AccountError(RuntimeError):
@@ -205,7 +207,9 @@ class AccountService:
                     auth_version bigint not null,
                     created_at timestamptz not null,
                     expires_at timestamptz not null,
-                    revoked_at timestamptz
+                    revoked_at timestamptz,
+                    desk_expires_at timestamptz,
+                    desk_version bigint not null default 0
                 );
                 create index if not exists portal_sessions_account_idx on portal_sessions (account_id);
                 create table if not exists portal_auth_limits (
@@ -218,6 +222,8 @@ class AccountService:
                 alter table portal_invitations add column if not exists actor text not null
                     default 'sandra' check (actor in ('sandra', 'owner'));
                 create unique index if not exists portal_accounts_actor_idx on portal_accounts (actor);
+                alter table portal_sessions add column if not exists desk_expires_at timestamptz;
+                alter table portal_sessions add column if not exists desk_version bigint not null default 0;
             """)
         await self._dummy()
 
@@ -381,15 +387,86 @@ class AccountService:
             return None
         now = self._now()
         async with self.get_pool().acquire() as conn:
-            row = await conn.fetchrow("""select a.username, a.chat_id, s.expires_at, a.actor from portal_sessions s
+            row = await conn.fetchrow("""select a.username, a.chat_id, s.expires_at, a.actor,
+                s.desk_expires_at, s.desk_version from portal_sessions s
                 join portal_accounts a on a.id = s.account_id and a.auth_version = s.auth_version
                 where s.token_hash = $1 and s.revoked_at is null and s.expires_at > $2""",
                 _digest(raw_token), now)
         actor = self._bound_actor(row)
         if not row or row["expires_at"] <= self._now() or actor is None:
             return None
-        return {"actor": actor, "chat_id": row["chat_id"], "username": row["username"],
-                "expires_at": _iso(row["expires_at"])}
+        result = {"actor": actor, "chat_id": row["chat_id"], "username": row["username"],
+                  "expires_at": _iso(row["expires_at"])}
+        if actor == "owner":
+            expiry = min(row["desk_expires_at"], row["expires_at"]) if row.get("desk_expires_at") else None
+            result.update(desk_expires_at=_iso(expiry) if expiry and expiry > self._now() else None,
+                          desk_version=row.get("desk_version", 0))
+        return result
+
+    @staticmethod
+    def _desk_status(expires_at=None):
+        return {"configured": True, "unlocked": expires_at is not None,
+                "expires_at": expires_at, "reauthenticate": True}
+
+    @_storage_errors
+    async def desk_status(self, raw_token):
+        session = await self.get_session(raw_token)
+        if not session:
+            raise AccountError("sign_in_required", 401)
+        if session["actor"] != "owner":
+            raise AccountError("owner_required", 403)
+        return self._desk_status(session.get("desk_expires_at"))
+
+    def _valid_owner_session(self, account, session, now):
+        return bool(account and session and self._bound_actor(account) == "owner"
+                    and session["account_id"] == account["id"]
+                    and session["auth_version"] == account["auth_version"]
+                    and session["revoked_at"] is None and session["expires_at"] > now)
+
+    @_storage_errors
+    async def unlock_desk(self, raw_token, password, ip=None):
+        if not isinstance(raw_token, str) or not SECRET.fullmatch(raw_token):
+            raise AccountError("sign_in_required", 401)
+        token_hash = _digest(raw_token)
+        async with self.get_pool().acquire() as conn:
+            session = await conn.fetchrow("select * from portal_sessions where token_hash = $1", token_hash)
+            account = await conn.fetchrow("select * from portal_accounts where id = $1", session["account_id"]) if session else None
+        if account and self._bound_actor(account) == "sandra":
+            raise AccountError("owner_required", 403)
+        if not self._valid_owner_session(account, session, self._now()):
+            raise AccountError("sign_in_required", 401)
+        await self._rate_limit("desk", ip, str(account["id"]))
+        try:
+            password = self._password(password)
+        except AccountError:
+            raise AccountError("invalid_credentials", 401) from None
+        if not await self._verify(account["password_hash"], password):
+            raise AccountError("invalid_credentials", 401)
+        async with self.get_pool().acquire() as conn:
+            async with conn.transaction():
+                # Match reset's account-then-session lock order. A lock, logout,
+                # reset or identity change during Argon2 must win over this unlock.
+                current = await conn.fetchrow("select * from portal_accounts where id = $1 for update", account["id"])
+                live = await conn.fetchrow("select * from portal_sessions where token_hash = $1 for update", token_hash)
+                now = self._now()
+                if (not self._valid_owner_session(current, live, now)
+                        or current["auth_version"] != account["auth_version"]
+                        or current["password_hash"] != account["password_hash"]):
+                    raise AccountError("sign_in_required", 401)
+                if live["desk_version"] != session["desk_version"]:
+                    raise AccountError("admin_locked", 423)
+                expiry = min(now + DESK_LIFETIME, live["expires_at"])
+                await conn.execute("""update portal_sessions set desk_expires_at = $2,
+                    desk_version = desk_version + 1 where token_hash = $1""", token_hash, expiry)
+        return self._desk_status(_iso(expiry))
+
+    @_storage_errors
+    async def lock_desk(self, raw_token):
+        await self.desk_status(raw_token)
+        async with self.get_pool().acquire() as conn:
+            await conn.execute("""update portal_sessions set desk_expires_at = null,
+                desk_version = desk_version + 1 where token_hash = $1""", _digest(raw_token))
+        return self._desk_status()
 
     @_storage_errors
     async def logout(self, raw_token):

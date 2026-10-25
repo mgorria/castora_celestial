@@ -35,6 +35,19 @@ class PortalTests(unittest.IsolatedAsyncioTestCase):
         self.accounts.create_invitation.return_value = {"code": "one-time-code", "expires_at": "2026-10-23T00:00:00+00:00", "reset": False}
         self.accounts.register.return_value = self.accounts.login.return_value = {
             "token": SESSION, "username": "patita", "actor": "sandra", "expires_at": datetime.now(timezone.utc) + timedelta(days=7)}
+        self.accounts.desk_status.return_value = {"configured": True, "unlocked": False,
+                                                  "expires_at": None, "reauthenticate": True}
+        async def unlock(raw, password, ip=None):
+            result = {"configured": True, "unlocked": True,
+                      "expires_at": "2099-01-01T00:00:00+00:00", "reauthenticate": True}
+            self.accounts.desk_status.return_value = result
+            return result
+        async def lock(raw):
+            result = {"configured": True, "unlocked": False, "expires_at": None, "reauthenticate": True}
+            self.accounts.desk_status.return_value = result
+            return result
+        self.accounts.unlock_desk.side_effect = unlock
+        self.accounts.lock_desk.side_effect = lock
         self.data = {}
         self.access = AsyncMock()
         self.access.status.return_value = {"configured": True, "unlocked": True, "expires_at": "2099-01-01T00:00:00+00:00"}
@@ -207,19 +220,54 @@ class PortalTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.headers["Cache-Control"], "no-store")
         self.assertEqual(self.bridge.admin_events, [], "Invitation secrets never enter the mirrored admin feed")
 
-    async def test_owner_cookie_reports_role_and_opens_despacho_without_a_second_password(self):
+    async def test_owner_cookie_requires_same_account_password_again_before_despacho(self):
         response = await self.client.get("/api/account/session", headers=self.owner_cookie())
         self.assertEqual(await response.json(), {"portal": True, "authenticated": True,
                                                 "username": "miguel", "actor": "owner"})
         response = await self.client.get("/api/bridge/admin-state", headers=self.owner_cookie())
-        self.assertEqual(response.status, 200)
-        self.assertEqual((await response.json())["actor"], "owner")
+        self.assertEqual(response.status, 423)
         response = await self.client.get("/api/bridge/admin-auth", headers=self.owner_cookie())
         self.assertEqual(response.status, 200)
-        self.assertTrue((await response.json())["unlocked"])
+        self.assertEqual(await response.json(), {"configured": True, "unlocked": False,
+                                                "expires_at": None, "reauthenticate": True})
+        response = await self.client.post("/api/bridge/admin-auth", headers=self.owner_cookie(Origin=ORIGIN),
+                                         json={"action": "unlock", "password": "x"})
+        self.assertEqual(response.status, 200)
+        self.assertNotIn("session_token", await response.json())
+        self.accounts.unlock_desk.assert_awaited_once_with(OWNER_SESSION, "x", ip="127.0.0.1")
+        self.assertEqual((await self.client.get("/api/bridge/admin-state", headers=self.owner_cookie())).status, 200)
+        response = await self.client.post("/api/bridge/admin-auth", headers=self.owner_cookie(Origin=ORIGIN), json={"action": "lock"})
+        self.assertEqual(response.status, 200)
+        self.accounts.lock_desk.assert_awaited_once_with(OWNER_SESSION)
+        self.assertEqual((await self.client.get("/api/bridge/admin-state", headers=self.owner_cookie())).status, 423)
+        self.assertTrue((await (await self.client.get("/api/account/session", headers=self.owner_cookie())).json())["authenticated"])
+        self.accounts.login.assert_not_awaited()
+        self.accounts.logout.assert_not_awaited()
         self.access.status.assert_not_awaited()
         response = await self.client.get("/castori-web/admin-state", headers=self.owner_cookie())
         self.assertEqual(response.status, 401, "Portal cookies never authenticate the internal transport")
+
+    async def test_every_portal_admin_route_and_admin_receipt_requires_elevation(self):
+        self.data["web_bridge"] = {"sequence": 0, "inboxes": {}, "requests": {
+            "22:adminreceipt": {"status": "processed", "admin": True}}}
+        for route in ("admin-state", "admin-events", "admin-invitation", "admin-owner-invitation", "request?request_id=adminreceipt"):
+            response = await self.client.get("/api/bridge/" + route, headers=self.owner_cookie(**OWNER))
+            self.assertEqual(response.status, 423)
+        for route in ("admin-action", "admin-callback", "admin-invitation", "admin-owner-invitation"):
+            response = await self.client.post("/api/bridge/" + route, json={}, headers=self.owner_cookie(Origin=ORIGIN, **OWNER))
+            self.assertEqual(response.status, 423)
+        self.accounts.create_invitation.assert_not_awaited()
+        self.assertEqual(self.bridge.admin_events, [])
+
+    async def test_portal_reauth_rejects_injected_fields_and_keeps_exact_origin(self):
+        for body in ({"action": "setup", "password": "x"}, {"action": "unlock", "password": "x", "actor": "owner"},
+                     {"action": "lock", "password": "x"}, {"action": "unlock"}):
+            response = await self.client.post("/api/bridge/admin-auth", headers=self.owner_cookie(Origin=ORIGIN), json=body)
+            self.assertEqual(response.status, 400)
+        response = await self.client.post("/api/bridge/admin-auth", headers=self.owner_cookie(Origin="https://other.example"),
+                                         json={"action": "unlock", "password": "x"})
+        self.assertEqual(response.status, 403)
+        self.accounts.unlock_desk.assert_not_awaited()
 
     async def test_owner_normal_view_cannot_send_or_mutate_sandra_state(self):
         for route in ("message", "callback", "consultation-action", "consultation-message"):
