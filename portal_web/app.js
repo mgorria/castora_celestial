@@ -939,6 +939,11 @@
   async function sendMessage(text) {
     if (readOnly()) return;
     text = text.trim(); const id = activeId; if (!text || !ready(id)) return; const input = document.getElementById('chat-input');
+    if (view === 'chat' && window.CastoriBearAlarm?.matches(id, text) &&
+        window.CastoriBearAlarm.play({ onFinish: () => toast('Oso espantado. Puedes continuar, Patita. 🐮') })) {
+      if (input) { input.value = ''; input.style.height = 'auto'; }
+      return;
+    }
     if (mode === 'live') { const accepted = await submitLive(id, text.slice(0, 4000)); if (accepted && input?.isConnected && input.value.trim() === text) { input.value = ''; input.style.height = 'auto'; } return; }
     if (mode !== 'demo' || pending.has(id)) return; if (input) { input.value = ''; input.style.height = 'auto'; }
     const history = demoHistory(id); history.push({ id: uid(), role: 'user', text: text.slice(0, 1500), time: Date.now() }); pending.add(id); persist(); refreshChat(true);
