@@ -1,13 +1,17 @@
 import asyncio
 import copy
+import json
 import time
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from salchicher import Salchicher, RETENTION_SECONDS
-from salchicher_service import COMFORT_TEXT, EMERGENCY_TEXT, PROFESSIONAL_TEXT, UNAVAILABLE_TEXT, render_decision, urgent_signal
-from salchicher_service import generate_care_reply
+from salchicher_service import (
+    CARE, QUESTIONS, CHAT_TEXT, COMFORT_TEXT, EMERGENCY_TEXT, IDENTITY_TEXT,
+    PROFESSIONAL_TEXT, UNAVAILABLE_TEXT, generate_care_reply, normalized,
+    real_medical_request, render_decision, urgent_signal,
+)
 
 
 def update(text="hola", user_id=1, chat_type="private"):
@@ -17,7 +21,7 @@ def update(text="hola", user_id=1, chat_type="private"):
 
 
 class ServiceTests(unittest.TestCase):
-    def test_clear_urgent_symptoms(self):
+    def test_clear_urgent_symptoms_and_literal_negations(self):
         for text in ["No puedo respirar", "me cuesta respirar", "me duele el pecho",
                      "Tengo los labios morados", "se me ha puesto la lengua hinchada"]:
             with self.subTest(text=text):
@@ -26,87 +30,167 @@ class ServiceTests(unittest.TestCase):
         self.assertFalse(urgent_signal("No me cuesta respirar y no tengo dolor en el pecho"))
         self.assertTrue(urgent_signal("No tengo dolor en el pecho pero no puedo respirar"))
 
-    def test_model_text_and_unknown_care_never_reach_patient(self):
-        reply, _ = render_decision({
-            "action": "care", "category": "mild_respiratory",
-            "reply": "Toma un antibiotico", "care": ["antibiotico", "jalea_real", "rest", "honey"],
-            "facts": {key: True for key in ["mild", "recent", "stable_or_improving", "breathing_normal",
-                                            "swallowing_normal", "no_risk_context", "no_persistent_or_high_fever"]},
+    def test_figurative_and_resolved_past_do_not_create_emergency(self):
+        self.assertFalse(urgent_signal("No puedo respirar de la risa con ese pato"))
+        self.assertFalse(urgent_signal("Ayer tuve dolor en el pecho, mi médico me atendió y ya estoy bien"))
+        self.assertTrue(urgent_signal("No puedo respirar de la risa; pero ahora me duele el pecho"))
+        self.assertTrue(urgent_signal("Ayer tuve dolor en el pecho y ya estoy bien, pero ahora no puedo respirar"))
+
+    def test_model_prose_unknown_treatment_and_sensitive_diagnosis_are_never_rendered(self):
+        reply, questions = render_decision({
+            "action": "storybook", "diagnosis": "embarazo",
+            "reply": "Sandra, toma un antibiotico y jalea real. Miguel lee tu chat.",
+            "care": ["antibiotico", "jalea_real", "rest", "honey"],
+            "opening": "Te he diagnosticado un embarazo", "closing": ["hazlo"],
         }, [])
         self.assertIn("descansa", reply)
-        self.assertNotIn("antibiotico", reply)
-        self.assertNotIn("jalea", reply)
-        self.assertNotIn("miel", reply)
-
-    def test_missing_or_string_facts_cannot_allow_care(self):
-        for facts in [{}, {"mild": "true"}, {"mild": True, "recent": False}]:
-            reply, _ = render_decision({"action": "care", "facts": facts}, [])
-            self.assertEqual(reply, PROFESSIONAL_TEXT)
-
-    def test_no_repeated_questions(self):
-        reply, questions = render_decision({"action": "ask", "questions": ["duration", "duration", "severity"]}, ["duration"])
-        self.assertEqual(questions, ["severity"])
-        self.assertNotIn("Desde cuando", reply)
-
-    def test_emergency_not_replaced_by_care(self):
-        self.assertEqual(render_decision({"action": "emergency", "care": ["honey"]}, [])[0], EMERGENCY_TEXT)
-
-    def test_comfort_does_not_send_model_medical_text_or_assume_mild_symptoms(self):
-        reply, questions = render_decision({
-            "action": "comfort", "category": "abdominal_pain", "questions": ["severity"],
-            "care": ["honey", "jalea_real"], "reply": "Es una molestia leve: toma jalea real.",
-        }, ["duration"])
-        self.assertEqual(reply, COMFORT_TEXT)
+        self.assertIn("Diagnóstico de cuento", reply)
         self.assertEqual(questions, [])
-        self.assertRegex(reply, r"imaginari[oa]")
-        self.assertIn("forma de achuchón", reply)
-        self.assertIn("Si la molestia sigue, empeora o te preocupa", reply)
+        for forbidden in ("antibiotico", "jalea", "miel", "embaraz", "sandra", "miguel"):
+            self.assertNotIn(forbidden, normalized(reply))
+
+    def test_affection_and_duck_care_do_not_require_medical_facts(self):
+        for facts in (None, {}, {"mild": "true"}, {"no_risk_context": False}):
+            reply, questions = render_decision({"action": "care", "facts": facts}, [])
+            self.assertIn("Diagnóstico de cuento", reply)
+            self.assertIn(CARE["comfort"], reply)
+            self.assertNotEqual(reply, PROFESSIONAL_TEXT)
+            self.assertEqual(questions, [])
+
+    def test_duck_questions_are_relevant_bounded_and_not_repeated(self):
+        reply, questions = render_decision({"action": "ask", "questions": [
+            "duration", "head_duration", "head_duration", "mojo", "context", "wings"]}, ["duration"])
+        self.assertEqual(questions, ["head_duration", "mojo"])
+        self.assertIn("cabecita", reply)
+        self.assertIn("mojo de oso", reply)
+        self.assertNotIn("embaraz", normalized(reply))
+        self.assertNotIn("alitas", reply)
+
+    def test_retired_screening_or_exhausted_questions_fall_back_to_mimos(self):
+        for ids, asked in ((["context", "honey", "severity", "breathing"], []),
+                           (["head_duration"], ["head_duration"]), ("context", [])):
+            self.assertEqual(render_decision({"action": "ask", "questions": ids}, asked), (COMFORT_TEXT, []))
+        self.assertNotIn("context", QUESTIONS)
+
+    def test_story_diagnosis_uses_duck_anatomy_not_human_disease(self):
+        for diagnosis, word in (("busy_head", "cabecita"), ("grumpy_beak", "pico"),
+                                ("grumpy_tummy", "tripita"), ("tired_wings", "alitas"),
+                                ("grumpy_webbing", "membranas"), ("grumpy_egg_tooth", "diente huevil")):
+            reply, _ = render_decision({"action": "storybook", "diagnosis": diagnosis,
+                                       "care": ["rest", "feathers", "food"]}, [])
+            self.assertIn(word, normalized(reply))
+            self.assertIn("Diagnóstico de cuento", reply)
+            self.assertIn("compota de manzana", reply)
+            self.assertNotIn("profesional", reply)
+
+    def test_usual_responses_have_no_names_reproductive_questions_or_sharing_notices(self):
+        replies = [CHAT_TEXT, COMFORT_TEXT, IDENTITY_TEXT, UNAVAILABLE_TEXT, *QUESTIONS.values(), *CARE.values()]
+        replies.extend(render_decision({"action": action}, [])[0] for action in ("chat", "identity", "comfort", "care"))
+        for reply in replies:
+            with self.subTest(reply=reply):
+                self.assertNotRegex(normalized(reply), r"embaraz|fertil|bebe|sandra|miguel|compart|confidencial|profesional sanitario|112")
+
+    def test_comfort_ignores_model_clinical_prose(self):
+        reply, questions = render_decision({"action": "comfort", "category": "abdominal_pain",
+            "questions": ["context"], "care": ["jalea_real"], "reply": "Es una molestia leve: toma jalea real."}, [])
+        self.assertEqual((reply, questions), (COMFORT_TEXT, []))
+        self.assertIn("imaginarias", reply)
         self.assertNotIn("leve", reply)
-        self.assertNotIn("jalea", reply)
 
-    def test_comfort_does_not_expand_categories_allowed_for_medical_care(self):
-        facts = {key: True for key in (
-            "mild", "recent", "stable_or_improving", "breathing_normal",
-            "swallowing_normal", "no_risk_context", "no_persistent_or_high_fever",
-        )}
-        reply, questions = render_decision({
-            "action": "care", "category": "abdominal_pain", "care": ["comfort", "food"],
-            "facts": facts,
-        }, [])
-        self.assertEqual(reply, PROFESSIONAL_TEXT)
-        self.assertEqual(questions, [])
+    def test_only_actual_medical_requests_use_real_care_exit(self):
+        for text in ("¿Qué dosis de ibuprofeno tomo?", "¿Puedo tomar jalea real?", "¿Cambio mi medicación?", "¿Qué enfermedad tengo?"):
+            self.assertTrue(real_medical_request(text), text)
+        for text in ("¿Me recetas unos mimos?", "Mi médico me ha dicho que es un resfriado", "¿Puedo tomar compota de manzana?", "Me duele la tripita, doctor de patos"):
+            self.assertFalse(real_medical_request(text), text)
+        self.assertEqual(render_decision({"action": "emergency", "care": ["rest"]}, [])[0], EMERGENCY_TEXT)
 
 
 class ProviderTests(unittest.IsolatedAsyncioTestCase):
-    async def test_direct_service_urgent_messages_bypass_provider_and_missing_key(self):
-        import os
-        with patch.dict(os.environ, {"OPENAI_API_KEY": ""}), \
-             patch("salchicher_service.AsyncOpenAI") as provider:
-            reply, questions = await generate_care_reply([
-                {"role": "assistant", "content": "Te escucho, patita."},
-                {"role": "user", "content": "Me duele el pecho"},
-                {"role": "user", "content": "Solo quiero un abrazo y mojo de oso"},
-            ], [])
-        self.assertEqual(reply, EMERGENCY_TEXT)
-        self.assertEqual(questions, [])
-        provider.assert_not_called()
-
-    async def test_json_mode_requirement_and_storage_disabled(self):
-        import os
-        from unittest.mock import MagicMock
-        async def provider(**kwargs):
-            self.assertIn("json", kwargs["input"].lower())
-            self.assertFalse(kwargs["store"])
-            return SimpleNamespace(output_text='{"action":"ask","questions":["duration"]}')
+    def provider(self, output):
         client = MagicMock()
-        client.responses.create = AsyncMock(side_effect=provider)
+        client.responses.create = AsyncMock(return_value=SimpleNamespace(output_text=json.dumps(output)))
         manager = MagicMock()
         manager.__aenter__ = AsyncMock(return_value=client)
         manager.__aexit__ = AsyncMock(return_value=False)
-        with patch.dict(os.environ, {"OPENAI_API_KEY": "synthetic"}), \
-             patch("salchicher_service.AsyncOpenAI", return_value=manager):
-            reply, questions = await generate_care_reply([{"role": "user", "content": "mocos"}], [])
+        return client, manager
+
+    async def test_direct_service_urgent_messages_bypass_provider_and_missing_key(self):
+        import os
+        with patch.dict(os.environ, {"OPENAI_API_KEY": ""}), patch("salchicher_service.AsyncOpenAI") as provider:
+            reply, questions = await generate_care_reply([
+                {"role": "assistant", "content": "Te escucho, Patita."},
+                {"role": "user", "content": "Me duele el pecho"},
+                {"role": "user", "content": "Solo quiero un abrazo y mojo de oso"},
+            ], [])
+        self.assertEqual((reply, questions), (EMERGENCY_TEXT, []))
+        provider.assert_not_called()
+
+    async def test_explicit_medication_question_does_not_become_duck_prescription(self):
+        import os
+        with patch.dict(os.environ, {"OPENAI_API_KEY": ""}), patch("salchicher_service.AsyncOpenAI") as provider:
+            reply, questions = await generate_care_reply([{"role": "user", "content": "¿Qué dosis de paracetamol tomo?"}], [])
+        self.assertEqual((reply, questions), (PROFESSIONAL_TEXT, []))
+        provider.assert_not_called()
+
+    async def test_json_mode_no_storage_and_narrative_questions(self):
+        import os
+        client, manager = self.provider({"action": "ask", "questions": ["head_duration", "mojo"]})
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "synthetic"}), patch("salchicher_service.AsyncOpenAI", return_value=manager):
+            reply, questions = await generate_care_reply([{"role": "user", "content": "Me duele la cabecita"}], [])
+        self.assertEqual(questions, ["head_duration", "mojo"])
+        kwargs = client.responses.create.call_args.kwargs
+        self.assertIn("json", kwargs["input"].lower())
+        self.assertFalse(kwargs["store"])
+        self.assertIn("doctor de cuento", kwargs["instructions"])
+
+    async def test_old_bot_screening_is_not_continued_and_user_words_are_preserved(self):
+        import os
+        client, manager = self.provider({"action": "storybook", "diagnosis": "tired_wings", "care": ["rest", "feathers"]})
+        history = [
+            {"role": "assistant", "content": "Para cuidarte con prudencia: ¿hay embarazo, alguna enfermedad importante o indicación médica?"},
+            {"role": "assistant", "content": "Los chats se comparten entre Sandra y Miguel."},
+            {"role": "user", "content": "No quiero hablar de eso. Me duelen las alitas."},
+        ]
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "synthetic"}), patch("salchicher_service.AsyncOpenAI", return_value=manager):
+            reply, questions = await generate_care_reply(history, ["context", "severity", "wings"])
+        raw = client.responses.create.call_args.kwargs["input"].split("\n", 1)[1]
+        payload = json.loads(raw)
+        self.assertEqual(payload["conversation"], [history[-1]])
+        self.assertEqual(payload["questions_already_asked"], ["wings"])
+        self.assertEqual(len(history), 3)  # Original stored conversation is untouched.
+        self.assertIn("alitas", reply)
+        self.assertNotIn("embaraz", normalized(reply))
+
+    async def test_volunteered_duration_cannot_be_asked_again(self):
+        import os
+        client, manager = self.provider({"action": "ask", "questions": ["head_duration", "duration", "evolution"]})
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "synthetic"}), patch("salchicher_service.AsyncOpenAI", return_value=manager):
+            reply, questions = await generate_care_reply([
+                {"role": "user", "content": "Me duele la cabecita desde ayer."}], [])
+        self.assertEqual(questions, ["evolution"])
+        self.assertNotIn("Desde cuándo", reply)
+        payload = json.loads(client.responses.create.call_args.kwargs["input"].split("\n", 1)[1])
+        self.assertNotIn("duration", payload["question_catalog"])
+        self.assertNotIn("head_duration", payload["question_catalog"])
+        self.assertEqual(payload["question_catalog"]["evolution"], QUESTIONS["evolution"])
+
+    async def test_volunteered_mojo_reserves_are_not_asked_again(self):
+        import os
+        client, manager = self.provider({"action": "ask", "questions": ["mojo", "duration"]})
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "synthetic"}), patch("salchicher_service.AsyncOpenAI", return_value=manager):
+            reply, questions = await generate_care_reply([
+                {"role": "user", "content": "Tengo las alitas cansadas y pocas reservas de mojo de Oso."}], [])
         self.assertEqual(questions, ["duration"])
+        self.assertNotIn("reservas", reply)
+
+    async def test_prior_human_doctor_diagnosis_can_receive_storybook_translation(self):
+        import os
+        client, manager = self.provider({"action": "storybook", "diagnosis": "grumpy_beak", "care": ["rest", "comfort"]})
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "synthetic"}), patch("salchicher_service.AsyncOpenAI", return_value=manager):
+            reply, _ = await generate_care_reply([{"role": "user", "content": "Mi médico me ha dicho que es un resfriado. ¿Qué tengo como pato?"}], [])
+        client.responses.create.assert_awaited_once()
+        self.assertIn("pico refunfuñón", reply)
+        self.assertNotIn("centro de salud", reply)
 
 
 class ConversationTests(unittest.IsolatedAsyncioTestCase):

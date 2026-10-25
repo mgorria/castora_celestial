@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from salchicher_copy import retired_automatic_message
 
 
 logger = logging.getLogger("control-castora.notifications")
@@ -127,7 +128,7 @@ def acknowledge(data, chat_id, animal, event_id, consultation_id=None):
     return True
 
 
-def _doctor_scope_exists(data, chat_id, sub, now):
+def _doctor_scope_exists(data, chat_id, sub, now, event_id=None):
     doctor = data.get("salchicher", {})
     session = doctor.get("sessions", {}).get(str(chat_id), {})
     if sub == DEFAULT_SCOPE:
@@ -135,7 +136,7 @@ def _doctor_scope_exists(data, chat_id, sub, now):
         # whether a consultation exists. Once that letter is erased/expired it
         # must not survive solely as unread metadata. Legacy consent-bound
         # messages in this same scope still require their original session.
-        latest_id = latest(data, chat_id, "salchicher")
+        latest_id = event_id if event_id is not None else latest(data, chat_id, "salchicher")
         message = next((event for event in data.get("web_bridge", {}).get("inboxes", {})
                         .get(_scope(chat_id, "salchicher"), [])
                         if event.get("id") == latest_id and event.get("role") == "assistant"
@@ -156,6 +157,27 @@ def _doctor_scope_exists(data, chat_id, sub, now):
     return bool(session and session.get("updated_at", 0) > now - retention)
 
 
+def _visible_doctor_unread_id(data, chat_id, sub, entry):
+    """Ignore retired copy without acknowledging or rewriting any message.
+
+    Keep the original cursor when its source has already been trimmed. If the
+    latest source is a known retired template, an earlier visible unread event
+    still deserves its reminder and can be acknowledged by its unchanged ID.
+    """
+    latest_id = entry.get("latest_id", 0)
+    events = [event for event in data.get("web_bridge", {}).get("inboxes", {})
+              .get(_scope(chat_id, "salchicher"), [])
+              if event.get("role") == "assistant" and _positive_id(event.get("id"))
+              and event.get("animal", "salchicher") == "salchicher"
+              and _consultation("salchicher", event) == sub]
+    latest_event = next((event for event in events if event["id"] == latest_id), None)
+    if latest_event is None or not retired_automatic_message(latest_event):
+        return latest_id
+    return max((event["id"] for event in events
+                if entry.get("read_id", 0) < event["id"] <= latest_id
+                and not retired_automatic_message(event)), default=0)
+
+
 def pending(data, chat_id):
     """Return pending animal/episode identifiers; never conversation contents."""
     if not _positive_id(chat_id):
@@ -167,9 +189,12 @@ def pending(data, chat_id):
         for sub, entry in scopes.get(_scope(chat_id, animal), {}).items():
             if entry.get("latest_id", 0) <= entry.get("read_id", 0):
                 continue
-            if animal == "salchicher" and not _doctor_scope_exists(data, chat_id, sub, now):
-                continue
-            item = {"animal": animal, "event_id": entry["latest_id"]}
+            event_id = entry["latest_id"]
+            if animal == "salchicher":
+                event_id = _visible_doctor_unread_id(data, chat_id, sub, entry)
+                if not event_id or not _doctor_scope_exists(data, chat_id, sub, now, event_id):
+                    continue
+            item = {"animal": animal, "event_id": event_id}
             if sub != DEFAULT_SCOPE:
                 item["consultation_id"] = sub
             result.append(item)

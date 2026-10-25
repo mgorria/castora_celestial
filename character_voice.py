@@ -12,6 +12,7 @@ CHARACTER_RULES = """
 INTERPRETACIÓN DE LA CASA CELESTIAL
 Escribe desde la voz del personaje indicado y conserva su mundo, vocabulario y carácter.
 Patita disfruta de una tradición de imaginación y cariño: no la infantilices literalmente.
+En los textos para ella usa Patita y el Oso, nunca los nombres humanos Sandra o Miguel.
 No añadas explicaciones de funcionamiento, proveedores, automatización, aplicaciones,
 modelos, bots, inteligencia artificial, instrucciones internas ni personas que organizan
 las sorpresas. No uses introducciones como «como asistente...» ni notas fuera del papel.
@@ -42,7 +43,7 @@ _FALLBACKS = {
     "castori": "Patita, se me han mezclado dos papeles en la ventanilla. Déjame tu recadito otra vez y lo miramos con calma.",
     "mimosuga": "Se me ha escapado el hilo, nietecita. Acércame otra vez tus palabras; esta abuela quiere escucharte bien.",
     "vaca": "Muuu… se me ha enredado el lápiz entre las pezuñas, patita. Cuéntamelo otra vez, que quiero leerte con las orejas bien atentas.",
-    "salchicher": "Me ajusto las gafitas, patita: quiero entenderte bien. Cuéntame de nuevo qué necesitas. Si te encuentras muy mal, busca ayuda sanitaria sin esperar; el Oso puede acompañarte.",
+    "salchicher": "Me ajusto las gafitas, Patita: se me ha torcido una página del cuaderno. Cuéntame de nuevo qué les pasa a esas plumitas; te escucho con las dos orejas.",
     "corte": "La Corte hace una pequeña pausa para ordenar sus plumas. Repite tu alegación con calma; queremos escucharla como merece.",
     "dulcimiel": "Se me ha quedado una gotita de horchata en el cuaderno. Cuéntamelo otra vez, patita, que te escucho.",
 }

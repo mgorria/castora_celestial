@@ -11,24 +11,22 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from salchicher_service import CARE, EMERGENCY_TEXT, UNAVAILABLE_TEXT, generate_care_reply, urgent_signal
+from salchicher_copy import retired_automatic_message
 
 logger = logging.getLogger("control-castora.salchicher")
 RETENTION_SECONDS = 48 * 60 * 60
 INACTIVITY_SECONDS = 30 * 24 * 60 * 60
 MAX_MESSAGES = 24
 CONSULTATION_GREETING = (
-    "¡Adelante, patita! Te guardé el sillón junto a la ventana. Me pongo las gafitas "
-    "y abro nuestro cuaderno de cuidados, que podéis leer tú y el Oso. Cuéntame qué notas y desde cuándo, "
-    "y vamos pasito a pasito."
+    "¡Adelante, Patita! Te guardé el sillón junto a la ventana. Me pongo las gafitas "
+    "y abro mi cuaderno de patos. Cuéntame qué les pasa hoy a esas plumitas "
+    "y desde cuándo; iremos pasito a pasito."
 )
 INTRO = (
-    "¡Adelante, patita! Soy el Doctor Salchicher. Me acomodo las gafitas y te guardo "
-    "el sillón de los cuidados y los mimos. Aquí buscamos un poquito de comodidad; "
-    "para saber qué te pasa o decidir un tratamiento hace falta un profesional sanitario.\n\n"
-    "Este cuaderno se conserva hasta 48 horas desde tu último mensaje y no pasa a "
-    "los cuentos. Puedes borrarlo con /olvidar; eso no borra las copias que ya existan "
-    "fuera de mi cuaderno ni otros registros del servicio. Tú eliges si el Oso recibe copia.\n\n"
-    "Si es una urgencia, busca ayuda sin esperar y llama al 112."
+    "¡Adelante, Patita! Soy el Doctor Salchicher. Me acomodo las gafitas y abro "
+    "el consultorio de cuento: aquí cuidamos picos, alas y plumitas con mucha atención. "
+    "Tengo el sillón preparado y el sello de las recetas de mimos sobre la mesa. "
+    "Cuando quieras, puedes pasar."
 )
 
 
@@ -115,7 +113,8 @@ class Salchicher:
                   "closed_at", "closure_reason", "care_summary")
         result = {key: copy.deepcopy(record.get(key)) for key in fields}
         if include_messages:
-            result["messages"] = copy.deepcopy(record.get("messages", []))
+            result["messages"] = [copy.deepcopy(message) for message in record.get("messages", [])
+                                  if not retired_automatic_message(message)]
         return result
 
     def list_consultations(self, chat_id: int) -> list[dict]:
@@ -171,7 +170,7 @@ class Salchicher:
         now = time.time()
         consultation_id = uuid4().hex
         record = {
-            "id": consultation_id, "title": "Consulta de cuidados", "status": "active",
+            "id": consultation_id, "title": "Una visita al doctor de patos", "status": "active",
             "retained": retain_history, "created_at": now, "updated_at": now,
             "closed_at": None, "closure_reason": None, "care_summary": [],
             "messages": [{"role": "assistant", "content": CONSULTATION_GREETING, "created_at": now}],
@@ -291,25 +290,14 @@ class Salchicher:
             return
         current = self.active_consultation(update.effective_chat.id)
         if current:
-            retention = (
-                "Elegiste guardar este historial, que podéis leer tú y el Oso: se conserva "
-                "hasta que lo borres. Si pasan 30 días sin actividad, la consulta se cierra "
-                "por inactividad; eso no significa que te hayas recuperado."
-                if current["retained"] else
-                "Elegiste no guardar historial: esta consulta se borra al cerrarla o tras "
-                "48 horas sin actividad."
-            )
             await update.effective_chat.send_message(
-                "Tu sillón sigue reservado, patita. Tenemos una consulta de cuidados abierta "
-                "y puedes continuar contándome por aquí o desde la web.\n\n"
-                + retention + " No envío copia al Oso. Puedes cerrar la consulta en la web "
-                "cuando te encuentres mejor, o borrar todas tus consultas con /olvidar. "
-                "Las copias que guardes en otros lugares se borran allí por separado."
+                "Tu sillón sigue reservado, Patita. He dejado el cuaderno abierto por "
+                "nuestra página y tengo las orejitas atentas. Seguimos por donde íbamos: "
+                "¿cómo van hoy esas plumitas?"
             )
             return
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("Abrir consulta", callback_data="salchicher:private")],
-            [InlineKeyboardButton("Abrir y avisar al Oso", callback_data="salchicher:shared")],
+            [InlineKeyboardButton("Pasar al sillón", callback_data="salchicher:private")],
         ])
         await update.effective_chat.send_message(INTRO, reply_markup=keyboard)
 
@@ -330,15 +318,15 @@ class Salchicher:
             "updated_at": time.time(), "version": time.time_ns(), "pending": False,
         })
         await query.edit_message_reply_markup(reply_markup=None)
-        await self.send(chat_id, "Consultorio abierto, patita. Cuentame que te pasa y desde cuando.")
+        await self.send(chat_id, CONSULTATION_GREETING)
 
     async def reset(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not self.allowed(update):
             return
         self.forget(update.effective_chat.id)
         await update.effective_chat.send_message(
-            "He borrado tus consultas y su historial de mi memoria, patita. Las copias que ya tengas "
-            "en otros lugares siguen allí. Cuando quieras, podemos abrir otra con /consulta."
+            "He dejado en blanco tus páginas de mi cuaderno, Patita. "
+            "Cuando quieras, podemos abrir una nueva visita con /consulta."
         )
 
     async def receive(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -371,8 +359,8 @@ class Salchicher:
                 await self.safe_notify("Doctor Salchicher ha indicado buscar ayuda urgente.\n" + text[:2500])
             return
         if not self.enabled():
-            await self.send(chat_id, "El sillón del consultorio está descansando un ratito, patita. Si necesitas "
-                            "consejo sanitario, contacta con un profesional; no esperes a que vuelva a abrir.")
+            await self.send(chat_id, "El sillón del consultorio está descansando un ratito, Patita. "
+                            "Te dejo un abrazo de perro con las orejitas por fuera.")
             return
         session = self.session(chat_id)
         if not session:

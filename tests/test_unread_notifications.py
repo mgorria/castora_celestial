@@ -13,6 +13,7 @@ from unread_notifications import (
     NOTICE_TEXT, STORE_KEY, UnreadNotifier, acknowledge, forget, initialize,
     latest, pending, record,
 )
+from salchicher_copy import LEGACY_GREETING, LEGACY_QUESTIONS
 
 
 def event(identity, animal="mimosuga", **values):
@@ -118,6 +119,55 @@ class UnreadLedgerTests(unittest.TestCase):
         self.assertTrue(acknowledge(self.data, 11, "salchicher", 1))
         self.assertFalse(pending(self.data, 11))
 
+    def test_retired_doctor_copy_never_leaves_a_phantom_pending_but_new_visible_copy_does(self):
+        screening = "Gracias por contármelo, solete. " + LEGACY_QUESTIONS["context"]
+        for sub in (None, "temporary", "retained"):
+            with self.subTest(sub=sub):
+                data = {"salchicher": {"sessions": {"11": {
+                    "consultation_id": "temporary", "updated_at": time.time()}},
+                    "consultations": {"11": {"retained": {"retained": True}}}}}
+                initialize(data)
+                values = {"consultation_id": sub} if sub else {}
+                add(data, 1, "salchicher", text=screening, **values)
+                before = copy.deepcopy(data)
+                self.assertFalse(pending(data, 11))
+                self.assertEqual(data, before)
+                self.assertEqual(latest(data, 11, "salchicher", sub), 1)
+                add(data, 2, "salchicher", text="Te dejo una mantita nueva", **values)
+                expected = {"animal": "salchicher", "event_id": 2, **values}
+                self.assertEqual(pending(data, 11), [expected])
+                self.assertTrue(acknowledge(data, 11, "salchicher", 1, sub))
+                self.assertEqual(pending(data, 11), [expected])
+                self.assertTrue(acknowledge(data, 11, "salchicher", 2, sub))
+                self.assertFalse(pending(data, 11))
+
+    def test_hidden_latest_preserves_earlier_visible_unread_and_unchanged_read_metadata(self):
+        add(self.data, 1, "salchicher", text="Una nota pendiente")
+        add(self.data, 2, "salchicher", text=LEGACY_GREETING)
+        before = copy.deepcopy(self.data)
+        self.assertEqual(pending(self.data, 11), [{"animal": "salchicher", "event_id": 1}])
+        self.assertEqual(self.data, before)
+        self.assertTrue(acknowledge(self.data, 11, "salchicher", 1))
+        self.assertFalse(pending(self.data, 11))
+        self.assertEqual(latest(self.data, 11, "salchicher"), 2)
+        self.assertEqual(self.data[STORE_KEY]["scopes"]["11:salchicher"]["_"]["read_id"], 1)
+        add(self.data, 3, "salchicher", text="Otra nota nueva")
+        self.assertEqual(pending(self.data, 11), [{"animal": "salchicher", "event_id": 3}])
+
+    def test_baseline_retired_copy_stays_read_and_similar_manual_copy_stays_unread(self):
+        data = {"web_bridge": {"inboxes": {"11:salchicher": [event(1, "salchicher", text=LEGACY_GREETING)]}}}
+        initialize(data)
+        before = copy.deepcopy(data)
+        self.assertFalse(pending(data, 11))
+        self.assertEqual(data, before)
+        add(data, 2, "salchicher", text="Nota manual: " + LEGACY_GREETING)
+        self.assertEqual(pending(data, 11), [{"animal": "salchicher", "event_id": 2}])
+
+    def test_hidden_latest_does_not_revive_an_expired_visible_general_note(self):
+        add(self.data, 1, "salchicher", text="Nota ya caducada", timestamp=time.time() - 49 * 3600)
+        add(self.data, 2, "salchicher", text=LEGACY_GREETING)
+        self.assertFalse(pending(self.data, 11))
+
     def test_new_consultation_does_not_consume_general_doctor_note(self):
         add(self.data, 1, "salchicher")
         self.data["salchicher"] = {"sessions": {"11": {
@@ -162,6 +212,14 @@ class UnreadNotifierTests(unittest.IsolatedAsyncioTestCase):
     def new_notifier(self, save=None):
         return UnreadNotifier(lambda: copy.deepcopy(self.data), save or self.save,
                               self.identities.get, lambda: self.bot, "https://house.example/castori/index.html")
+
+    async def test_retired_copy_does_not_notify_but_a_later_visible_message_does(self):
+        add(self.data, 1, "salchicher", text=LEGACY_GREETING)
+        self.assertEqual(await self.notifier.tick(datetime(2026, 1, 1, 6, tzinfo=timezone.utc)), "no_unread")
+        self.bot.send_notification.assert_not_awaited()
+        add(self.data, 2, "salchicher", text="Te he preparado una mantita")
+        self.assertEqual(await self.notifier.tick(datetime(2026, 1, 1, 18, tzinfo=timezone.utc)), "sent")
+        self.bot.send_notification.assert_awaited_once()
 
     async def test_madrid_winter_and_summer_slots_and_window(self):
         add(self.data, 1)

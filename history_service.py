@@ -21,6 +21,7 @@ import time
 from datetime import datetime, timezone
 
 import database
+from salchicher_copy import retired_automatic_message
 
 
 logger = logging.getLogger("control-castora.history")
@@ -319,6 +320,7 @@ class HistoryService:
             live = [message for message in live if (stamp := _date(message.get("time")))
                     and stamp.timestamp() > time.time() - RETENTION_SECONDS]
             messages = self._merge_session_with_live(messages, sorted(live, key=_sort))
+        messages = [message for message in messages if not retired_automatic_message(message)]
         return self._page_result(messages, cursor, limit, actor, chat_id, "salchicher", epoch, False,
                                  retention="active_consultation_48h")
 

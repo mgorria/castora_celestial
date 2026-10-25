@@ -13,6 +13,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ExtBot
 
 from web_bridge import MAX_EVENTS, RETENTION_SECONDS, RecordingExtBot, WebBridge
+from salchicher_copy import LEGACY_GREETING, LEGACY_QUESTIONS
 
 
 TOKEN = "test-bridge-token-that-is-at-least-32-characters"
@@ -119,6 +120,25 @@ class WebBridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([e["text"] for e in (await self.get_events("salchicher", headers=OWNER_HEADERS))["events"]], ["Privado Sandra"])
         self.assertEqual(self.data["web_bridge"]["inboxes"]["22:salchicher"][0]["text"], "Privado propietario")
         self.assertEqual([e["text"] for e in (await self.get_events())["events"]], ["Cuento"])
+
+    async def test_retired_doctor_events_are_hidden_without_mutating_source_or_reading_for_owner(self):
+        screening = "Me ajusto las gafitas y te escucho, patita. " + LEGACY_QUESTIONS["context"]
+        hidden = self.bridge.record("salchicher", 11, LEGACY_GREETING)
+        self.bridge.record("salchicher", 11, screening)
+        user = self.bridge.record("salchicher", 11, screening, role="user")
+        manual = self.bridge.record("salchicher", 11, "Nota manual: " + screening)
+        other = self.bridge.record("mimosuga", 11, LEGACY_GREETING)
+        before = copy.deepcopy(self.data)
+        for headers in (HEADERS, OWNER_HEADERS):
+            shown = await self.get_events("salchicher", headers=headers)
+            self.assertEqual([event["id"] for event in shown["events"]], [user["id"], manual["id"]])
+            self.assertEqual([event["revision"] for event in shown["events"]], [user["revision"], manual["revision"]])
+            self.assertEqual(shown["cursor"], self.data["web_bridge"]["sequence"])
+        self.assertEqual((await self.get_events("mimosuga"))["events"][0]["id"], other["id"])
+        self.assertEqual(self.data, before)
+        empty = await self.get_events("salchicher", after=manual["revision"])
+        self.assertEqual(empty["events"], [])
+        self.assertGreater(empty["cursor"], hidden["id"])
 
     async def test_dispatch_builds_real_update_and_command_entity(self):
         response = await self.post(body={"animal": "mimosuga", "text": "/cuento una carta", "request_id": "request001"})

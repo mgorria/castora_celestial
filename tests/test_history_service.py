@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
 from history_service import BASELINE_KEY, HistoryService, HistoryUnavailable, RETENTION_SECONDS
+from salchicher_copy import LEGACY_GREETING, LEGACY_INTRO, LEGACY_QUESTIONS
 
 
 STAMP = datetime(2026, 10, 1, 9, 0, tzinfo=timezone.utc)
@@ -94,6 +95,39 @@ class HistoryTests(unittest.IsolatedAsyncioTestCase):
             return 11
         self.service = HistoryService(lambda: copy.deepcopy(self.data), save, partner,
             lambda actor: {"sandra": 11, "owner": 22}.get(actor), self.db)
+
+    async def test_doctor_filters_retired_copy_before_pagination_without_rewriting_history(self):
+        screening = "Gracias por contármelo, solete. " + LEGACY_QUESTIONS["context"]
+        manual = "Nota manual: " + screening
+        self.data["salchicher"]["sessions"]["11"]["history"] = [
+            {"role": "assistant", "content": LEGACY_GREETING},
+            {"role": "user", "content": LEGACY_GREETING},
+            {"role": "assistant", "content": screening},
+            {"role": "assistant", "content": manual},
+        ]
+        now = datetime.now(timezone.utc)
+        self.data["web_bridge"] = {"inboxes": {"11:salchicher": [
+            event(10, LEGACY_INTRO, moment=now),
+            event(11, "Una mantita nueva", moment=now + timedelta(seconds=1)),
+        ]}}
+        await self.service.initialize()
+        before = copy.deepcopy(self.data)
+        messages, cursor = [], None
+        for _ in range(4):
+            page = await self.service.page("sandra", 11, "salchicher", before=cursor, limit=1)
+            self.assertEqual(len(page["messages"]), 1)
+            messages.extend(page["messages"])
+            cursor = page["next_cursor"]
+            if not page["has_more"]:
+                break
+            self.assertIsNotNone(cursor)
+        self.assertCountEqual([message["text"] for message in messages],
+                              [LEGACY_GREETING, manual, "Una mantita nueva"])
+        self.assertEqual(next(message for message in messages if message["text"] == LEGACY_GREETING)["role"], "user")
+        self.assertEqual(next(message for message in messages if message["text"] == "Una mantita nueva")["id"], 11)
+        self.assertIsNone(cursor)
+        self.assertEqual(self.data, before)
+        self.assertEqual(self.db.read_calls, 0)
 
     async def test_baseline_is_once_only_preserves_sources_and_never_snapshots_consultation(self):
         original = copy.deepcopy(self.data)

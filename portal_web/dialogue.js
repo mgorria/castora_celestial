@@ -18,9 +18,9 @@
     },
     salchicher: {
       name: 'Doctor Salchicher',
-      tagline: 'Una consulta de ternura',
-      greeting: '¡Adelante, Patita! Me acomodo las gafitas y abro la consulta de mimos. Este perrito tiene el cuaderno preparado para escucharte, un abrazo de los que no aprietan y un poquito de mojo de oso imaginario. ¿Cómo viene tu día?',
-      suggestions: ['Necesito una pausa bonita', 'Ayúdame a celebrar algo pequeño', 'Cuéntame algo que dé alegría'],
+      tagline: 'El consultorio de cuento',
+      greeting: '¡Adelante, Patita! Me acomodo las gafitas y abro el consultorio de cuento. Tengo el cuaderno de los patos y el abrazómetro preparados. Vamos pasito a pasito: ¿qué te trae hoy por aquí?',
+      suggestions: ['Tengo las alas cansadas', 'Revisemos mi mojo de Oso', 'Quiero una receta de mimos'],
       color: '#83A3AC'
     },
     vaca: {
@@ -80,13 +80,13 @@
       default: ['Te escucho, Patita. Puedes seguir por ahí, sin ordenar mucho las palabras. ¿Qué es lo que más te ronda?', 'Vamos despacito, Patita. ¿Te apetece contarme un poco más o prefieres que saque un cuento de mi bolsillo?']
     },
     salchicher: {
-      hello: ['¡Hola, Patita! Gafitas en su sitio, orejitas atentas y consulta de mimos abierta. Este perrito te escucha: ¿cómo viene tu día?', 'Adelante, Patita. Me acomodo las gafitas y te acerco una silla. En la consulta de mimos podemos ir despacito. ¿Qué te apetece contarme?'],
+      hello: ['¡Hola, Patita! Gafitas en su sitio, orejitas atentas y consultorio de cuento abierto. Tengo preparado el cuaderno de los patos. ¿Qué te trae hoy por aquí?', 'Adelante, Patita. Me acomodo las gafitas y acerco el sillón. Primero escuchamos lo que te pasa y luego revisamos las alas y el abrazómetro. ¿Qué notas hoy?'],
       tired: ['Me acomodo las gafas, Patita. Para esta pausa de cuento propongo elegir una escena: una ventana con lluvia, un jardín tranquilo o una biblioteca diminuta. ¿Dónde nos sentamos?', 'Hoy podemos bajar el volumen de nuestro cuento, Patita. Sin grandes hazañas: solo una conversación tranquila. ¿Quieres una historia o prefieres contarme tu día?'],
       sad: ['Siento que hoy te pese el día, Patita. Dejo el cuaderno a un lado para escucharte. ¿Te gustaría contar qué ha pasado?', 'No tienes que traer una sonrisa puesta, Patita. Podemos hablar de lo que sientes o buscar una historia amable para acompañar este rato.'],
       thanks: ['¡Gracias a ti, Patita! Apunto en el cuaderno: «Un momento amable compartido». Es una buena página para hoy.'],
       gift: ['Tengo una idea de detalle bonito, Patita: una tarjeta con tres pequeñas cosas que admiras de alguien. Sin palabras enormes, solo cosas de verdad.', 'Un regalo curioso: un vale dibujado para una tarde de conversación, una peli o una merienda. ¿Qué plan le haría ilusión a esa persona?'],
       everyday: ['Abramos el cuaderno de pequeñas alegrías, Patita. ¿Qué merece hoy una estrellita: haber empezado algo, haber terminado algo o haber pedido ayuda?', 'Hoy propongo celebrar una cosa que normalmente pasa desapercibida. Puede ser tan pequeña como encontrar algo que dabas por perdido. ¿Se te ocurre una?'],
-      default: ['Te leo, Patita. ¿Quieres contarme un poco más, inventar una pausa bonita o celebrar algo pequeño del día?', 'Me ajusto las gafas y te escucho, Patita. Podemos seguir charlando o abrir el cuaderno de historias. ¿Qué te apetece?']
+      default: ['Lo anoto en el cuaderno de los patos, Patita. ¿Lo notas desde hace un ratito o lleva más tiempo acompañándote?', 'Me ajusto las gafitas, Patita. Vamos con calma y una pregunta cada vez: ¿cómo llevas hoy las alas y las reservas de mojo de Oso?']
     },
     vaca: {
       hello: ['¡Tolón, tolón, Patita! Un poquito de purpurina iridiscente y ya tenemos saludo. Hay una estrella de papel esperando un nombre bonito. ¿Cómo llamamos a tu día?', 'Hola, Patita. Las lucecitas están encendidas en nuestro cuento. Aquí también celebramos las alegrías de cualquier martes.'],
@@ -117,6 +117,7 @@
   function careResponse(characterId, input, history) {
     // Remove explicit symptom denials, while preserving separate affirmative clauses.
     const signals = input
+      .replace(/\bno puedo respirar de (?:la )?risa\b/g, '')
       .replace(/\bno (?:tengo|siento|hay|presento) (?:ningun[a]? )?(?:fiebre|dolor(?: (?:fuerte|intenso|insoportable))?|dificultad (?:para|al) respirar|sangre (?:en (?:las )?heces|al vomitar))\b/g, '')
       .replace(/\bno (?:he vomitado|vomito) sangre\b/g, '')
       .replace(/\bno (?:me he desmayado|me desmayo|se me (?:ha )?hinchado (?:la lengua|los labios))\b/g, '');
@@ -126,44 +127,67 @@
     const collapseEmergency = /\b(?:me (?:he desmayado|desmayo)|se ha desmayado|he tenido un desmayo)\b/.test(signals);
     const swellingEmergency = /\b(?:hinchazon (?:en|de) (?:la lengua|los labios)|(?:lengua|labios) (?:muy )?hinchad[ao]s?|se me (?:ha |han )?hinchado (?:la lengua|los labios))\b/.test(signals);
     const poisoningEmergency = /\b(?:intoxicacion|me he intoxicado|he (?:tomado|bebido|ingerido) (?:veneno|lejia|un producto de limpieza))\b/.test(signals);
-    const severePain = /\b(?:dolor (?:muy )?(?:fuerte|intenso|insoportable)|(?:me )?duele[^.!?;]{0,45}\b(?:muchisimo|mucho|muy fuerte|intensamente|demasiado))\b/.test(signals);
+    const duckOnlyPain = characterId === 'salchicher' && /\b(?:pico|alas?|membranas?|diente huevil|plumas?)\b/.test(signals) && !/\b(?:cabeza|cabecita|pecho|tripa|tripota|barriga|estomago|real|humano)\b/.test(signals);
+    const severePain = !duckOnlyPain && /\b(?:dolor (?:muy )?(?:fuerte|intenso|insoportable)|(?:me )?duele[^.!?;]{0,45}\b(?:muchisimo|mucho|muy fuerte|intensamente|demasiado))\b/.test(signals);
 
     if (breathingEmergency || bloodEmergency || collapseEmergency || swellingEmergency || poisoningEmergency || severePain) {
       return 'Patita, lo que describes necesita ayuda médica urgente. Llama al 112 ahora o pide a alguien que llame y se quede contigo. No esperes a seguir esta conversación.';
     }
 
     const priorMessages = Array.isArray(history) ? history.filter(function (item) { return item && item.role === 'user'; }) : [];
-    const previousInput = priorMessages.length ? normalize(priorMessages[priorMessages.length - 1].text) : '';
+    const previousInput = priorMessages.length ? normalize(priorMessages[priorMessages.length - 1].text || priorMessages[priorMessages.length - 1].content) : '';
+    const humanPlan = /\b(?:medico|medica|doctor humano|doctora humana)\b/.test(input) && /\b(?:me (?:ha |han )?(?:dicho|recetado|mandado|diagnosticado)|me (?:dijo|receto|mando)|diagnostico del)\b/.test(input);
+    const medicineRequest = /\b(?:que (?:medicamento|pastilla|dosis)|que tengo que tomar|cuant[oa]s?[^.!?]{0,30}(?:tomar|tomo|pastillas?|dosis)|cambi[ao]r? (?:la |mi )?dosis|puedo tomar|debo tomar)\b/.test(input) || (!humanPlan && /\b(?:medicamentos?|pastillas?|dosis|antibioticos?|ibuprofeno|paracetamol)\b/.test(input));
+    if (medicineRequest || /\b(?:diagnostico medico real|que enfermedad tengo|necesito (?:un )?medico)\b/.test(input)) {
+      return 'Esa duda sobre medicamentos, dosis o un diagnóstico real corresponde a un profesional, Patita. Consúltala con tu médico o farmacéutico. Puedo ayudarte a escribir la pregunta.';
+    }
+    if (characterId === 'salchicher' && humanPlan) {
+      return 'Anoto la indicación de tu médico humano tal como te la dio, Patita. En el cuaderno de los patos añadimos la parte de cuento: un sillón para recoger las alas, un ratito tranquilo y cuidado de plumas por parte del Oso, si te apetece. ¿Cómo tienes hoy las reservas de mojo de Oso?';
+    }
     const painContext = /\b(?:dolor|duele|molestia|molestias|tripota|tripa|barriga|estomago)\b/.test(signals + ' ' + previousInput);
     const persistentSymptoms = /\b(?:persiste|persistente|empeora|empeorando|va a peor|no se me (?:pasa|quita)|no se (?:pasa|quita)|llevo (?:varios|muchos|dos|tres|cuatro|cinco|\d+) dias|desde hace (?:varios|muchos|dos|tres|cuatro|cinco|\d+) dias)\b/.test(signals);
-    if (painContext && persistentSymptoms) {
-      return 'Patita, si esa molestia sigue o está empeorando, es momento de consultarlo con un profesional sanitario. No hace falta aguantarla ni intentar adivinar qué es. ¿Puedes pedir que te valoren?';
+    if (painContext && persistentSymptoms && (characterId !== 'salchicher' || /\b(?:empeora|empeorando|va a peor)\b/.test(signals))) {
+      return 'Patita, si esa molestia sigue o está empeorando, es momento de consultarlo con un profesional sanitario. ¿Puedes pedir que te valoren?';
     }
-
-    if (/\b(?:medicamentos?|pastillas?|dosis|diagnostico|diagnosticar|antibioticos?|tratamiento)\b/.test(input) || /\b(?:que enfermedad tengo|que tengo que tomar|necesito (?:un )?medico)\b/.test(input)) {
-      return 'Eso hay que consultarlo con un profesional, Patita. No voy a adivinar un diagnóstico ni decirte qué medicamento o dosis tomar. Si ya tienes una pauta, confirma cualquier duda con tu médico o farmacéutico. Yo puedo ayudarte a poner en palabras lo que quieres preguntar.';
+    if (characterId !== 'salchicher' && /\b(?:diagnostico|diagnosticar|tratamiento)\b/.test(input)) {
+      return 'Un diagnóstico real corresponde a un profesional, Patita. Yo puedo acompañarte y ayudarte a poner en palabras lo que quieres preguntar.';
     }
-
+    if (characterId === 'salchicher' && /\b(?:diagnostico|diagnosticar|receta|tratamiento)\b/.test(input)) {
+      return 'Abro una ficha para nuestro diagnóstico de pato, Patita. Primero necesito escucharte: ¿qué notas en el pico, las alas, las membranas o la cabecita? Después prepararemos una receta de mimos con el sello del consultorio de cuento.';
+    }
+    if (characterId === 'salchicher' && /\b(?:cabeza|cabecita)\b/.test(input + ' ' + previousInput)) {
+      if (/\b(?:desde|hace|ayer|hoy|dias|horas|rato|mucho tiempo|no se me pasa)\b/.test(input)) return 'Anotado, Patita. Mientras charlamos puedes recoger las alas y buscar un rincón tranquilo. ¿La molestia de la cabecita está en un punto o la notas por toda la cabeza?';
+      return 'Me ajusto las gafitas y apunto lo de la cabecita, Patita. Vamos con una pregunta cada vez: ¿desde cuándo te molesta?';
+    }
+    if (characterId === 'salchicher' && /\b(?:pico|alas?|membranas?|diente huevil|plumas?)\b/.test(input)) {
+      if (/\bdiente huevil\b/.test(input)) return 'Acerco la lupita de cuento al diente huevil, Patita. ¿Lo notas distinto al abrir el pico o también cuando estás tranquila?';
+      if (/\bmembranas?\b/.test(input)) return 'Anoto las membranas en el cuaderno, Patita. ¿Las notas cansadas al caminar o también cuando recoges las patitas en el sillón?';
+      if (/\bpico\b/.test(input)) return 'Vamos a mirar ese pico con mi lupita de cuento, Patita. ¿Lo notas raro al abrirlo, al cerrarlo o todo el rato?';
+      return 'Revisamos esas alas, Patita. ¿Las notas cansadas después de aletear o ya estaban así al empezar el día? Si te apetece, el Oso puede acompañarte con un ratito suave de cuidado de plumas.';
+    }
     if (/\bjalea real\b/.test(input)) {
-      return 'Para nuestro cuento, la cambio por jalea de nubes imaginaria, Patita. Es un ingrediente de cuento, no un suplemento ni algo para tratar el malestar: solo se sirve en las páginas de nuestro cuaderno. Le pongo una etiqueta turquesa y un dibujito de nube. ¿Qué nombre le damos?';
+      return 'Para nuestro cuento, la cambio por jalea de nubes imaginaria, Patita. Es un ingrediente de cuento que solo se sirve en las páginas de nuestro cuaderno. Le pongo una etiqueta turquesa y un dibujito de nube. ¿Qué nombre le damos?';
     }
 
     const tummyDiscomfort = /\b(?:tripa|tripota|barriga|barriguita|estomago)\b/.test(signals) && /\b(?:duele|dolor|molestia|molestias|revuelta|revuelto|mal)\b/.test(signals);
+    if (characterId === 'salchicher' && painContext && /\b(?:desde|hace|ayer|dias|horas|no se me pasa)\b/.test(input)) {
+      return 'Anoto cuánto lleva acompañándote, Patita. Vamos a la siguiente línea del cuaderno: ¿lo notas todo el rato o aparece y desaparece? El Oso puede acercarte compañía y una manta mientras charlamos.';
+    }
     if (tummyDiscomfort && characterId === 'salchicher') {
-      return 'Ay, esa tripota, Patita. Hoy toca bajar el ritmo: un ratito tranquila, sorbitos de agua y, si te apetece, un abrazo de perro de los que no aprietan. En mi cuaderno añado dos cucharadas imaginarias de mojo de oso y un pellizquito de paciencia. ¿Ha empezado hace poquito?';
+      return 'Ay, esa tripota de pato, Patita. Puedes acomodarte, beber unos sorbitos de agua y pedir un abrazo de perro de los que no aprietan, si te apetece. En mi cuaderno dibujo unas gotas imaginarias de mojo de Oso. ¿Desde cuándo la notas así?';
     }
     if (tummyDiscomfort) {
       return 'Ay, esa tripota, Patita. Podemos ir despacito: un ratito tranquila y sorbitos de agua. Te acompaño con unas palabras suaves. ¿Ha empezado hace poquito?';
     }
 
     if (/\bmojo de oso\b/.test(input)) {
-      return '¡Mojo de oso imaginario, Patita! Lo dibujo en el cuaderno con dos cucharadas de ternura y un pellizquito de paciencia. Es un ingrediente de cuento: no se toma ni cura nada. ¿Lo guardamos en un tarrito con estrellas?';
+      return 'Saco el abrazómetro de cuento, Patita: vamos a revisar tus reservas de mojo de Oso. Para llenarlas, podemos pedir un abrazo o un ratito juntos cuidando las plumas, si te apetece. ¿El Oso te está dando mimos suficientes o anotamos que te vendrían bien más?';
     }
     if (characterId === 'salchicher' && /\b(?:autocuidado|cuidarme|habitos|cuidado cotidiano)\b/.test(input)) {
       return 'Me ajusto las gafitas, Patita. Para cuidarte en lo cotidiano podemos empezar por cosas sencillas: descansar, beber agua con normalidad, comer de forma variada y buscar un ratito tranquilo. Sin convertirlo en una lista de deberes. ¿Qué pequeño cuidado te apetece hoy?';
     }
     if (characterId === 'salchicher' && /^no tengo fiebre[.!\s]*$/.test(input)) {
-      return 'Te escucho, Patita. Me acomodo las gafitas y lo anoto, sin sacar conclusiones solo por eso. ¿Cómo te encuentras y qué te apetece contarme?';
+      return 'Anotado en el cuaderno, Patita. Me acomodo las gafitas y seguimos despacito: ¿qué notas hoy en el pico, las alas o la tripota?';
     }
     return null;
   }

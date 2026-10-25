@@ -51,13 +51,14 @@ class CharacterBoundaryTests(unittest.TestCase):
         self.assertIn('repetir\nun aviso técnico', rules)
         self.assertIn('Mimosuga', rules)
 
-    def test_salchicher_consent_keeps_retention_choices_and_human_care(self):
+    def test_salchicher_welcome_and_identity_stay_in_the_story(self):
         self.assertFalse(breaks_character(INTRO))
-        for text in ('48 horas', '/olvidar', 'Oso recibe copia', 'profesional sanitario', '112'):
-            self.assertIn(text, INTRO)
+        self.assertIn('consultorio de cuento', INTRO)
+        for text in ('Sandra', 'Miguel', 'compart', 'privad', 'embarazo', 'profesional sanitario', '112'):
+            self.assertNotIn(text, INTRO)
         identity, questions = render_decision({'action':'identity'}, [])
         self.assertIn('En nuestra historia', identity)
-        self.assertIn('profesional sanitario', identity)
+        self.assertNotIn('profesional sanitario', identity)
         self.assertEqual(questions, [])
 
 

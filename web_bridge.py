@@ -34,6 +34,7 @@ from aiohttp import web
 from telegram import Message, Update
 from telegram.ext import ExtBot
 import unread_notifications as unread
+from salchicher_copy import retired_automatic_message
 
 
 logger = logging.getLogger("control-castora.web")
@@ -1112,7 +1113,8 @@ class WebBridge:
         events = state["inboxes"].get(scope, [])
         reset = state["resets"].get(scope, 0) > after
         visible = [{key: value for key, value in event.items() if key not in {"timestamp", "requires_consultation"}}
-                   for event in events if reset or event.get("revision", event["id"]) > after]
+                   for event in events if (reset or event.get("revision", event["id"]) > after)
+                   and not (animal == "salchicher" and retired_automatic_message(event))]
         return web.json_response({"events": visible, "cursor": state["sequence"], "reset": reset})
 
     async def _mark_read(self, request):

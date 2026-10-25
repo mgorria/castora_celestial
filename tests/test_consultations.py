@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 from salchicher import CONSULTATION_GREETING, INACTIVITY_SECONDS, RETENTION_SECONDS, Salchicher
 from salchicher_service import CARE, EMERGENCY_TEXT
+from salchicher_copy import LEGACY_GREETING, LEGACY_INTRO, LEGACY_QUESTIONS
 
 
 def incoming(text, user_id=1):
@@ -36,6 +37,29 @@ class ConsultationTests(unittest.IsolatedAsyncioTestCase):
     async def finish(self):
         await asyncio.wait_for(asyncio.gather(*list(self.bot.tasks.values())), timeout=2)
 
+    async def test_retired_automatic_copy_is_only_projected_out_of_saved_or_temporary_history(self):
+        screening = "Gracias por contármelo, solete. " + LEGACY_QUESTIONS["duration"] + "\n\n" + LEGACY_QUESTIONS["context"]
+        messages = [{"role": "assistant", "content": text, "created_at": time.time()}
+                    for text in (LEGACY_GREETING, LEGACY_INTRO, screening)] + [
+            {"role": "user", "content": screening, "created_at": time.time()},
+            {"role": "assistant", "content": "Nota manual: " + screening, "created_at": time.time()},
+            {"role": "assistant", "content": "Te dejo una mantita.", "created_at": time.time()},
+        ]
+        for retained in (True, False):
+            with self.subTest(retained=retained):
+                self.bot.forget(1)
+                episode = self.bot.start_consultation(1, retain_history=retained)
+                state = self.data["salchicher"]
+                stored = (state["consultations"]["1"][episode["id"]] if retained
+                          else state["sessions"]["1"]["consultation"])
+                stored["messages"] = copy.deepcopy(messages)
+                before = copy.deepcopy(self.data)
+                projected = self.bot.get_consultation(1, episode["id"])
+                self.assertEqual(projected["messages"], messages[3:])
+                self.assertEqual(self.data, before)
+                projected["messages"][-1]["content"] = "Changed output only"
+                self.assertEqual(self.data, before)
+
     async def test_manual_delivery_stays_in_the_episode_that_was_open_when_sent(self):
         episode = self.bot.start_consultation(1, retain_history=True)
         self.bot.record_manual_delivery(1, "Te he dejado una mantita, patita.", episode["id"])
@@ -62,7 +86,7 @@ class ConsultationTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, "consultation_active"):
             self.bot.start_consultation(1, retain_history=True)
 
-    async def test_help_describes_actual_retention_without_offering_legacy_sharing(self):
+    async def test_help_stays_in_story_without_sharing_or_clinical_notices(self):
         for retained in (True, False):
             with self.subTest(retained=retained):
                 self.bot.forget(1)
@@ -72,14 +96,9 @@ class ConsultationTests(unittest.IsolatedAsyncioTestCase):
                 sent = update.effective_chat.send_message.call_args
                 text = sent.args[0]
                 self.assertNotIn("reply_markup", sent.kwargs)
-                self.assertIn("No envío copia al Oso", text)
-                if retained:
-                    self.assertIn("hasta que lo borres", text)
-                    self.assertIn("30 días", text)
-                    self.assertNotIn("48 horas", text)
-                else:
-                    self.assertIn("48 horas", text)
-                    self.assertNotIn("30 días", text)
+                self.assertIn("plumitas", text)
+                for forbidden in ("compart", "copia", "privad", "Sandra", "Miguel", "embarazo", "profesional", "112"):
+                    self.assertNotIn(forbidden, text)
 
     async def test_saved_episode_survives_restart_and_bounds_only_model_context(self):
         episode = self.bot.start_consultation(1, retain_history=True)
