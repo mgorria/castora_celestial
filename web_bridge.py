@@ -97,7 +97,7 @@ class WebBridge:
                  history_provider=None, get_admin_app: Callable | None = None,
                  admin_state_provider: Callable | None = None, admin_actor_id: Callable | None = None,
                  account_service=None, portal_origin: str | None = None, portal_root=None,
-                 get_consultorio: Callable | None = None):
+                 get_consultorio: Callable | None = None, admin_access=None):
         self.load, self.save = load, save
         self.get_apps, self.resolve_actor = get_apps, resolve_actor
         self.token = token if token is not None else os.getenv("CASTORI_WEB_TOKEN", "")
@@ -108,6 +108,7 @@ class WebBridge:
         self.admin_state_provider = admin_state_provider
         self.admin_actor_id = admin_actor_id
         self.account_service = account_service
+        self.admin_access = admin_access
         self.get_consultorio = get_consultorio or (lambda: None)
         self.portal = None
         if portal_origin:
@@ -501,7 +502,7 @@ class WebBridge:
             return existing
         if self.get_admin_app() is None:
             return _failure("centralita_unavailable", 503)
-        self._reserve(key, fingerprint)
+        self._reserve(key, fingerprint, admin=True)
         return self._schedule_admin(request["chat_id"], body, "admin_action", key)
 
     def _find_admin_callback(self, body):
@@ -530,7 +531,7 @@ class WebBridge:
             return _failure("callback_not_allowed", 403)
         if self.get_admin_app() is None:
             return _failure("centralita_unavailable", 503)
-        self._reserve(key, fingerprint)
+        self._reserve(key, fingerprint, admin=True)
         return self._schedule_admin(request["chat_id"], body, "admin_callback", key)
 
     def _schedule_admin(self, chat_id, body, kind, key):
@@ -625,6 +626,61 @@ class WebBridge:
         except AccountError as exc:
             return _failure(exc.code, exc.status)
 
+    async def _admin_access_status(self, request):
+        from admin_access import AdminAccessError
+        if self.admin_access is None:
+            raise AdminAccessError("admin_auth_unavailable", 503)
+        if len(request.headers.getall("X-Castori-Owner-Id", [])) != 1:
+            raise AdminAccessError("owner_identity_required", 403)
+        if len(request.headers.getall("X-Castori-Admin-Session", [])) > 1:
+            raise AdminAccessError("admin_locked", 423)
+        return await self.admin_access.status(request.headers.get("X-Castori-Owner-Id"),
+                                              request.headers.get("X-Castori-Admin-Session"))
+
+    async def _admin_guard(self, request):
+        from admin_access import AdminAccessError
+        if not self._admin_authorized(request):
+            return _failure("owner_required", 403)
+        try:
+            status = await self._admin_access_status(request)
+            if not status["unlocked"]:
+                return _failure("admin_locked", 423)
+        except AdminAccessError as exc:
+            return _failure(exc.code, exc.status)
+        return None
+
+    async def _admin_auth(self, request):
+        from admin_access import AdminAccessError
+        if not self._admin_authorized(request):
+            return _failure("owner_required", 403)
+        if request.query:
+            return _failure("invalid_admin_query")
+        try:
+            # Validate the trusted identity and storage even for mutations. A
+            # missing password never makes any other admin endpoint public.
+            result = await self._admin_access_status(request)
+            if request.method == "POST":
+                if request.content_type != "application/json":
+                    return _failure("json_required", 415)
+                try:
+                    body = await request.json()
+                except (ValueError, UnicodeError):
+                    return _failure("invalid_body")
+                if not isinstance(body, dict) or not isinstance(body.get("action"), str):
+                    return _failure("invalid_body")
+                action = body["action"]
+                if action not in {"setup", "unlock", "lock"} or set(body) != ({"action"} if action == "lock" else {"action", "password"}):
+                    return _failure("invalid_body")
+                owner = request.headers.get("X-Castori-Owner-Id")
+                if action == "lock":
+                    result = await self.admin_access.lock(owner, request.headers.get("X-Castori-Admin-Session"))
+                else:
+                    method = self.admin_access.setup if action == "setup" else self.admin_access.unlock
+                    result = await method(owner, body["password"])
+            return web.json_response(result, headers={"Cache-Control": "no-store"})
+        except AdminAccessError as exc:
+            return _failure(exc.code, exc.status)
+
     def create_app(self) -> web.Application:
         @web.middleware
         async def authentication(request, handler):
@@ -644,6 +700,13 @@ class WebBridge:
                 return _failure("actor_unavailable", 403)
             request["actor"], request["chat_id"] = actor
             try:
+                if request.path.startswith("/castori-web/admin-"):
+                    if not self._admin_authorized(request):
+                        return _failure("owner_required", 403)
+                    if request.path != "/castori-web/admin-auth":
+                        denied = await self._admin_guard(request)
+                        if denied is not None:
+                            return denied
                 response = await handler(request)
                 response.headers["Cache-Control"] = "no-store"
                 return response
@@ -667,6 +730,8 @@ class WebBridge:
         app.router.add_get("/castori-web/consultation", self._consultation)
         app.router.add_post("/castori-web/consultation-action", self._consultation_action)
         app.router.add_post("/castori-web/consultation-message", self._consultation_message)
+        app.router.add_get("/castori-web/admin-auth", self._admin_auth)
+        app.router.add_post("/castori-web/admin-auth", self._admin_auth)
         app.router.add_get("/castori-web/admin-state", self._admin_state)
         app.router.add_get("/castori-web/admin-events", self._admin_events)
         app.router.add_post("/castori-web/admin-action", self._admin_action)
@@ -975,6 +1040,10 @@ class WebBridge:
         receipt = state["requests"].get(f"{request['chat_id']}:{request_id}")
         if not receipt:
             return _failure("request_not_found", 404)
+        if receipt.get("admin"):
+            denied = await self._admin_guard(request)
+            if denied is not None:
+                return denied
         return web.json_response(self._receipt_result(request_id, receipt))
 
     @staticmethod
@@ -1011,9 +1080,11 @@ class WebBridge:
                 **self._receipt_result(body["request_id"], existing), "duplicate": True})
         return key, fingerprint, None
 
-    def _reserve(self, key: str, fingerprint: str) -> None:
+    def _reserve(self, key: str, fingerprint: str, *, admin=False) -> None:
         data, state = self._read()
         state["requests"][key] = {"fingerprint": fingerprint, "status": "pending", "at": time.time()}
+        if admin:
+            state["requests"][key]["admin"] = True
         # Keep recent idempotency receipts; they never contain user messages or symptoms.
         if len(state["requests"]) > MAX_REQUESTS:
             completed = [k for k, v in state["requests"].items() if v["status"] != "pending"]

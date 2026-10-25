@@ -20,7 +20,7 @@ from web_bridge import MAX_EVENTS, RETENTION_SECONDS, WebBridge
 
 
 TOKEN = "offline-owner-bridge-token-longer-than-32-characters"
-HEADERS = {"Authorization": f"Bearer {TOKEN}", "X-Castori-Actor": "owner"}
+HEADERS = {"Authorization": f"Bearer {TOKEN}", "X-Castori-Actor": "owner", "X-Castori-Owner-Id": "owner-test"}
 SANDRA_HEADERS = {**HEADERS, "X-Castori-Actor": "sandra"}
 
 
@@ -47,6 +47,8 @@ class AdminBridgeTests(unittest.IsolatedAsyncioTestCase):
         self.transports = []
         self.stack = ExitStack()
         self.provider = AsyncMock(return_value={"system": {"database": False}, "admin_identity_matches": True})
+        self.access = AsyncMock()
+        self.access.status.return_value = {"configured": True, "unlocked": True, "expires_at": "2099-01-01T00:00:00+00:00"}
 
         def save(data):
             self.data = copy.deepcopy(data)
@@ -59,7 +61,7 @@ class AdminBridgeTests(unittest.IsolatedAsyncioTestCase):
         self.bridge = WebBridge(lambda: copy.deepcopy(self.data), save, lambda: self.apps,
             lambda actor: {"owner": 22, "sandra": 11}.get(actor), token=TOKEN,
             get_admin_app=lambda: self.app, admin_state_provider=self.provider,
-            admin_actor_id=lambda: main.admin_chat_id())
+            admin_actor_id=lambda: main.admin_chat_id(), admin_access=self.access)
         for key, value in {"web_bridge": self.bridge, "animal_apps": self.apps,
                 "load_data": lambda: copy.deepcopy(self.data), "save_data": save,
                 "MI_CHAT_ID": "22", "TELEGRAM_ADMIN_ID": "22", "SANDRA_TELEGRAM_ID": "11",

@@ -12,7 +12,7 @@ from web_bridge import WebBridge
 
 TOKEN = "internal-token-only-never-sent-to-a-browser-12345"
 ORIGIN = "https://casa.example"
-OWNER = {"Authorization": "Bearer " + TOKEN, "X-Castori-Actor": "owner"}
+OWNER = {"Authorization": "Bearer " + TOKEN, "X-Castori-Actor": "owner", "X-Castori-Owner-Id": "owner-test"}
 SESSION = "session-for-test"
 
 
@@ -33,9 +33,12 @@ class PortalTests(unittest.IsolatedAsyncioTestCase):
         self.accounts.register.return_value = self.accounts.login.return_value = {
             "token": SESSION, "username": "patita", "expires_at": datetime.now(timezone.utc) + timedelta(days=7)}
         self.data = {}
+        self.access = AsyncMock()
+        self.access.status.return_value = {"configured": True, "unlocked": True, "expires_at": "2099-01-01T00:00:00+00:00"}
         self.bridge = WebBridge(lambda: copy.deepcopy(self.data), lambda data: setattr(self, "data", data),
                                 lambda: {}, lambda role: {"owner": 22, "sandra": 11}.get(role), token=TOKEN,
-                                account_service=self.accounts, portal_origin=ORIGIN, portal_root=self.root)
+                                account_service=self.accounts, portal_origin=ORIGIN, portal_root=self.root,
+                                admin_access=self.access)
         self.client = TestClient(TestServer(self.bridge.create_app()))
         await self.client.start_server()
 
@@ -63,7 +66,7 @@ class PortalTests(unittest.IsolatedAsyncioTestCase):
         response = await self.client.get("/api/bridge/state", headers=self.cookie(**OWNER))
         self.assertEqual(response.status, 200)
         self.assertEqual((await response.json())["actor"], "sandra")
-        for route in ("admin-state", "admin-events", "admin-invitation"):
+        for route in ("admin-state", "admin-events", "admin-invitation", "admin-auth"):
             response = await self.client.get("/api/bridge/" + route, headers=self.cookie(**OWNER))
             self.assertEqual(response.status, 404)
         response = await self.client.get("/castori-web/state", headers=self.cookie())

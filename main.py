@@ -2797,10 +2797,20 @@ async def main() -> None:
                 # A portal outage must not stop the established Telegram services.
                 logger.warning("Portal de cuentas no disponible: %s", type(exc).__name__)
                 accounts = None
+        from admin_access import AdminAccessService
+        admin_access = AdminAccessService(resolve_web_actor, passwords=accounts)
+        try:
+            await admin_access.initialize()
+        except Exception as exc:
+            # Keep the Centralita locked if password storage is unavailable;
+            # established Telegram services continue independently.
+            logger.warning("Acceso web de Centralita no disponible: %s", type(exc).__name__)
+            admin_access = None
         web_bridge = WebBridge(load_data, save_data, lambda: animal_apps, resolve_web_actor,
             history_provider=history_provider, get_admin_app=lambda: centralita_app,
             admin_state_provider=admin_provider, admin_actor_id=admin_chat_id,
-            account_service=accounts, portal_origin=portal_origin, get_consultorio=lambda: salchicher)
+            account_service=accounts, portal_origin=portal_origin, get_consultorio=lambda: salchicher,
+            admin_access=admin_access)
 
     if os.getenv("TOKEN_SALCHICHER"):
         salchicher = Salchicher(

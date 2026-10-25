@@ -42,6 +42,7 @@
   const newPage = () => ({ items: [], loaded: false, loading: false, error: '', nextCursor: null, hasMore: false, available: true, version: 0, controller: null });
   let storyShelf = newPage(), storyController = null, storyVersion = 0;
   const admin = { data: null, events: [], cursor: '0', loading: false, error: '', busy: false, note: '', requestId: null, check: false, preview: null };
+  const adminAuth = { checked: false, configured: false, unlocked: false, expiresAt: null, loading: false, error: '', version: 0, controller: null, timer: null, requirePassword: false, revocationPending: false };
   const adminRequests = new Map();
   let adminTab = 'overview', adminController, adminPollController, adminTimer, adminVersion = 0;
   let demoAdminEvents = [], demoAdminSequence = 0;
@@ -54,6 +55,7 @@
   const ready = id => mode === 'demo' ? id !== 'corte' : mode === 'live' && Boolean(config(id)?.available);
   const isOwner = () => serverState.actor === 'owner' || serverState.actor?.role === 'owner';
   const canOpenControl = () => !account.portal && (mode === 'demo' || mode === 'live' && isOwner());
+  const canUseControl = () => canOpenControl() && (mode === 'demo' || adminAuth.unlocked && Date.parse(adminAuth.expiresAt) > Date.now());
   const accountLocked = () => !account.checked || account.portal && !account.authenticated;
   function canCommand(id, command) {
     const list = config(id)?.commands;
@@ -312,10 +314,10 @@
       visits: [{ id: 'ejemplo-visita', status: 'draft', gifts: 'Un cuaderno y una tarde de merienda · ejemplo ficticio', delivery_at: '2026-12-24T08:00:00Z', events: [{ id: 'pista1', at: '2026-12-21T17:00:00Z', text: 'Hay una sorpresa de papel esperando su momento.', status: 'pending' }] }],
       wishes: [{ id: 'ejemplo-deseo', name: 'Un cuaderno color lavanda', details: 'Deseo ficticio de la vista de Miguel', favorite: true }], court: null, errors: [] };
   }
-  const controlData = () => mode === 'demo' ? demoControlData() : admin.data;
-  const controlEvents = () => mode === 'demo' ? demoAdminEvents : admin.events;
+  const controlData = () => mode === 'demo' ? demoControlData() : canUseControl() ? admin.data : null;
+  const controlEvents = () => mode === 'demo' ? demoAdminEvents : canUseControl() ? admin.events : [];
   function adminCommandAllowed(text) {
-    if (!canOpenControl()) return false;
+    if (!canUseControl()) return false;
     const command = String(text).trim().split(/\s/)[0].replace(/^\//, '').toLowerCase(), data = controlData();
     return Boolean(data?.available && Array.isArray(data.commands) && data.commands.includes(command) && !(command.startsWith('admin_') && (data.admin_identity_matches === false || data.editorial_admin?.available === false)));
   }
@@ -323,10 +325,98 @@
   const adminEmpty = text => `<p class="admin-empty">${esc(text)}</p>`;
   function adminDate(value) { if (!value) return 'Sin fecha disponible'; const date = new Date(value); return Number.isNaN(date.getTime()) ? 'Sin fecha disponible' : new Intl.DateTimeFormat('es-ES', { timeZone: controlData()?.timezone || 'Europe/Madrid', dateStyle: 'long', timeStyle: 'short' }).format(date); }
   const adminStatus = value => ({ pending: 'Pendiente', approved: 'Aprobado', rejected: 'Descartado', canon: 'Canon', draft: 'Borrador', active: 'Activa', cancelled: 'Cancelada', sent: 'Enviado', done: 'Completado', open: 'Abierto', review: 'Con revisión', auto: 'Automático' }[value] || value || 'Sin estado');
+  function renderAdminLock() {
+    const setup = adminAuth.checked && !adminAuth.configured;
+    const form = !adminAuth.checked ? `<div class="admin-lock-wait" role="status"><p>${adminAuth.loading ? 'Comprobando la cerradura de tu escritorio…' : 'Comprueba tu acceso para abrir el escritorio.'}</p>${adminAuth.loading ? '' : '<button class="button" data-admin-auth-refresh>Comprobar acceso</button>'}</div>` : `<form id="admin-auth-form" class="admin-lock-form"><label>${setup ? 'Elige tu contraseña' : 'Contraseña de la Centralita'}<input id="admin-auth-password" name="password" type="password" autocomplete="${setup ? 'new-password' : 'current-password'}" minlength="12" maxlength="128" required placeholder="${setup ? 'Al menos 12 caracteres' : 'Tu llave secreta'}" ${adminAuth.loading ? 'disabled' : ''}></label>${setup ? '<label>Repite la contraseña<input id="admin-auth-confirm" name="confirmation" type="password" autocomplete="new-password" minlength="12" maxlength="128" required placeholder="La misma llave, una vez más"></label><p class="admin-lock-hint">Puede ser una frase que recuerdes. Guárdala en tu gestor de contraseñas.</p>' : ''}<button class="button" type="submit" ${adminAuth.loading ? 'disabled' : ''}>${adminAuth.loading ? 'Comprobando tu llave…' : setup ? 'Guardar mi contraseña y entrar' : 'Abrir mi Centralita'} ${icon('arrow')}</button></form>`;
+    return `<section class="admin-lock" aria-labelledby="admin-lock-title"><div class="admin-lock-art" aria-hidden="true"><span class="admin-lock-orbit">✧</span><div class="admin-lock-seal">${icon('key')}</div><span class="admin-lock-signature">centralita celestial</span></div><div class="admin-lock-content"><span class="eyebrow">EL ESCRITORIO PRIVADO DE MIGUEL</span><h1 id="admin-lock-title">La llave de<br><em>tu Centralita.</em></h1><p class="admin-lock-intro">${setup ? 'Elige una contraseña para cuidar las historias, los mensajes y las sorpresas que preparas para Sandra.' : 'Un pequeño secreto para entrar donde se preparan las cosas bonitas.'}</p>${adminAuth.error ? `<p class="account-error" role="alert">${esc(adminAuth.error)}</p>` : ''}${adminAuth.revocationPending ? `<button class="button secondary admin-lock-retry" data-admin-lock ${adminAuth.loading ? 'disabled' : ''}>${adminAuth.loading ? 'Cerrando la sesión…' : 'Reintentar cierre'}</button>` : ''}${form}<p class="admin-lock-footnote">${icon('key')} Tu acceso de ChatGPT y esta contraseña protegen el escritorio. Se cierra automáticamente a los 30 minutos.</p></div></section>`;
+  }
+  function refreshAdminGate() {
+    if (view !== 'control' || !canOpenControl()) return;
+    main.innerHTML = control(); bindControl();
+  }
+  function clearAdminAuth() {
+    adminAuth.version++; adminAuth.controller?.abort(); clearTimeout(adminAuth.timer);
+    Object.assign(adminAuth, { checked: false, configured: false, unlocked: false, expiresAt: null, loading: false, error: '', controller: null, timer: null, requirePassword: false, revocationPending: false });
+  }
+  function closeAdminGate(message = '') {
+    adminAuth.version++; adminAuth.controller?.abort(); clearTimeout(adminAuth.timer);
+    Object.assign(adminAuth, { unlocked: false, expiresAt: null, loading: false, error: message, controller: null, timer: null, requirePassword: true });
+    clearAdminState(); refreshAdminGate();
+  }
+  function adminAccessError(error) {
+    if (error.status !== 423 && error.code !== 'admin_locked') return false;
+    closeAdminGate('Tu Centralita se ha cerrado. Introduce tu contraseña para continuar.'); return true;
+  }
+  function applyAdminAuth(data) {
+    if (typeof data?.configured !== 'boolean' || typeof data.unlocked !== 'boolean') throw new Error('No se pudo comprobar la llave de tu Centralita.');
+    const expires = Date.parse(data.expires_at);
+    if (data.unlocked && (!data.configured || !Number.isFinite(expires) || expires <= Date.now())) throw new Error('La sesión de tu Centralita ha caducado. Vuelve a introducir tu contraseña.');
+    const unlocked = data.unlocked && !adminAuth.requirePassword;
+    Object.assign(adminAuth, { checked: true, configured: data.configured, unlocked, expiresAt: unlocked ? data.expires_at : null });
+    clearTimeout(adminAuth.timer);
+    if (unlocked) {
+      const version = adminAuth.version;
+      adminAuth.timer = setTimeout(() => { if (version === adminAuth.version) closeAdminGate('Han pasado 30 minutos. Tu escritorio vuelve a estar cerrado.'); }, Math.min(expires - Date.now(), 2147483647));
+    } else clearAdminState();
+  }
+  function openAdminDesk() {
+    refreshAdminGate();
+    if (view === 'control' && canUseControl() && mode === 'live') { loadAdminState(); startAdminPolling(); }
+  }
+  async function loadAdminAuth() {
+    if (!canOpenControl() || mode !== 'live' || adminAuth.loading) return;
+    const epoch = liveEpoch, version = ++adminAuth.version; adminAuth.loading = true; adminAuth.error = ''; adminAuth.controller = new AbortController(); refreshAdminGate();
+    try {
+      const data = await bridge.adminAuth(adminAuth.controller.signal);
+      if (epoch !== liveEpoch || version !== adminAuth.version || !canOpenControl() || mode !== 'live') return;
+      applyAdminAuth(data);
+    } catch (error) {
+      if (epoch !== liveEpoch || version !== adminAuth.version || error.cancelled) return;
+      adminAuth.unlocked = false; adminAuth.expiresAt = null; clearAdminState(); adminAuth.error = error.message || 'No se pudo comprobar el acceso.';
+    } finally { if (epoch === liveEpoch && version === adminAuth.version) { adminAuth.loading = false; adminAuth.controller = null; openAdminDesk(); } }
+  }
+  async function submitAdminAuth() {
+    if (!canOpenControl() || mode !== 'live' || adminAuth.loading || !adminAuth.checked || canUseControl()) return;
+    const input = document.getElementById('admin-auth-password'), confirmation = document.getElementById('admin-auth-confirm');
+    const password = input?.value || '', setup = !adminAuth.configured;
+    if (password.length < 12 || password.length > 128) { adminAuth.error = 'Elige una contraseña de entre 12 y 128 caracteres.'; refreshAdminGate(); return; }
+    if (setup && password !== confirmation?.value) { adminAuth.error = 'Las dos contraseñas deben ser iguales.'; refreshAdminGate(); return; }
+    if (input) input.value = ''; if (confirmation) confirmation.value = '';
+    const epoch = liveEpoch, version = ++adminAuth.version; adminAuth.loading = true; adminAuth.error = ''; adminAuth.controller = new AbortController(); refreshAdminGate();
+    try {
+      const data = await bridge.adminAuthAction({ action: setup ? 'setup' : 'unlock', password }, adminAuth.controller.signal);
+      if (epoch !== liveEpoch || version !== adminAuth.version || !canOpenControl() || mode !== 'live') return;
+      adminAuth.requirePassword = false; adminAuth.revocationPending = false; applyAdminAuth(data);
+      if (!adminAuth.unlocked) throw new Error('No se pudo abrir la Centralita. Vuelve a comprobar tu llave.');
+    } catch (error) {
+      if (epoch !== liveEpoch || version !== adminAuth.version || error.cancelled) return;
+      adminAuth.unlocked = false; adminAuth.expiresAt = null; clearAdminState();
+      if (error.code === 'admin_already_configured') { adminAuth.checked = true; adminAuth.configured = true; }
+      if (error.code === 'admin_setup_required') { adminAuth.checked = true; adminAuth.configured = false; }
+      adminAuth.error = error.code === 'invalid_admin_password' ? 'La contraseña no coincide. Prueba de nuevo.' : error.uncertain ? 'No pudimos confirmar la apertura. Comprueba el acceso antes de volver a intentarlo.' : error.message;
+      if (error.uncertain) adminAuth.checked = false;
+    } finally { if (epoch === liveEpoch && version === adminAuth.version) { adminAuth.loading = false; adminAuth.controller = null; openAdminDesk(); } }
+  }
+  async function lockAdmin() {
+    if (!canOpenControl() || mode !== 'live') return;
+    closeAdminGate(); const epoch = liveEpoch, version = adminAuth.version;
+    adminAuth.loading = true; adminAuth.revocationPending = true; refreshAdminGate();
+    try {
+      const data = await bridge.adminAuthAction({ action: 'lock' });
+      if (epoch !== liveEpoch || version !== adminAuth.version) return;
+      if (data?.unlocked !== false) throw new Error('No se pudo confirmar el cierre.');
+      adminAuth.revocationPending = false;
+      if (typeof data.configured === 'boolean') { adminAuth.checked = true; adminAuth.configured = data.configured; }
+    } catch (_) {
+      if (epoch !== liveEpoch || version !== adminAuth.version) return;
+      adminAuth.error = 'El escritorio está oculto, pero no pudimos confirmar el cierre en el servidor. Vuelve a intentar cerrarlo antes de dejar este dispositivo.';
+    } finally { if (epoch === liveEpoch && version === adminAuth.version) { adminAuth.loading = false; refreshAdminGate(); } }
+  }
   function control() {
     if (!canOpenControl()) return title('Un rincón privado', 'La Centralita es el escritorio de Miguel.', mode === 'checking' ? 'Estamos comprobando tu acceso.' : 'Este panel no está disponible para tu cuenta.') + `<div class="empty-state">${icon('star')}<p>Las conversaciones de Patita siguen en su propio rincón.</p><button class="button" data-view="home">Volver a mi rincón</button></div>`;
+    if (!canUseControl()) return renderAdminLock();
     const tabs = [['overview', 'Un vistazo'], ['send', 'Mensajes y horarios'], ['stories', 'Cuentos y borradores'], ['vaca', 'La Vaca Mágica'], ['court', 'Corte y memoria'], ['access', 'La llave de Sandra']];
-    return `<section class="control-hero"><div><div class="eyebrow">${icon('star')}${mode === 'demo' ? 'VISTA DE MIGUEL · DATOS FICTICIOS' : 'EL ESCRITORIO PRIVADO DE MIGUEL'}</div><h1>Detrás de cada poquito<br>de magia, <em>estás tú.</em></h1><p>Cuida las historias, prepara las sorpresas y acompaña a cada animal desde un solo lugar.</p></div><div class="control-seal" aria-hidden="true"><span>✦</span><small>centralita<br>celestial</small></div></section><div class="control-topline"><span>${mode === 'demo' ? 'Demostración local · Ninguna acción se envía a Telegram ni a Sandra.' : 'Los mismos servicios de Telegram · Solo tú puedes abrir este escritorio.'}</span><button class="text-button" data-admin-refresh>Actualizar estado ${icon('arrow')}</button></div><div id="admin-summary">${renderAdminSummary()}</div><nav class="control-tabs" aria-label="Secciones de la Centralita">${tabs.map(([id, label]) => `<button data-admin-tab="${id}" class="${adminTab === id ? 'active' : ''}" aria-pressed="${adminTab === id}">${label}</button>`).join('')}</nav><div id="admin-panel">${renderAdminPanel()}</div><section class="admin-console" aria-label="Consola completa de la Centralita"><div class="section-heading"><div><span class="eyebrow">EL CUADERNO DE MANDO</span><h2>La Centralita, con todas sus palabras.</h2><p>Las respuestas y sus botones aparecen aquí. También puedes usar cualquier comando disponible.</p></div>${adminButton('Ayuda de Telegram', '/start')}</div><div id="admin-feed" class="admin-feed" role="log" aria-live="polite">${renderAdminEvents()}</div><div id="admin-delivery" class="admin-delivery" role="status">${renderAdminDelivery()}</div><form id="admin-console-form" class="admin-console-form"><label class="sr-only" for="admin-command-input">Comando de la Centralita</label><input id="admin-command-input" name="command" placeholder="/status, /historial mimosuga 10…" maxlength="4000" autocomplete="off" required><button class="button" type="submit" ${mode === 'live' && admin.busy ? 'disabled' : ''}>Ejecutar ${icon('arrow')}</button></form><details class="admin-command-help"><summary>Ver todos los comandos disponibles</summary><div id="admin-command-list">${renderAdminHelp()}</div></details></section>`;
+    return `<section class="control-hero"><div><div class="eyebrow">${icon('star')}${mode === 'demo' ? 'VISTA DE MIGUEL · DATOS FICTICIOS' : 'EL ESCRITORIO PRIVADO DE MIGUEL'}</div><h1>Detrás de cada poquito<br>de magia, <em>estás tú.</em></h1><p>Cuida las historias, prepara las sorpresas y acompaña a cada animal desde un solo lugar.</p></div><div class="control-seal" aria-hidden="true"><span>✦</span><small>centralita<br>celestial</small></div></section><div class="control-topline"><span>${mode === 'demo' ? 'Demostración local · Ninguna acción se envía a Telegram ni a Sandra.' : 'Los mismos servicios de Telegram · Solo tú puedes abrir este escritorio.'}</span><div class="control-topline-actions"><button class="text-button" data-admin-refresh>Actualizar estado ${icon('arrow')}</button>${mode === 'live' ? '<button class="button secondary admin-lock-button" data-admin-lock>Cerrar Centralita</button>' : ''}</div></div><div id="admin-summary">${renderAdminSummary()}</div><nav class="control-tabs" aria-label="Secciones de la Centralita">${tabs.map(([id, label]) => `<button data-admin-tab="${id}" class="${adminTab === id ? 'active' : ''}" aria-pressed="${adminTab === id}">${label}</button>`).join('')}</nav><div id="admin-panel">${renderAdminPanel()}</div><section class="admin-console" aria-label="Consola completa de la Centralita"><div class="section-heading"><div><span class="eyebrow">EL CUADERNO DE MANDO</span><h2>La Centralita, con todas sus palabras.</h2><p>Las respuestas y sus botones aparecen aquí. También puedes usar cualquier comando disponible.</p></div>${adminButton('Ayuda de Telegram', '/start')}</div><div id="admin-feed" class="admin-feed" role="log" aria-live="polite">${renderAdminEvents()}</div><div id="admin-delivery" class="admin-delivery" role="status">${renderAdminDelivery()}</div><form id="admin-console-form" class="admin-console-form"><label class="sr-only" for="admin-command-input">Comando de la Centralita</label><input id="admin-command-input" name="command" placeholder="/status, /historial mimosuga 10…" maxlength="4000" autocomplete="off" required><button class="button" type="submit" ${mode === 'live' && admin.busy ? 'disabled' : ''}>Ejecutar ${icon('arrow')}</button></form><details class="admin-command-help"><summary>Ver todos los comandos disponibles</summary><div id="admin-command-list">${renderAdminHelp()}</div></details></section>`;
   }
   function renderAdminSummary() {
     const data = controlData();
@@ -352,7 +442,7 @@
   function renderAdminHelp() { const data = controlData(); return (data?.commands || []).map(command => { const [args, description] = adminHelp[command] || ['', 'Comando disponible en tu Centralita']; return `<button data-admin-compose="/${esc(command)}${args ? ' ' : ''}" ${adminCommandAllowed('/' + command) ? '' : 'disabled'}><code>/${esc(command)}${args ? ' ' + esc(args) : ''}</code><span>${esc(description)}</span></button>`; }).join(''); }
   function renderAdminEvents() {
     const events = controlEvents(); if (!events.length) return '<div class="admin-feed-empty">✧<p>Aquí aparecerán las respuestas de tu Centralita y sus botones.</p></div>';
-    return events.map(event => `<article class="admin-event ${event.role === 'user' ? 'user' : ''}"><div class="admin-event-meta">${event.role === 'user' ? 'Miguel' : 'Centralita Celestial'}${event.time ? ' · ' + esc(formatTime(event.time)) : ''}${mode === 'demo' ? ' · Demostración' : ''}</div><div class="admin-event-text">${esc(event.text)}</div>${Array.isArray(event.buttons) ? `<div class="message-buttons">${event.buttons.filter(Array.isArray).map(row => `<div>${row.filter(button => typeof button?.text === 'string' && typeof button.data === 'string').map(button => `<button class="message-choice" data-admin-event="${esc(event.id)}" data-admin-callback="${esc(button.data)}" ${mode === 'live' && admin.busy || !canOpenControl() || mode === 'live' && /^(adminstory|adminteststory):/.test(button.data) && (admin.data?.admin_identity_matches === false || admin.data?.editorial_admin?.available === false) ? 'disabled' : ''}>${esc(button.text)}</button>`).join('')}</div>`).join('')}</div>` : ''}</article>`).join('');
+    return events.map(event => `<article class="admin-event ${event.role === 'user' ? 'user' : ''}"><div class="admin-event-meta">${event.role === 'user' ? 'Miguel' : 'Centralita Celestial'}${event.time ? ' · ' + esc(formatTime(event.time)) : ''}${mode === 'demo' ? ' · Demostración' : ''}</div><div class="admin-event-text">${esc(event.text)}</div>${Array.isArray(event.buttons) ? `<div class="message-buttons">${event.buttons.filter(Array.isArray).map(row => `<div>${row.filter(button => typeof button?.text === 'string' && typeof button.data === 'string').map(button => `<button class="message-choice" data-admin-event="${esc(event.id)}" data-admin-callback="${esc(button.data)}" ${mode === 'live' && admin.busy || !canUseControl() || mode === 'live' && /^(adminstory|adminteststory):/.test(button.data) && (admin.data?.admin_identity_matches === false || admin.data?.editorial_admin?.available === false) ? 'disabled' : ''}>${esc(button.text)}</button>`).join('')}</div>`).join('')}</div>` : ''}</article>`).join('');
   }
   function renderAdminDelivery() {
     if (mode === 'demo') return 'Vista de prueba · Ninguna acción sale de este navegador.';
@@ -374,26 +464,26 @@
     document.querySelectorAll('[data-admin-form]').forEach(form => { for (const [name, value] of Object.entries(drafts[form.dataset.adminForm] || {})) { const field = form.elements.namedItem(name); if (field) field.value = value; } });
   }
   function refreshControl() {
-    if (view !== 'control' || !canOpenControl()) return;
+    if (view !== 'control' || !canUseControl()) return;
     rememberAdminForms(); const focused = document.activeElement, focusForm = focused?.closest?.('[data-admin-form]')?.dataset.adminForm, focusName = focused?.name, selection = focused?.selectionStart;
     document.getElementById('admin-summary').innerHTML = renderAdminSummary(); document.getElementById('admin-panel').innerHTML = renderAdminPanel() + adminTruncation(); document.getElementById('admin-command-list').innerHTML = renderAdminHelp(); restoreAdminForms(); bindAdminForms(); refreshAdminFeed();
     if (focusForm && focusName) { const field = document.querySelector(`[data-admin-form="${focusForm}"]`)?.elements?.namedItem(focusName); if (field) { field.focus({ preventScroll: true }); if (typeof selection === 'number' && field.type !== 'date' && field.type !== 'time') { try { field.setSelectionRange(selection, selection); } catch (_) {} } } }
   }
   function refreshAdminFeed() {
-    if (view !== 'control' || !canOpenControl()) return;
+    if (view !== 'control' || !canUseControl()) return;
     const feed = document.getElementById('admin-feed'), bottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 100, position = feed.scrollTop;
     feed.innerHTML = renderAdminEvents(); feed.scrollTop = bottom ? feed.scrollHeight : position;
     document.getElementById('admin-delivery').innerHTML = renderAdminDelivery();
     document.querySelectorAll('[data-admin-command], [data-admin-form] button[type="submit"], #admin-console-form button').forEach(button => { button.disabled = mode === 'live' && admin.busy || Boolean(button.dataset.adminCommand && !adminCommandAllowed(button.dataset.adminCommand)); });
   }
-  function selectAdminTab(tab) { if (!canOpenControl() || !['overview', 'send', 'stories', 'vaca', 'court', 'access'].includes(tab)) return; if (tab !== 'access') clearInvitationSecret(); adminTab = tab; document.querySelectorAll('[data-admin-tab]').forEach(button => { const selected = button.dataset.adminTab === tab; button.classList.toggle('active', selected); button.setAttribute('aria-pressed', String(selected)); }); refreshControl(); if (tab === 'access') loadInvitation(); }
+  function selectAdminTab(tab) { if (!canUseControl() || !['overview', 'send', 'stories', 'vaca', 'court', 'access'].includes(tab)) return; if (tab !== 'access') clearInvitationSecret(); adminTab = tab; document.querySelectorAll('[data-admin-tab]').forEach(button => { const selected = button.dataset.adminTab === tab; button.classList.toggle('active', selected); button.setAttribute('aria-pressed', String(selected)); }); refreshControl(); if (tab === 'access') loadInvitation(); }
   function stopAdminReads() { adminVersion++; clearTimeout(adminTimer); adminController?.abort(); adminPollController?.abort(); adminController = null; adminPollController = null; admin.loading = false; }
   function clearAdminState() { stopAdminReads(); clearInvitationSecret(); invitation.data = null; invitation.error = ''; invitation.uncertain = false; adminRequests.clear(); adminFormDrafts.live = {}; Object.assign(admin, { data: null, events: [], cursor: '0', loading: false, error: '', busy: false, note: '', requestId: null, check: false, preview: null }); }
   async function loadAdminState() {
-    if (mode !== 'live' || !isOwner() || admin.loading) return;
+    if (mode !== 'live' || !canUseControl() || admin.loading) return;
     const epoch = liveEpoch, version = adminVersion; admin.loading = true; admin.error = ''; adminController = new AbortController();
-    try { const data = await bridge.adminState(adminController.signal); if (epoch !== liveEpoch || version !== adminVersion || mode !== 'live' || !isOwner()) return; if (!data || data.actor !== 'owner') throw new Error('Esta sesión no tiene acceso a la Centralita.'); admin.data = data; }
-    catch (error) { if (epoch !== liveEpoch || version !== adminVersion || error.cancelled) return; admin.error = error.message; if (error.status === 401 || error.status === 403) { clearLiveState(); mode = 'offline'; connectionError = error.message; connectionStatus = error.status; navigate('control', null, false); return; } }
+    try { const data = await bridge.adminState(adminController.signal); if (epoch !== liveEpoch || version !== adminVersion || mode !== 'live' || !canUseControl()) return; if (!data || data.actor !== 'owner') throw new Error('Esta sesión no tiene acceso a la Centralita.'); admin.data = data; }
+    catch (error) { if (epoch !== liveEpoch || version !== adminVersion || error.cancelled) return; if (adminAccessError(error)) return; admin.error = error.message; if (error.status === 401 || error.status === 403) { clearLiveState(); mode = 'offline'; connectionError = error.message; connectionStatus = error.status; navigate('control', null, false); return; } }
     finally { if (epoch === liveEpoch && version === adminVersion) { admin.loading = false; adminController = null; refreshControl(); } }
   }
   function mergeAdminEvents(payload) {
@@ -406,14 +496,14 @@
     refreshAdminFeed();
   }
   function startAdminPolling() {
-    if (mode !== 'live' || !isOwner()) return;
+    if (mode !== 'live' || !canUseControl()) return;
     const version = adminVersion, epoch = liveEpoch;
     const run = async () => {
-      if (version !== adminVersion || epoch !== liveEpoch || mode !== 'live' || !isOwner()) return;
+      if (version !== adminVersion || epoch !== liveEpoch || mode !== 'live' || !canUseControl()) return;
       adminPollController = new AbortController();
-      try { const payload = await bridge.adminEvents(admin.cursor, adminPollController.signal); if (version !== adminVersion || epoch !== liveEpoch || mode !== 'live' || !isOwner()) return; mergeAdminEvents(payload); }
-      catch (error) { if (version !== adminVersion || epoch !== liveEpoch || error.cancelled) return; if (error.status === 401 || error.status === 403) { clearLiveState(); mode = 'offline'; connectionError = error.message; connectionStatus = error.status; navigate('control', null, false); return; } admin.note = 'No se están recibiendo respuestas de la Centralita. Volveremos a comprobar la conexión.'; refreshAdminFeed(); }
-      finally { if (version === adminVersion && epoch === liveEpoch && mode === 'live' && isOwner()) adminTimer = setTimeout(run, 3000); }
+      try { const payload = await bridge.adminEvents(admin.cursor, adminPollController.signal); if (version !== adminVersion || epoch !== liveEpoch || mode !== 'live' || !canUseControl()) return; mergeAdminEvents(payload); }
+      catch (error) { if (version !== adminVersion || epoch !== liveEpoch || error.cancelled) return; if (adminAccessError(error)) return; if (error.status === 401 || error.status === 403) { clearLiveState(); mode = 'offline'; connectionError = error.message; connectionStatus = error.status; navigate('control', null, false); return; } admin.note = 'No se están recibiendo respuestas de la Centralita. Volveremos a comprobar la conexión.'; refreshAdminFeed(); }
+      finally { if (version === adminVersion && epoch === liveEpoch && mode === 'live' && canUseControl()) adminTimer = setTimeout(run, 3000); }
     }; run();
   }
   const toCommandDate = value => /^\d{4}-\d{2}-\d{2}$/.test(value || '') ? value.split('-').reverse().join('/') : String(value || '').trim();
@@ -435,7 +525,7 @@
       if (form.dataset.adminForm === 'send') { const updatePreview = () => { const values = Object.fromEntries(new FormData(form)); form.querySelector('[data-send-preview]').textContent = `Para Sandra · ${characters[values.animal]?.name || values.animal}\n\n${values.text || 'Aquí verás el mensaje antes de enviarlo.'}`; }; form.addEventListener('input', updatePreview); updatePreview(); }
     });
   }
-  function bindControl() { bindAdminForms(); if (adminTab === 'access') loadInvitation(); document.getElementById('admin-console-form').addEventListener('submit', async event => { event.preventDefault(); const input = document.getElementById('admin-command-input'), text = input.value.trim(); if (await submitAdmin(text)) input.value = ''; }); }
+  function bindControl() { if (!canUseControl()) { document.getElementById('admin-auth-form')?.addEventListener('submit', event => { event.preventDefault(); submitAdminAuth(); }); return; } bindAdminForms(); if (adminTab === 'access') loadInvitation(); document.getElementById('admin-console-form').addEventListener('submit', async event => { event.preventDefault(); const input = document.getElementById('admin-command-input'), text = input.value.trim(); if (await submitAdmin(text)) input.value = ''; }); }
   function clearInvitationSecret() { invitation.version++; invitation.controller?.abort(); invitation.controller = null; invitation.loading = false; invitation.secret = null; }
   function invitationData() { return mode === 'demo' ? { has_account: false, active: false, expires_at: null, reset: false, portal_url: 'https://ejemplo.invalid/castori/' } : invitation.data; }
   function renderInvitation() {
@@ -443,30 +533,30 @@
     const disabled = invitation.loading ? 'disabled' : '';
     return `<section class="invitation-card"><div class="invitation-emblem" aria-hidden="true">${icon('key')}</div><div class="eyebrow">UNA PUERTA SOLO PARA ELLA</div><h2>La llave de Sandra.</h2><p class="invitation-intro">Prepara una invitación para que pueda elegir su usuario y su contraseña. Sin correo, con todos sus amigos al otro lado.</p>${mode === 'demo' ? '<p class="admin-notice">Vista de prueba · Las llaves de ejemplo no abren ninguna cuenta real.</p>' : ''}${invitation.error ? `<p class="account-error" role="alert">${esc(invitation.error)}</p>` : ''}${!data ? `<p class="admin-card-note" role="status">${invitation.loading ? 'Comprobando su llave…' : 'Consulta el estado de su acceso.'}</p><button class="button secondary" data-invitation-refresh ${disabled}>Comprobar acceso</button>` : `<div class="invitation-status"><span class="online-dot ${data.has_account ? '' : 'offline'}"></span><div><strong>${data.has_account ? 'Sandra ya tiene su cuenta' : 'Su rincón espera su primera llave'}</strong><p>${data.active ? `${data.reset ? 'Invitación para renovar su contraseña' : 'Invitación pendiente de activar'}${data.expires_at ? ' · hasta ' + esc(adminDate(data.expires_at)) : ''}` : data.has_account ? 'Puede entrar con el usuario y la contraseña que eligió.' : 'Crea una invitación y comparte el enlace con ella.'}</p></div></div>${secret ? `<div class="invitation-secret"><span class="eyebrow">${mode === 'demo' ? 'LLAVE FICTICIA DEL BOCETO' : 'GUARDA ESTA LLAVE AHORA'}</span><h3>Una invitación hecha para ella.</h3><p>El código se muestra ahora y no vuelve a aparecer al salir de este apartado. No se ha enviado automáticamente.</p><label>Enlace de invitación<input id="invitation-link" value="${esc(secret.invite_url || '')}" readonly></label><div class="invitation-copy"><button class="button secondary" data-invitation-copy="link">Copiar enlace ${icon('key')}</button></div><label>Código<input id="invitation-code" value="${esc(secret.code || '')}" readonly></label><button class="text-button" data-invitation-copy="code">Copiar código</button>${secret.expires_at ? `<small>Válida hasta ${esc(adminDate(secret.expires_at))}</small>` : ''}<button class="text-button invitation-dismiss" data-invitation-dismiss>Ya lo he guardado · Ocultar la llave</button></div>` : ''}<div class="invitation-actions">${!data.has_account ? `<button class="button" data-invitation-action="create" ${disabled}>${data.active ? 'Crear una nueva invitación' : 'Preparar su invitación'} ${icon('key')}</button>` : `<button class="button secondary" data-invitation-action="reset" ${disabled}>Preparar llave de recuperación</button>`}${data.active ? `<button class="text-button" data-invitation-action="revoke" ${disabled}>Revocar invitación pendiente</button>` : ''}<button class="text-button" data-invitation-refresh ${disabled}>Actualizar estado</button></div>${data.has_account ? '<p class="invitation-note">La llave de recuperación permite elegir una contraseña nueva con el mismo usuario. Al completar el cambio se cerrarán sus sesiones anteriores.</p>' : data.active ? '<p class="invitation-note">Crear otra invitación invalida la anterior.</p>' : ''}${data.portal_url ? `<div class="invitation-address"><span>Su puerta de entrada</span><p>${esc(data.portal_url)}</p></div>` : ''}`}</section>`;
   }
-  function refreshInvitation() { if (view === 'control' && adminTab === 'access' && canOpenControl()) document.getElementById('admin-panel').innerHTML = renderInvitation(); }
+  function refreshInvitation() { if (view === 'control' && adminTab === 'access' && canUseControl()) document.getElementById('admin-panel').innerHTML = renderInvitation(); }
   async function loadInvitation() {
-    if (!canOpenControl() || invitation.loading) return;
+    if (!canUseControl() || invitation.loading) return;
     if (mode === 'demo') { refreshInvitation(); return; }
     const epoch = liveEpoch, version = ++invitation.version; invitation.loading = true; invitation.error = ''; invitation.controller = new AbortController(); refreshInvitation();
-    try { const data = await bridge.invitation(invitation.controller.signal); if (epoch !== liveEpoch || version !== invitation.version || !canOpenControl() || mode !== 'live') return; if (typeof data?.has_account !== 'boolean' || typeof data.active !== 'boolean') throw new Error('No se pudo comprobar la invitación.'); invitation.data = data; invitation.uncertain = false; }
-    catch (error) { if (epoch !== liveEpoch || version !== invitation.version || error.cancelled) return; if (archiveAccessError(error)) return; invitation.error = error.message; }
+    try { const data = await bridge.invitation(invitation.controller.signal); if (epoch !== liveEpoch || version !== invitation.version || !canUseControl() || mode !== 'live') return; if (typeof data?.has_account !== 'boolean' || typeof data.active !== 'boolean') throw new Error('No se pudo comprobar la invitación.'); invitation.data = data; invitation.uncertain = false; }
+    catch (error) { if (epoch !== liveEpoch || version !== invitation.version || error.cancelled) return; if (adminAccessError(error) || archiveAccessError(error)) return; invitation.error = error.message; }
     finally { if (epoch === liveEpoch && version === invitation.version) { invitation.loading = false; invitation.controller = null; refreshInvitation(); } }
   }
   async function changeInvitation(action) {
-    if (!canOpenControl() || invitation.loading || invitation.uncertain || !['create', 'reset', 'revoke'].includes(action)) return;
+    if (!canUseControl() || invitation.loading || invitation.uncertain || !['create', 'reset', 'revoke'].includes(action)) return;
     const data = invitationData(); if (!data || action === 'create' && data.has_account || action === 'reset' && !data.has_account) return;
     if (mode === 'demo') { invitation.secret = action === 'revoke' ? null : { code: 'EJEMPLO-LLAVE-CELESTIAL', invite_url: 'https://ejemplo.invalid/castori/#invite/EJEMPLO-LLAVE-CELESTIAL', expires_at: '2026-12-31T22:59:00Z' }; refreshInvitation(); return; }
     const epoch = liveEpoch, version = ++invitation.version; invitation.secret = null; invitation.loading = true; invitation.error = ''; refreshInvitation();
     try {
-      const result = await bridge.invitationAction(action); if (epoch !== liveEpoch || version !== invitation.version || mode !== 'live' || !isOwner()) return;
+      const result = await bridge.invitationAction(action); if (epoch !== liveEpoch || version !== invitation.version || mode !== 'live' || !canUseControl()) return;
       if (action !== 'revoke') { if (typeof result?.code !== 'string' || typeof result.invite_url !== 'string') throw new Error('No se pudo recuperar la nueva llave. Comprueba el estado antes de crear otra.'); invitation.secret = { code: result.code, invite_url: result.invite_url, expires_at: result.expires_at, reset: result.reset }; invitation.data = { ...data, active: true, expires_at: result.expires_at, reset: result.reset }; }
       else { invitation.data = typeof result?.has_account === 'boolean' ? result : { ...data, active: false, expires_at: null }; }
       invitation.uncertain = false;
-    } catch (error) { if (epoch !== liveEpoch || version !== invitation.version) return; if (archiveAccessError(error)) return; invitation.uncertain = Boolean(error.uncertain); invitation.error = error.uncertain ? 'No pudimos confirmar el cambio. Actualiza el estado antes de crear otra invitación; no repetiremos la acción automáticamente.' : error.message; }
+    } catch (error) { if (epoch !== liveEpoch || version !== invitation.version) return; if (adminAccessError(error) || archiveAccessError(error)) return; invitation.uncertain = Boolean(error.uncertain); invitation.error = error.uncertain ? 'No pudimos confirmar el cambio. Actualiza el estado antes de crear otra invitación; no repetiremos la acción automáticamente.' : error.message; }
     finally { if (epoch === liveEpoch && version === invitation.version) { invitation.loading = false; refreshInvitation(); } }
   }
   async function copyInvitation(kind) {
-    if (!canOpenControl() || !invitation.secret) return;
+    if (!canUseControl() || !invitation.secret) return;
     const field = document.getElementById(kind === 'code' ? 'invitation-code' : 'invitation-link');
     try { if (!window.navigator?.clipboard?.writeText) throw new Error(); await window.navigator.clipboard.writeText(field.value); toast(kind === 'code' ? 'Código copiado.' : 'Enlace copiado.'); }
     catch (_) { field.focus(); field.select(); toast('Seleccionado para que puedas copiarlo.'); }
@@ -478,18 +568,18 @@
     if (callback) { const original = demoAdminEvents.find(event => event.id === callback.eventId); if (original) original.buttons = []; } refreshAdminFeed();
   }
   async function submitAdmin(text, callback, confirmed = false) {
-    text = String(text || '').trim(); if (!canOpenControl() || !callback && (!text || !adminCommandAllowed(text))) { toast('Este comando no está disponible para esta sesión.'); return false; }
+    text = String(text || '').trim(); if (!canUseControl() || !callback && (!text || !adminCommandAllowed(text))) { toast('Este comando no está disponible para esta sesión.'); return false; }
     if (mode === 'demo') { demoAdminAction(text, callback); return true; }
     if (admin.busy) return false;
     if (!callback && !confirmed && /^\/(castori|mimosuga|salchicher|vaca|corte|vaca_activar)\s/.test(text)) { admin.preview = text; refreshAdminFeed(); document.getElementById('admin-delivery').scrollIntoView({ behavior: 'smooth', block: 'nearest' }); return false; }
     if (callback) { if (/^(adminstory|adminteststory):/.test(callback.data) && (admin.data?.admin_identity_matches === false || admin.data?.editorial_admin?.available === false)) return false; const event = admin.events.find(item => Number(item.id) === Number(callback.eventId)); if (!event?.buttons?.some(row => Array.isArray(row) && row.some(button => button.data === callback.data))) return false; }
-    const requestId = uid(), record = { id: requestId, epoch: liveEpoch }; adminRequests.set(requestId, record);
+    const requestId = uid(), record = { id: requestId, epoch: liveEpoch, authVersion: adminAuth.version }; adminRequests.set(requestId, record);
     Object.assign(admin, { busy: true, note: 'Enviando a tu Centralita…', requestId, check: false, preview: null }); refreshAdminFeed();
     try {
       const result = callback ? await bridge.adminCallback({ event_id: callback.eventId, data: callback.data, request_id: requestId }) : await bridge.adminAction({ text, request_id: requestId });
-      if (record.epoch !== liveEpoch || mode !== 'live' || !isOwner()) return false;
+      if (record.epoch !== liveEpoch || record.authVersion !== adminAuth.version || mode !== 'live' || !canUseControl()) return false;
       applyAdminReceipt(record, result.status); if (result.status === 'pending') setTimeout(() => checkAdminReceipt(requestId), 700); return true;
-    } catch (error) { if (record.epoch !== liveEpoch || mode !== 'live' || !isOwner()) return false; if (error.status === 401 || error.status === 403) { clearLiveState(); mode = 'offline'; connectionError = error.message; connectionStatus = error.status; navigate('control', null, false); return false; } admin.busy = false; admin.note = error.message; admin.check = Boolean(error.uncertain); refreshAdminFeed(); return false; }
+    } catch (error) { if (record.epoch !== liveEpoch || record.authVersion !== adminAuth.version || mode !== 'live' || !canUseControl()) return false; if (adminAccessError(error)) return false; if (error.status === 401 || error.status === 403) { clearLiveState(); mode = 'offline'; connectionError = error.message; connectionStatus = error.status; navigate('control', null, false); return false; } admin.busy = false; admin.note = error.message; admin.check = Boolean(error.uncertain); refreshAdminFeed(); return false; }
   }
   function applyAdminReceipt(record, status) {
     admin.busy = status === 'pending'; admin.requestId = record.id; admin.check = status === 'uncertain' || status === 'pending';
@@ -497,9 +587,9 @@
     refreshAdminFeed(); if (status === 'processed') loadAdminState();
   }
   async function checkAdminReceipt(requestId, attempt = 0) {
-    const record = adminRequests.get(requestId); if (!record || record.epoch !== liveEpoch || mode !== 'live' || !isOwner()) return;
-    try { const result = await bridge.receipt(requestId); if (!adminRequests.has(requestId) || record.epoch !== liveEpoch || mode !== 'live' || !isOwner()) return; applyAdminReceipt(record, result.status); if (result.status === 'pending') { if (attempt < 20) setTimeout(() => checkAdminReceipt(requestId, attempt + 1), 1500); else { admin.busy = false; admin.note = 'La acción sigue pendiente de confirmación. Puedes comprobar su estado.'; refreshAdminFeed(); } } }
-    catch (error) { if (record.epoch !== liveEpoch || mode !== 'live' || !isOwner()) return; if (error.status === 401 || error.status === 403) { clearLiveState(); mode = 'offline'; connectionError = error.message; connectionStatus = error.status; navigate('control', null, false); return; } admin.busy = false; admin.note = error.message; admin.check = true; refreshAdminFeed(); }
+    const record = adminRequests.get(requestId); if (!record || record.epoch !== liveEpoch || record.authVersion !== adminAuth.version || mode !== 'live' || !canUseControl()) return;
+    try { const result = await bridge.receipt(requestId); if (!adminRequests.has(requestId) || record.epoch !== liveEpoch || record.authVersion !== adminAuth.version || mode !== 'live' || !canUseControl()) return; applyAdminReceipt(record, result.status); if (result.status === 'pending') { if (attempt < 20) setTimeout(() => checkAdminReceipt(requestId, attempt + 1), 1500); else { admin.busy = false; admin.note = 'La acción sigue pendiente de confirmación. Puedes comprobar su estado.'; refreshAdminFeed(); } } }
+    catch (error) { if (record.epoch !== liveEpoch || record.authVersion !== adminAuth.version || mode !== 'live' || !canUseControl()) return; if (adminAccessError(error)) return; if (error.status === 401 || error.status === 403) { clearLiveState(); mode = 'offline'; connectionError = error.message; connectionStatus = error.status; navigate('control', null, false); return; } admin.busy = false; admin.note = error.message; admin.check = true; refreshAdminFeed(); }
   }
   function memories() {
     const items = mode === 'demo' ? state.memories : state.memories.filter(m => m.type === 'story');
@@ -536,7 +626,7 @@
     if (mode === 'live' && next === 'chat' && ready(activeId)) { startPolling(activeId); if (!archives[activeId]?.loaded) loadHistory(activeId); }
     if (mode === 'live' && next === 'wishes') startPolling('vaca');
     if (mode === 'live' && next === 'library') loadStories(true);
-    if (next === 'control' && canOpenControl()) { bindControl(); if (mode === 'live') { loadAdminState(); startAdminPolling(); } }
+    if (next === 'control' && canOpenControl()) { bindControl(); if (mode === 'live') { if (canUseControl()) { loadAdminState(); startAdminPolling(); } else loadAdminAuth(); } }
     if (['clinic', 'consultation', 'vaca'].includes(next)) experiences?.enter(next);
   }
   function scrollChat() { const log = document.getElementById('chat-messages'); if (log) log.scrollTop = log.scrollHeight; }
@@ -584,7 +674,7 @@
   function clearLiveState() {
     experiences?.clear();
     liveEpoch++; cancelArchiveReads(); if (modal.open) modal.close(); document.getElementById('modal-content').innerHTML = '';
-    clearAdminState();
+    clearAdminAuth(); clearAdminState();
     for (const data of [liveChats, cursors, deliveryNotes]) for (const key of Object.keys(data)) delete data[key];
     for (const key of Object.keys(archives)) delete archives[key]; storyShelf = newPage();
     requests.clear(); callbackBusy.clear();
@@ -711,6 +801,8 @@
     else if (b.hasAttribute('data-account-logout') || b.id === 'account-logout') logoutAccount();
     else if (accountLocked()) return;
     else if (experiences && await experiences.handle(b)) return;
+    else if (b.hasAttribute('data-admin-auth-refresh')) loadAdminAuth();
+    else if (b.hasAttribute('data-admin-lock')) lockAdmin();
     else if (b.hasAttribute('data-invitation-refresh')) loadInvitation();
     else if (b.dataset.invitationAction) changeInvitation(b.dataset.invitationAction);
     else if (b.dataset.invitationCopy) copyInvitation(b.dataset.invitationCopy);
