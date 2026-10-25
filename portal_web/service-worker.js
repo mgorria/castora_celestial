@@ -24,16 +24,17 @@ self.addEventListener('push', event => {
   let payload = {};
   try { payload = event.data?.json() || {}; } catch (_) { /* Even an empty push must show a visible notice. */ }
   if (!payload || typeof payload !== 'object') payload = {};
+  const isTest = payload.kind === 'test';
   const count = pushCount(payload.unread_count);
   // Fixed copy prevents names or message contents reaching the lock screen.
   const displayed = self.registration.showNotification('Oficina Castori', {
-    body: 'Hay mensajes nuevos sin leer en la Oficina Castori.',
+    body: isTest ? 'Esta es una notificación de prueba de Oficina Castori.' : 'Hay mensajes nuevos sin leer en la Oficina Castori.',
     icon: OFFICE_PATH + 'assets/castori.png',
-    tag: 'castori-unread',
+    tag: isTest ? 'castori-test' : 'castori-unread',
     data: { url: officeURL(payload.url) }
   });
   // Always display, including when a window is focused. Apple disallows silent pushes.
-  event.waitUntil(Promise.all([displayed, updateBadge(count)]));
+  event.waitUntil(isTest ? displayed : Promise.all([displayed, updateBadge(count)]));
 });
 self.addEventListener('notificationclick', event => {
   event.notification.close();

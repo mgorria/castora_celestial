@@ -221,11 +221,13 @@
       ctx.showModal(`<div class="eyebrow">${icon('heart')} PASA, PATITA</div><h2 id="modal-title">Te estaba guardando<br>el mejor sillón.</h2><p>En este consultorio de cuento, Salchicher se ajusta las gafitas y abre el cuaderno de los patos. Cuéntale qué te trae: te hará preguntas sobre el pico, las alas o lo que te moleste, pasito a pasito, antes de preparar una receta de mimos.</p><div class="consultation-consent"><label><input type="checkbox" id="consultation-retain"><span><strong>Guardar esta visita en mi cuaderno</strong><small>Podré releerla y borrarla cuando quiera. Se cerrará tras 30 días sin actividad, pero seguirá en mi historial.</small></span></label><p class="consent-temporary">Si no la guardas, se eliminará tras 48 horas sin actividad. ${isDemo() ? 'En este boceto, todas las consultas son de ejemplo y duran solo esta sesión.' : ''}</p></div><button class="button" data-consultation-start>Pasar al consultorio ${icon('arrow')}</button><p class="experience-modal-note" id="experience-modal-note" role="status"></p>`);
     }
     async function act(action, id) {
-      if (busy || !canWrite('salchicher')) return;
+      // Existing visits can be closed or erased even while the doctor's replies are paused.
+      if (busy || readOnly() || (action === 'start' && !canWrite('salchicher'))) return;
       const epoch = ctx.epoch(), version = generation; busy = true;
       const keep = Boolean(document.getElementById('consultation-retain')?.checked);
       const button = document.querySelector('[data-consultation-start], [data-consultation-confirm]'); if (button) button.disabled = true;
       try {
+        if (!isDemo() && ctx.mode() !== 'live') throw new Error('No podemos confirmar el cambio ahora. Vuelve a entrar en tu rincón y prueba de nuevo.');
         let result;
         if (isDemo()) {
           if (action === 'start') {

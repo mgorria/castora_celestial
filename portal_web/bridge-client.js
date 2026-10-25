@@ -13,7 +13,8 @@
     if (options.signal) { options.signal.addEventListener('abort', abort, { once: true }); if (options.signal.aborted) controller.abort(); }
     const timer = setTimeout(abort, 15000);
     try {
-      const response = await fetch((options.prefix || '/api/bridge') + path, { method: options.body ? 'POST' : 'GET', credentials: 'same-origin', cache: 'no-store', ...(options.keepalive ? { keepalive: true } : {}), headers: { Accept: 'application/json', ...(options.body ? { 'Content-Type': 'application/json' } : {}) }, ...(options.body ? { body: JSON.stringify(options.body) } : {}), signal: controller.signal });
+      // Preserve the office origin on Safari POSTs without sharing referrers with other sites.
+      const response = await fetch((options.prefix || '/api/bridge') + path, { method: options.body ? 'POST' : 'GET', credentials: 'same-origin', referrerPolicy: 'same-origin', cache: 'no-store', ...(options.keepalive ? { keepalive: true } : {}), headers: { Accept: 'application/json', ...(options.body ? { 'Content-Type': 'application/json' } : {}) }, ...(options.body ? { body: JSON.stringify(options.body) } : {}), signal: controller.signal });
       if (options.portalProbe && response.status === 404) return { portal: false };
       if (!options.prefix && !options.adminAuth && response.status === 401) unauthorizedHandler?.();
       let data;

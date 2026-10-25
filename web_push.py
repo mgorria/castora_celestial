@@ -5,6 +5,8 @@ loop. Call enqueue within the same save as unread.record and the inbox event.
 Delivery reserves a sequence before awaiting: outcomes left uncertain are not
 replayed. This intentionally provides at-most-once attempts, not guaranteed
 delivery. Endpoint capabilities and encryption keys never enter log messages.
+An optional, expiring WEB_PUSH_TEST_REQUEST_ID order follows the same durable
+reservation rule, independently of message queues and read cursors.
 """
 
 import asyncio
@@ -26,6 +28,7 @@ import unread_notifications as unread
 logger = logging.getLogger("control-castora.web_push")
 STORE_KEY = "web_push"
 MAX_DEVICES = 16
+MAX_TEST_RECEIPTS = 8
 MAX_EVENT_AGE = 24 * 60 * 60
 MAX_DEBOUNCE_SECONDS = 10
 SEND_TIMEOUT_SECONDS = 15
@@ -34,8 +37,11 @@ PUSH_TTL = 60 * 60
 TITLE = "Oficina Castori"
 BODY = "Hay mensajes nuevos en Oficina Castori"
 TAG = "castori-new-messages"
+TEST_TAG = "castori-test"
+TEST_BODY = "Esta es una notificación de prueba de Oficina Castori."
 _EXACT_HOSTS = frozenset(("fcm.googleapis.com", "updates.push.services.mozilla.com"))
 _DOMAIN_LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
+_TEST_REQUEST_ID = re.compile(r"[A-Za-z0-9_-]{8,64}\Z")
 
 
 class WebPushError(RuntimeError):
@@ -53,6 +59,33 @@ def _number(value):
         return type(value) in (int, float) and math.isfinite(value)
     except OverflowError:
         return False
+
+
+def _test_request(request_id, expires_at):
+    if not isinstance(request_id, str) or not _TEST_REQUEST_ID.fullmatch(request_id):
+        return None
+    try:
+        if type(expires_at) not in (str, int, float):
+            return None
+        expiry = float(expires_at)
+    except (ValueError, OverflowError):
+        return None
+    return (request_id, expiry) if _number(expiry) and expiry > 0 else None
+
+
+def _test_receipts(state):
+    if not isinstance(state.get("test_receipts"), dict):
+        state["test_receipts"] = {}
+    return state["test_receipts"]
+
+
+def _prune_test_receipts(receipts, keep):
+    others = sorted((key for key in receipts if key != keep),
+                    key=lambda key: (receipts[key].get("created_at", 0)
+                                     if isinstance(receipts[key], dict) and _number(receipts[key].get("created_at")) else 0,
+                                     str(key)))
+    for key in others[:max(0, len(receipts) - MAX_TEST_RECEIPTS)]:
+        del receipts[key]
 
 
 def _decode_key(value, size=None):
@@ -206,7 +239,7 @@ def _post_webpush(subscription, payload, private_key, subject):
             data=json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
             vapid_private_key=vapid, vapid_claims={"sub": subject},
             content_encoding="aes128gcm", timeout=NETWORK_TIMEOUT, ttl=PUSH_TTL,
-            headers={"Urgency": "normal", "Topic": TAG}, requests_session=transport, verbose=False,
+            headers={"Urgency": "normal", "Topic": TEST_TAG if payload.get("kind") == "test" else TAG}, requests_session=transport, verbose=False,
         )
         return getattr(response, "status_code", None)
     finally:
@@ -226,13 +259,17 @@ def _http_status(value):
 
 class WebPushService:
     def __init__(self, load_data, save_data, resolve_actor, *, send=None, clock=time.time,
-                 debounce_seconds=2.5, private_key=None, public_key=None, subject=None):
+                 debounce_seconds=2.5, private_key=None, public_key=None, subject=None,
+                 test_request_id=None, test_expires_at=None):
         self.load, self.save, self.resolve_actor = load_data, save_data, resolve_actor
         self.clock, self.send = clock, send
         self.debounce_seconds = min(max(float(debounce_seconds), 0), MAX_DEBOUNCE_SECONDS)
         self.private_key = private_key if private_key is not None else os.getenv("WEB_PUSH_VAPID_PRIVATE_KEY", "")
         self.public_key = public_key if public_key is not None else os.getenv("WEB_PUSH_VAPID_PUBLIC_KEY", "")
         self.subject = subject if subject is not None else os.getenv("WEB_PUSH_SUBJECT", "https://oficinacastori.es")
+        self.test_request = _test_request(
+            test_request_id if test_request_id is not None else os.getenv("WEB_PUSH_TEST_REQUEST_ID", ""),
+            test_expires_at if test_expires_at is not None else os.getenv("WEB_PUSH_TEST_EXPIRES_AT", ""))
         self.lock = asyncio.Lock()
 
     def _allowed(self, chat_id):
@@ -366,6 +403,96 @@ class WebPushService:
             return await self.send(copy.deepcopy(subscription), copy.deepcopy(payload))
         return await asyncio.to_thread(_post_webpush, subscription, payload, self.private_key, self.subject)
 
+    async def _tick_test(self, result):
+        """One explicit, expiring operator request; no messages or unread mutations."""
+        if self.test_request is None:
+            return
+        request_id, expires_at = self.test_request
+        try:
+            chat_id = self.resolve_actor("sandra")
+        except Exception:
+            chat_id = None
+        if not self._allowed(chat_id):
+            result["test_status"] = "unavailable"
+            return
+        current = self._read()
+        state = _state(current)
+        receipts = _test_receipts(state)
+        previous = receipts.get(request_id)
+        if previous is not None and (not isinstance(previous, dict) or previous.get("status") != "waiting"):
+            # A process interrupted after reserving must never attempt again.
+            if isinstance(previous, dict) and previous.get("status") == "sending":
+                previous["status"] = "uncertain"
+                self._save(current)
+                logger.warning("Web Push test outcome uncertain")
+            result["test_status"] = previous.get("status", "uncertain") if isinstance(previous, dict) else "uncertain"
+            return
+        now = self.clock()
+        if previous and _number(previous.get("expires_at")):
+            expires_at = min(expires_at, previous["expires_at"])
+        receipt = {**(previous or {}), "created_at": previous.get("created_at", now) if previous else now,
+                   "expires_at": expires_at}
+        if expires_at <= now:
+            receipts[request_id] = {**receipt, "status": "expired"}
+            _prune_test_receipts(receipts, request_id)
+            self._save(current)
+            logger.info("Web Push test expired")
+            result["test_status"] = "expired"
+            return
+        devices = state["devices"].get(str(chat_id), {})
+        candidates, removed = [], False
+        for identity, device in list(devices.items()):
+            try:
+                candidate = validate_subscription(device.get("subscription"), now)
+            except (WebPushError, AttributeError):
+                del devices[identity]
+                removed = True
+                continue
+            updated = device.get("updated_at", device.get("created_at", 0))
+            candidates.append((updated if _number(updated) else 0, identity, device, candidate))
+        if not candidates:
+            result["test_status"] = "waiting"
+            if previous is None or removed:
+                receipts[request_id] = {**receipt, "status": "waiting"}
+                _prune_test_receipts(receipts, request_id)
+                self._save(current)
+            if previous is None:
+                logger.info("Web Push test waiting for a registered device")
+            return
+        _, identity, device, subscription = max(candidates, key=lambda item: (item[0], item[1]))
+        generation = device.get("generation")
+        receipts[request_id] = {**receipt, "status": "sending", "attempted_at": now, "device_id": identity}
+        _prune_test_receipts(receipts, request_id)
+        self._save(current)  # The durable reservation must precede the first await.
+        payload = {"kind": "test", "title": TITLE, "body": TEST_BODY,
+                   "tag": TEST_TAG, "url": "/castori/#conversations"}
+        outcome, http_status = "uncertain", None
+        try:
+            response = await asyncio.wait_for(self._deliver(subscription, payload), SEND_TIMEOUT_SECONDS)
+            http_status = _http_status(response)
+            if http_status is not None and 200 <= http_status < 300:
+                outcome = "sent"
+        except asyncio.CancelledError:
+            logger.warning("Web Push test outcome uncertain")
+            raise
+        except Exception as exc:
+            http_status = _http_status(exc)
+        if http_status in (404, 410):
+            outcome = "expired"
+        # Fresh state preserves subscriptions, messages and other writers changed during delivery.
+        latest = self._read()
+        latest_state = _state(latest)
+        latest_receipt = _test_receipts(latest_state).get(request_id)
+        if isinstance(latest_receipt, dict) and latest_receipt.get("status") == "sending":
+            latest_receipt.update(status=outcome, finished_at=self.clock())
+            latest_devices = latest_state["devices"].get(str(chat_id), {})
+            latest_device = latest_devices.get(identity)
+            if (outcome == "expired" and latest_device and latest_device.get("generation") == generation):
+                del latest_devices[identity]
+            self._save(latest)
+        logger.log(logging.WARNING if outcome == "uncertain" else logging.INFO, "Web Push test %s", outcome)
+        result["test_status"] = outcome
+
     def _skip_disabled_backlog(self):
         data = self._read()
         if STORE_KEY not in data:
@@ -398,6 +525,7 @@ class WebPushService:
             return {**result, "status": "unavailable"}
         async with self.lock:
             try:
+                await self._tick_test(result)
                 snapshot = self._read()
                 work = list(snapshot.get(STORE_KEY, {}).get("pending", {}).items())
                 for key, batch in work:

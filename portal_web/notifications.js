@@ -28,15 +28,21 @@
     const root = document.getElementById('castori-notifications');
     let eligible = false, closing = false, version = 0, expanded = !dismissed();
     let registration = null, subscription = null, status = null, confirmed = false;
-    let preparation = null, action = null, busy = false, checkedAt = 0, notice = '';
+    let preparation = null, action = null, busy = false, checkedAt = 0, notice = '', renderedHTML = null;
     const current = stamp => eligible && !closing && stamp === version;
+    function paint(html) {
+      // Preserve the actual button between pointerdown and click, and keyboard focus during polling.
+      if (renderedHTML === html) return;
+      root.innerHTML = html;
+      renderedHTML = html;
+    }
     function render() {
       if (!root) return;
       root.hidden = !eligible || closing;
-      if (root.hidden) { root.innerHTML = ''; return; }
+      if (root.hidden) { paint(''); return; }
       const enabled = confirmed && permission() === 'granted';
       if (!expanded) {
-        root.innerHTML = `<div class="notification-settings">${enabled ? '<span class="notification-state">Avisos activados en este dispositivo</span>' : ''}<button class="text-button" type="button" data-notification-action="settings">Ajustes de avisos</button></div>`;
+        paint(`<div class="notification-settings">${enabled ? '<span class="notification-state">Avisos activados en este dispositivo</span>' : ''}<button class="text-button" type="button" data-notification-action="settings">Ajustes de avisos</button></div>`);
         return;
       }
       let title = '¿Quieres que la oficina te avise cuando haya mensajes nuevos?';
@@ -54,7 +60,7 @@
         title = 'La oficina ya puede avisarte aquí.';
         description = '<p>Recibirás un aviso cuando haya mensajes nuevos sin leer.</p>';
         primary = '<button class="text-button" type="button" data-notification-action="disable">Desactivar en este dispositivo</button>';
-      } else if (!status || preparation) {
+      } else if (!status || preparation && !registration?.active) {
         description = '<p>Preparando los avisos de este dispositivo…</p>';
       } else if (!status.available || !status.public_key || !registration?.active) {
         description = '<p>Ahora no podemos preparar los avisos. Puedes volver a intentarlo en un ratito.</p>';
@@ -63,33 +69,41 @@
         primary = '<button class="button" type="button" data-notification-action="enable">Activar</button>';
       }
       if (busy) primary = '<button class="button" type="button" disabled>Un momentito…</button>';
-      root.innerHTML = `<div class="notification-card"><div class="notification-copy"><strong>${title}</strong>${description}${notice ? `<p class="notification-notice" role="status">${escape(notice)}</p>` : ''}</div><div class="notification-actions">${primary}<button class="text-button" type="button" data-notification-action="later">${enabled ? 'Cerrar ajustes' : 'Ahora no'}</button></div></div>`;
+      paint(`<div class="notification-card"><div class="notification-copy"><strong>${title}</strong>${description}${notice ? `<p class="notification-notice" role="status">${escape(notice)}</p>` : ''}</div><div class="notification-actions">${primary}<button class="text-button" type="button" data-notification-action="later">${enabled ? 'Cerrar ajustes' : 'Ahora no'}</button></div></div>`);
     }
     async function prepare(stamp) {
+      let phase = 'status';
       try {
         const nextStatus = await bridge.pushStatus();
         if (!current(stamp)) return;
-        status = nextStatus;
-        if (!supportsPush() || wantsInstall() || !status.available || !status.public_key) return;
+        if (!supportsPush() || wantsInstall() || !nextStatus.available || !nextStatus.public_key) { status = nextStatus; return; }
         // Registration and the existing subscription are ready before the user taps Activar.
+        phase = 'worker';
         const registered = await navigator.serviceWorker.register('/castori/service-worker.js', { scope: '/castori/', updateViaCache: 'none' });
         if (!current(stamp)) return;
         const activeRegistration = registered.active ? registered : await navigator.serviceWorker.ready;
         if (!current(stamp)) return;
+        phase = 'device';
         const localSubscription = await activeRegistration.pushManager.getSubscription();
         const id = await deviceId(localSubscription);
         if (!current(stamp)) return;
+        status = nextStatus;
         registration = activeRegistration;
         subscription = localSubscription;
         confirmed = Boolean(id && Array.isArray(status.device_ids) && status.device_ids.includes(id));
       } catch (_) {
-        if (current(stamp)) { status = { available: false }; confirmed = false; }
+        if (current(stamp)) {
+          if (!registration?.active) { status = { available: false }; confirmed = false; }
+          notice = phase === 'status' ? 'No hemos podido contactar con la oficina para preparar los avisos. Comprueba la conexión y vuelve a intentarlo.'
+            : phase === 'worker' ? 'No hemos podido preparar los avisos en este dispositivo. Cierra y vuelve a abrir la oficina desde su icono.'
+              : 'No hemos podido comprobar los avisos guardados en este dispositivo. Vuelve a intentarlo.';
+        }
       } finally {
         if (current(stamp)) { preparation = null; checkedAt = Date.now(); render(); }
       }
     }
     function startPreparation() {
-      if (preparation || !eligible || closing) return preparation;
+      if (preparation || busy || !eligible || closing) return preparation;
       preparation = prepare(version);
       render();
       return preparation;
@@ -99,20 +113,19 @@
       try { if (removeServer) await bridge.pushUnsubscribe({ endpoint: value.endpoint }); }
       finally { await value.unsubscribe(); }
     }
-    async function finishActivation(permissionOrSubscription, stamp, hadPermission) {
-      let nextSubscription, saved = false;
+    function subscriptionFailure(error) {
+      if (permission() === 'denied') return 'Los avisos no se han autorizado. Puedes permitirlos en los ajustes de notificaciones del dispositivo.';
+      if (error?.name === 'NotAllowedError') return 'El dispositivo no ha autorizado los avisos. Pulsa Activar para volver a intentarlo.';
+      return 'El dispositivo no ha podido activar sus avisos. Pulsa Activar para volver a intentarlo.';
+    }
+    async function finishActivation(pendingSubscription, stamp) {
+      let nextSubscription, saved = false, phase = 'subscribe';
       try {
-        const result = await permissionOrSubscription;
-        if (!hadPermission && result !== 'granted') {
-          if (current(stamp)) notice = result === 'denied' ? 'Está bien. Puedes cambiarlo cuando quieras desde los ajustes del dispositivo.' : 'Puedes activarlos otro día, cuando te apetezca.';
-          return;
-        }
-        if (!current(stamp)) {
-          if (hadPermission && result && result !== subscription) await discardSubscription(result);
-          return;
-        }
-        nextSubscription = hadPermission ? result : subscription || await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(status.public_key) });
+        nextSubscription = await pendingSubscription;
         if (!current(stamp)) { await discardSubscription(nextSubscription); return; }
+        // Retain a browser-approved subscription so a failed server save can be retried by a tap.
+        subscription = nextSubscription;
+        phase = 'save';
         await bridge.pushSubscribe({ subscription: { ...nextSubscription.toJSON(), userVisibleOnly: true } });
         saved = true;
         if (!current(stamp)) { await discardSubscription(nextSubscription, true); return; }
@@ -122,36 +135,47 @@
         expanded = false;
         rememberDismissal();
         toast('La oficina ya puede avisarte en este dispositivo.');
-      } catch (_) {
+      } catch (error) {
         // If registration could not be confirmed, a subsequent explicit tap can retry it.
         if (current(stamp)) {
           confirmed = false;
-          notice = 'No hemos podido activar los avisos. Pulsa Activar para volver a intentarlo.';
+          notice = phase === 'save'
+            ? 'El permiso está listo, pero no hemos podido guardar este dispositivo en la oficina. Comprueba la conexión y pulsa Activar de nuevo.'
+            : subscriptionFailure(error);
+          expanded = true;
         } else if (nextSubscription && !saved) {
           try { await discardSubscription(nextSubscription, true); } catch (_) { /* Local expiry is also pruned by the server. */ }
         }
       } finally {
-        if (stamp === version) { busy = false; action = null; render(); }
+        if (stamp === version) { busy = false; action = null; checkedAt = Date.now(); render(); }
       }
     }
-    // This is deliberately not async: Safari must receive requestPermission in the tap itself.
+    // Safari requires subscribe itself in the gesture handler; it presents the permission prompt.
+    // https://developer.apple.com/documentation/usernotifications/sending-web-push-notifications-in-web-apps-and-browsers
     function enable() {
-      if (!eligible || closing || busy || preparation || wantsInstall() || !supportsPush() || !status?.available || !registration?.active || permission() === 'denied') return;
-      const stamp = version, hadPermission = permission() === 'granted';
-      let permissionOrSubscription;
+      if (!eligible || closing || busy) return;
+      if (wantsInstall() || !supportsPush() || permission() === 'denied') { expanded = true; render(); return; }
+      if (!status?.available || !registration?.active) {
+        notice = 'Los avisos todavía se están preparando. Vuelve a comprobarlos en un momento.'; render(); return;
+      }
+      // Invalidate a background check begun before this explicit action; its result is now stale.
+      const stamp = ++version;
+      preparation = null;
+      let pendingSubscription;
       try {
-        permissionOrSubscription = hadPermission
-          ? subscription || registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(status.public_key) })
-          : window.Notification.requestPermission();
-      } catch (_) { notice = 'No hemos podido activar los avisos. Puedes volver a intentarlo.'; render(); return; }
+        pendingSubscription = permission() === 'granted' && subscription
+          ? subscription
+          : registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(status.public_key) });
+      } catch (error) { notice = subscriptionFailure(error); render(); return; }
       busy = true;
       notice = '';
-      action = finishActivation(permissionOrSubscription, stamp, hadPermission);
+      action = finishActivation(pendingSubscription, stamp);
       render();
     }
     async function disable() {
       if (!eligible || closing || busy) return;
-      const stamp = version;
+      const stamp = ++version;
+      preparation = null;
       busy = true;
       render();
       try {
@@ -167,7 +191,7 @@
           if (!remaining) { subscription = null; confirmed = false; }
           notice = 'No hemos podido confirmar el cambio. Vuelve a comprobar los ajustes.';
         }
-      } finally { if (stamp === version) { busy = false; action = null; render(); } }
+      } finally { if (stamp === version) { busy = false; action = null; checkedAt = Date.now(); render(); } }
     }
     root?.addEventListener('click', event => {
       const button = event.target.closest('[data-notification-action]');
@@ -185,7 +209,7 @@
       if (closing) return;
       if (!eligible) { eligible = true; version += 1; checkedAt = 0; }
       badge(unreadCount);
-      if (!preparation && (!checkedAt || Date.now() - checkedAt > 60000)) startPreparation();
+      if (!busy && !preparation && (!checkedAt || Date.now() - checkedAt > 60000)) startPreparation();
       render();
       await preparation;
     }

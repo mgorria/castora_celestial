@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import unread_notifications as unread
 from web_push import (
-    BODY, MAX_DEVICES, MAX_EVENT_AGE, NETWORK_TIMEOUT, STORE_KEY, WebPushError,
+    BODY, MAX_DEVICES, MAX_EVENT_AGE, MAX_TEST_RECEIPTS, NETWORK_TIMEOUT, STORE_KEY, TEST_BODY, TEST_TAG, WebPushError,
     WebPushService, _PushTransport, _post_webpush, validate_endpoint, validate_subscription,
 )
 
@@ -151,6 +151,9 @@ class SubscriptionValidationTests(unittest.TestCase):
 
 class WebPushServiceTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        environment = patch.dict("os.environ", {"WEB_PUSH_TEST_REQUEST_ID": "", "WEB_PUSH_TEST_EXPIRES_AT": ""})
+        environment.start()
+        self.addCleanup(environment.stop)
         self.now = time.time()
         self.data = {"web_bridge": {"sequence": 0, "inboxes": {}}}
         unread.initialize(self.data)
@@ -493,6 +496,248 @@ class WebPushServiceTests(unittest.IsolatedAsyncioTestCase):
             service = self.make_service(private_key=key)
             self.assertFalse(service.status(11)["available"])
             self.assertIsNone(service.status(11)["public_key"])
+
+
+class WebPushTestRequestTests(unittest.IsolatedAsyncioTestCase):
+    make_service = WebPushServiceTests.make_service
+    save = WebPushServiceTests.save
+    register = WebPushServiceTests.register
+    put = WebPushServiceTests.put
+    device = WebPushServiceTests.device
+
+    async def asyncSetUp(self):
+        await WebPushServiceTests.asyncSetUp(self)
+        self.request_id = "test-request-one"
+        self.expires_at = self.now + 86400
+        self.service = self.restart()
+
+    def restart(self):
+        return self.make_service(test_request_id=self.request_id, test_expires_at=self.expires_at)
+
+    def receipt(self):
+        return self.data[STORE_KEY]["test_receipts"][self.request_id]
+
+    async def test_waits_for_registration_then_reserves_one_attempt_and_survives_restart(self):
+        before = copy.deepcopy(self.data)
+        with patch("web_push.logger") as log:
+            self.assertEqual((await self.service.tick())["test_status"], "waiting")
+            self.assertEqual((await self.service.tick())["test_status"], "waiting")
+            self.service = self.restart()
+            self.assertEqual((await self.service.tick())["test_status"], "waiting")
+            self.assertEqual(sum(call.args == ("Web Push test waiting for a registered device",)
+                                 for call in log.info.call_args_list), 1)
+        self.sender.assert_not_awaited()
+        self.assertEqual(self.data["web_bridge"], before["web_bridge"])
+        self.assertEqual(self.data[unread.STORE_KEY], before[unread.STORE_KEY])
+        identity = self.register()
+
+        async def check_reserved(sub, payload):
+            self.assertEqual(self.receipt()["status"], "sending")
+            self.assertEqual(self.receipt()["device_id"], identity)
+            self.assertEqual(self.device(identity)["last_reserved_seq"], 0)
+            self.assertEqual(payload, {"kind": "test", "title": "Oficina Castori", "body": TEST_BODY,
+                                       "tag": TEST_TAG, "url": "/castori/#conversations"})
+            self.assertNotIn("unread_count", payload)
+            return 201
+
+        self.sender.side_effect = check_reserved
+        self.assertEqual((await self.service.tick())["test_status"], "sent")
+        self.assertEqual((await self.restart().tick())["test_status"], "sent")
+        self.sender.assert_awaited_once()
+        self.assertEqual(self.data[unread.STORE_KEY], before[unread.STORE_KEY])
+        self.assertEqual(self.data[STORE_KEY]["pending"], {})
+
+    async def test_only_latest_current_device_gets_test_and_expired_device_is_skipped(self):
+        self.register("older")
+        self.now += 1
+        self.register("latest")
+        self.now += 1
+        expired = self.register("expires", expirationTime=(self.now + 1) * 1000)
+        self.now += 2
+        await self.service.tick()
+        self.sender.assert_awaited_once()
+        self.assertEqual(self.sender.call_args.args[0]["endpoint"], subscription("latest")["endpoint"])
+        self.assertNotIn(expired, self.service.status(11)["device_ids"])
+
+    async def test_refreshed_device_is_the_latest_registration(self):
+        self.register("one")
+        self.now += 1
+        self.register("two")
+        self.now += 1
+        self.register("one")
+        await self.service.tick()
+        self.sender.assert_awaited_once()
+        self.assertEqual(self.sender.call_args.args[0]["endpoint"], subscription("one")["endpoint"])
+
+    async def test_no_valid_environment_order_means_no_test(self):
+        self.register()
+        invalid = [("", self.expires_at), ("short", self.expires_at), ("contains space", self.expires_at),
+                   ("not-ascii-ñ", self.expires_at), ("x" * 65, self.expires_at),
+                   (self.request_id, ""), (self.request_id, "nan"), (self.request_id, "inf"),
+                   (self.request_id, True), (self.request_id, -1), (self.request_id, "not a timestamp")]
+        for request_id, expiry in invalid:
+            service = self.make_service(test_request_id=request_id, test_expires_at=expiry)
+            result = await service.tick()
+            self.assertNotIn("test_status", result)
+        self.assertNotIn("test_status", await self.make_service().tick())
+        self.sender.assert_not_awaited()
+        self.assertNotIn("test_receipts", self.data[STORE_KEY])
+
+    async def test_environment_uuid_order_is_supported_without_modifying_vapid_configuration(self):
+        self.register()
+        request_id = "7b32d164-6d70-431c-b388-4b82e9229a76"
+        with patch.dict("os.environ", {"WEB_PUSH_TEST_REQUEST_ID": request_id,
+                                      "WEB_PUSH_TEST_EXPIRES_AT": str(self.expires_at)}):
+            service = self.make_service()
+            self.assertEqual((await service.tick())["test_status"], "sent")
+            self.assertEqual(service.private_key, PRIVATE)
+            self.assertEqual(service.public_key, PUBLIC)
+        self.assertEqual(self.data[STORE_KEY]["test_receipts"][request_id]["status"], "sent")
+
+    async def test_disabled_delivery_configuration_cannot_send_an_authorized_test(self):
+        self.register()
+        service = self.make_service(private_key="", test_request_id=self.request_id,
+                                    test_expires_at=self.expires_at)
+        self.assertEqual((await service.tick())["status"], "unavailable")
+        self.sender.assert_not_awaited()
+        self.assertNotIn("test_receipts", self.data[STORE_KEY])
+
+    async def test_expiry_before_device_registration_never_sends_or_rearms_same_request(self):
+        await self.service.tick()
+        self.now = self.expires_at + 1
+        self.register()
+        with patch("web_push.logger") as log:
+            self.assertEqual((await self.service.tick())["test_status"], "expired")
+            self.expires_at = self.now + 86400
+            self.assertEqual((await self.restart().tick())["test_status"], "expired")
+            self.assertEqual(sum(call.args == ("Web Push test expired",) for call in log.info.call_args_list), 1)
+        self.sender.assert_not_awaited()
+
+    async def test_canonical_missing_invalid_or_owner_identity_never_receives_test(self):
+        self.register()
+        for actor in (None, True, 0, -1, "11", 22, 33):
+            self.actors["sandra"] = actor
+            result = await self.service.tick()
+            self.assertIn(result["test_status"], ("unavailable", "waiting"))
+        self.sender.assert_not_awaited()
+        self.assertNotIn("attempted_at", self.receipt())
+
+    async def test_ambiguous_failures_and_timeout_are_reserved_once_and_never_retried(self):
+        async def stalled(sub, payload):
+            await asyncio.Event().wait()
+
+        for index, failure in enumerate((None, 403, 500, RuntimeError("PRIVATE_ENDPOINT_TOKEN"), stalled)):
+            self.request_id = f"test-failure-{index}"
+            self.service = self.restart()
+            self.register()
+            self.sender.reset_mock()
+            self.sender.side_effect = failure if isinstance(failure, Exception) or callable(failure) else None
+            self.sender.return_value = failure if type(failure) is int else None
+            with patch("web_push.SEND_TIMEOUT_SECONDS", .01), patch("web_push.logger") as log:
+                self.assertEqual((await self.service.tick())["test_status"], "uncertain")
+                self.sender.side_effect = None
+                self.assertEqual((await self.restart().tick())["test_status"], "uncertain")
+            self.sender.assert_awaited_once()
+            self.assertNotIn("PRIVATE_ENDPOINT_TOKEN", str(log.mock_calls))
+            self.assertNotIn(subscription()["endpoint"], str(log.mock_calls))
+            self.assertNotIn(TEST_BODY, str(log.mock_calls))
+
+    async def test_cancelled_attempt_survives_restart_without_another_delivery(self):
+        self.register()
+        started = asyncio.Event()
+
+        async def stalled(sub, payload):
+            started.set()
+            await asyncio.Event().wait()
+
+        self.sender.side_effect = stalled
+        task = asyncio.create_task(self.service.tick())
+        await started.wait()
+        self.assertEqual(self.receipt()["status"], "sending")
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+        self.sender.side_effect = None
+        self.assertEqual((await self.restart().tick())["test_status"], "uncertain")
+        self.sender.assert_awaited_once()
+
+    async def test_provider_expiry_prunes_device_but_does_not_retry_another_device(self):
+        self.register("older")
+        self.now += 1
+        latest = self.register("latest")
+        self.sender.return_value = 410
+        self.assertEqual((await self.service.tick())["test_status"], "expired")
+        self.assertNotIn(latest, self.service.status(11)["device_ids"])
+        await self.restart().tick()
+        self.sender.assert_awaited_once()
+
+    async def test_expiry_response_cannot_delete_a_renewed_subscription(self):
+        identity = self.register()
+
+        async def renew(sub, payload):
+            self.service.subscribe(11, subscription(keys={"p256dh": PUBLIC, "auth": b64(bytes(reversed(range(16))))}))
+            return 410
+
+        self.sender.side_effect = renew
+        await self.service.tick()
+        self.assertIn(identity, self.service.status(11)["device_ids"])
+        self.assertEqual(self.receipt()["status"], "expired")
+
+    async def test_test_receipts_are_bounded_without_changing_pending_normal_delivery(self):
+        identity = self.register()
+        self.put(1)
+        before_pending = copy.deepcopy(self.data[STORE_KEY]["pending"])
+        before_unread = copy.deepcopy(self.data[unread.STORE_KEY])
+        self.data[STORE_KEY]["extra_config"] = "preserved"
+        self.data[STORE_KEY]["test_receipts"] = {
+            f"previous-{number}": {"status": "sent", "created_at": self.now - 100 + number}
+            for number in range(MAX_TEST_RECEIPTS)
+        }
+        await self.service.tick()
+        self.assertEqual(len(self.data[STORE_KEY]["test_receipts"]), MAX_TEST_RECEIPTS)
+        self.assertIn(self.request_id, self.data[STORE_KEY]["test_receipts"])
+        self.assertNotIn("previous-0", self.data[STORE_KEY]["test_receipts"])
+        self.assertEqual(self.data[STORE_KEY]["pending"], before_pending)
+        self.assertEqual(self.data[unread.STORE_KEY], before_unread)
+        self.assertEqual(self.data[STORE_KEY]["extra_config"], "preserved")
+        self.assertEqual(self.device(identity)["last_reserved_seq"], 0)
+        self.sender.assert_awaited_once()
+
+    async def test_concurrent_reads_and_new_messages_during_test_delivery_are_preserved(self):
+        self.register()
+        self.put(1)
+
+        async def update_other_state(sub, payload):
+            unread.acknowledge(self.data, 11, "mimosuga", 1)
+            self.put(2)
+            self.data["other_writer"] = "preserved"
+            return 201
+
+        self.sender.side_effect = update_other_state
+        await self.service.tick()
+        self.assertEqual(self.data[STORE_KEY]["pending"]["11"]["event_id"], 2)
+        self.assertEqual(self.data[unread.STORE_KEY]["scopes"]["11:mimosuga"]["_"]["read_id"], 1)
+        self.assertEqual(self.data["other_writer"], "preserved")
+        self.sender.assert_awaited_once()
+
+    async def test_storage_failure_before_reservation_blocks_send_and_after_send_cannot_repeat(self):
+        self.register()
+        with patch.object(self.service, "save", side_effect=OSError("private path")):
+            self.assertEqual((await self.service.tick())["status"], "storage_unavailable")
+        self.sender.assert_not_awaited()
+        original_save, writes = self.service.save, 0
+
+        def fail_after_reserving(data):
+            nonlocal writes
+            writes += 1
+            if writes == 2:
+                raise OSError("private path")
+            original_save(data)
+
+        with patch.object(self.service, "save", side_effect=fail_after_reserving):
+            self.assertEqual((await self.service.tick())["status"], "storage_unavailable")
+        self.assertEqual((await self.restart().tick())["test_status"], "uncertain")
+        self.sender.assert_awaited_once()
 
 
 if __name__ == "__main__":

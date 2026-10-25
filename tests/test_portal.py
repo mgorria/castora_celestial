@@ -1,4 +1,5 @@
 import copy
+import json
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -75,7 +76,7 @@ class PortalTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status, 200)
         self.assertIn("La casa", await response.text())
         self.assertIn("frame-ancestors 'none'", response.headers["Content-Security-Policy"])
-        self.assertEqual(response.headers["Referrer-Policy"], "no-referrer")
+        self.assertEqual(response.headers["Referrer-Policy"], "same-origin")
         response = await self.client.get("/api/account/session")
         self.assertEqual(await response.json(), {"portal": True, "authenticated": False})
         for route in ("state", "history?animal=mimosuga", "stories", "consultations", "consultation?id=abc12345"):
@@ -151,6 +152,44 @@ class PortalTests(unittest.IsolatedAsyncioTestCase):
         response = await self.client.post("/api/account/login", json={}, headers={
             "Origin": "https://evil.example", "X-Forwarded-Host": "evil.example", "X-Forwarded-Proto": "https"})
         self.assertEqual(response.status, 403)
+
+    async def test_origin_rejection_logs_only_categories_without_request_secrets(self):
+        secret_origin = "https://untrusted.example/private-origin-secret"
+        base_headers = [("Cookie", f"{COOKIE}={SESSION}"), ("Authorization", "Bearer credential-secret")]
+        cases = (([], "missing"), ([("Origin", "null")], "null"),
+                 ([("Origin", secret_origin)], "mismatch"),
+                 ([("Origin", ORIGIN), ("Origin", secret_origin)], "duplicate"),
+                 ([("Origin", ORIGIN), ("Origin", ORIGIN)], "duplicate"))
+        for origins, kind in cases:
+            with self.subTest(kind=kind), self.assertLogs("control-castora.portal", level="WARNING") as captured:
+                response = await self.client.post("/api/bridge/consultation-action?token=query-secret",
+                    headers=[*base_headers, *origins], json={"password": "body-secret"})
+            self.assertEqual(response.status, 403)
+            self.assertEqual(await response.json(), {"error": "origin_not_allowed"})
+            self.assertEqual(response.headers["Referrer-Policy"], "same-origin")
+            self.assertEqual([json.loads(record.getMessage()) for record in captured.records], [{
+                "event": "portal_request_rejected", "route": "/api/bridge/consultation-action",
+                "error": "origin_not_allowed", "origin_kind": kind}])
+            for secret in (secret_origin, ORIGIN, SESSION, "credential-secret", "query-secret", "body-secret"):
+                self.assertNotIn(secret, " ".join(captured.output))
+        self.accounts.get_session.assert_not_awaited()
+
+    async def test_rejection_diagnostics_ignore_unknown_or_static_paths(self):
+        with self.assertNoLogs("control-castora.portal", level="WARNING"):
+            for path in ("/api/bridge/private-path-secret", "/api/account/private-path-secret", "/castori/index.html"):
+                response = await self.client.post(path, json={"password": "body-secret"})
+                self.assertEqual(response.status, 403)
+
+    async def test_owner_rejection_diagnostic_has_no_cookie_body_or_query(self):
+        with self.assertLogs("control-castora.portal", level="WARNING") as captured:
+            response = await self.client.post("/api/bridge/push-subscribe?token=query-secret",
+                headers=self.owner_cookie(Origin=ORIGIN), json={"subscription": "body-secret"})
+        self.assertEqual(response.status, 403)
+        self.assertEqual(await response.json(), {"error": "read_only"})
+        self.assertEqual([json.loads(record.getMessage()) for record in captured.records], [{
+            "event": "portal_request_rejected", "route": "/api/bridge/push-subscribe", "error": "read_only"}])
+        for secret in (OWNER_SESSION, ORIGIN, "query-secret", "body-secret"):
+            self.assertNotIn(secret, " ".join(captured.output))
 
     async def test_login_cookie_secure_behind_http_reverse_proxy_without_exposing_token(self):
         response = await self.client.post("/api/account/login", json={"username": "patita", "password": "a long password"},

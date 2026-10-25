@@ -1,4 +1,6 @@
 """Two-person invitation portal; database sessions decide the allowed role."""
+import json
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -13,6 +15,10 @@ PUBLIC_POST = ("message", "callback", "consultation-action", "consultation-messa
 ADMIN_GET = ("admin-state", "admin-events", "admin-invitation", "admin-owner-invitation", "admin-auth")
 ADMIN_POST = ("admin-action", "admin-callback", "admin-invitation", "admin-owner-invitation", "admin-auth")
 ASSET_EXTENSIONS = {".html", ".css", ".js", ".png", ".jpg", ".jpeg", ".webp", ".svg", ".woff", ".woff2", ".ico", ".webmanifest"}
+LOGGABLE_API_PATHS = frozenset(
+    "/api/bridge/" + route for route in PUBLIC_GET + PUBLIC_POST + ADMIN_GET + ADMIN_POST
+) | frozenset("/api/account/" + route for route in ("session", "register", "login", "logout"))
+logger = logging.getLogger("control-castora.portal")
 
 
 def canonical_origin(value):
@@ -41,10 +47,23 @@ class Portal:
     def protect(response):
         response.headers.update({
             "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
-            "Referrer-Policy": "no-referrer", "X-Frame-Options": "DENY",
+            "Referrer-Policy": "same-origin", "X-Frame-Options": "DENY",
             "Content-Security-Policy": "default-src 'none'; script-src 'self'; worker-src 'self'; manifest-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
         })
         return response
+
+    @staticmethod
+    def _log_rejection(request, error, *, origin_kind=None):
+        # Only fixed routes and classifications may enter diagnostics. In
+        # particular, never log the supplied origin, query, cookies or body.
+        if request.path not in LOGGABLE_API_PATHS or error not in {"origin_not_allowed", "read_only"}:
+            return
+        details = {"event": "portal_request_rejected", "route": request.path, "error": error}
+        if error == "origin_not_allowed":
+            if origin_kind not in {"missing", "null", "mismatch", "duplicate"}:
+                return
+            details["origin_kind"] = origin_kind
+        logger.warning(json.dumps(details, sort_keys=True))
 
     async def authenticate(self, request, handler):
         try:
@@ -53,6 +72,9 @@ class Portal:
             if request.method == "POST":
                 origins = request.headers.getall("Origin", [])
                 if origins != [self.origin]:
+                    origin_kind = ("missing" if not origins else "duplicate" if len(origins) > 1
+                                   else "null" if origins == ["null"] else "mismatch")
+                    self._log_rejection(request, "origin_not_allowed", origin_kind=origin_kind)
                     return self.protect(failure("origin_not_allowed", 403))
                 if request.content_type != "application/json":
                     return self.protect(failure("json_required", 415))
@@ -75,6 +97,7 @@ class Portal:
                     if denied is not None:
                         return self.protect(denied)
                 if route in PUBLIC_POST and request["portal_owner"]:
+                    self._log_rejection(request, "read_only")
                     return self.protect(failure("read_only", 403))
             response = await handler(request)
         except AccountError as exc:
