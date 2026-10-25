@@ -37,6 +37,19 @@ class ConsultationTests(unittest.IsolatedAsyncioTestCase):
     async def finish(self):
         await asyncio.wait_for(asyncio.gather(*list(self.bot.tasks.values())), timeout=2)
 
+    async def test_headache_alone_keeps_the_consultation_open(self):
+        episode = self.bot.start_consultation(1, retain_history=True)
+        response = "Me ajusto las gafitas, Patita. ¿Desde cuándo te molesta la cabecita?"
+        with patch("salchicher.generate_care_reply", AsyncMock(return_value=(response, ["head_duration"]))) as provider:
+            await self.bot.receive(incoming("Me duele mucho la cabeza"), None)
+            await self.finish()
+        provider.assert_awaited_once()
+        current = self.bot.get_consultation(1, episode["id"])
+        self.assertEqual(current["status"], "active")
+        self.assertIsNone(current["closure_reason"])
+        self.assertEqual(current["messages"][-1]["content"], response)
+        self.assertNotIn("112", current["messages"][-1]["content"])
+
     async def test_retired_automatic_copy_is_only_projected_out_of_saved_or_temporary_history(self):
         screening = "Gracias por contármelo, solete. " + LEGACY_QUESTIONS["duration"] + "\n\n" + LEGACY_QUESTIONS["context"]
         messages = [{"role": "assistant", "content": text, "created_at": time.time()}

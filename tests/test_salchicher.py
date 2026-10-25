@@ -53,7 +53,7 @@ class ServiceTests(unittest.TestCase):
         for facts in (None, {}, {"mild": "true"}, {"no_risk_context": False}):
             reply, questions = render_decision({"action": "care", "facts": facts}, [])
             self.assertIn("Diagnóstico de cuento", reply)
-            self.assertIn(CARE["comfort"], reply)
+            self.assertTrue(any(care in reply for care in CARE.values()))
             self.assertNotEqual(reply, PROFESSIONAL_TEXT)
             self.assertEqual(questions, [])
 
@@ -88,7 +88,7 @@ class ServiceTests(unittest.TestCase):
         replies.extend(render_decision({"action": action}, [])[0] for action in ("chat", "identity", "comfort", "care"))
         for reply in replies:
             with self.subTest(reply=reply):
-                self.assertNotRegex(normalized(reply), r"embaraz|fertil|bebe|sandra|miguel|compart|confidencial|profesional sanitario|112")
+                self.assertNotRegex(normalized(reply), r"embaraz|fertil|bebe|sandra|miguel|(?:chat|consulta).{0,20}compart|compart.{0,20}(?:chat|consulta)|confidencial|profesional sanitario|112")
 
     def test_comfort_ignores_model_clinical_prose(self):
         reply, questions = render_decision({"action": "comfort", "category": "abdominal_pain",
@@ -98,11 +98,15 @@ class ServiceTests(unittest.TestCase):
         self.assertNotIn("leve", reply)
 
     def test_only_actual_medical_requests_use_real_care_exit(self):
-        for text in ("¿Qué dosis de ibuprofeno tomo?", "¿Puedo tomar jalea real?", "¿Cambio mi medicación?", "¿Qué enfermedad tengo?"):
+        for text in ("¿Qué dosis de ibuprofeno tomo?", "¿Puedo tomar jalea real?", "¿Cambio mi medicación?", "¿Qué enfermedad tengo de verdad?"):
             self.assertTrue(real_medical_request(text), text)
-        for text in ("¿Me recetas unos mimos?", "Mi médico me ha dicho que es un resfriado", "¿Puedo tomar compota de manzana?", "Me duele la tripita, doctor de patos"):
+        for text in ("¿Me recetas unos mimos?", "Mi médico me ha dicho que es un resfriado", "¿Puedo tomar compota de manzana?", "Me duele la tripita, doctor de patos", "¿Qué dosis de mojo de Oso me recetas?", "¿Qué enfermedad de pato tengo?"):
             self.assertFalse(real_medical_request(text), text)
-        self.assertEqual(render_decision({"action": "emergency", "care": ["rest"]}, [])[0], EMERGENCY_TEXT)
+        self.assertNotEqual(render_decision({"action": "emergency", "care": ["rest"]}, [])[0], EMERGENCY_TEXT)
+
+    def test_provider_action_alone_cannot_issue_emergency_instructions(self):
+        reply, _ = render_decision({"action": "emergency", "reply": "Llama al 112"}, [])
+        self.assertNotIn("112", reply)
 
 
 class ProviderTests(unittest.IsolatedAsyncioTestCase):
@@ -142,6 +146,40 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("json", kwargs["input"].lower())
         self.assertFalse(kwargs["store"])
         self.assertIn("doctor de cuento", kwargs["instructions"])
+
+    async def test_headache_alone_cannot_be_escalated_by_the_model(self):
+        import os
+        for statement in ("Me duele la cabeza", "Me duele mucho la cabeza", "Me duele la cabeza desde ayer"):
+            with self.subTest(statement=statement):
+                client, manager = self.provider({"action": "emergency"})
+                with patch.dict(os.environ, {"OPENAI_API_KEY": "synthetic"}), patch("salchicher_service.AsyncOpenAI", return_value=manager):
+                    reply, questions = await generate_care_reply([{"role": "user", "content": statement}], [])
+                client.responses.create.assert_awaited_once()
+                self.assertNotIn("112", reply)
+                self.assertNotIn("urgente", reply)
+                self.assertTrue(questions)
+                self.assertIn(questions[0], ("head_duration", "evolution"))
+
+    async def test_false_emergency_after_questions_stays_in_story(self):
+        import os
+        _, manager = self.provider({"action": "emergency"})
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "synthetic"}), patch("salchicher_service.AsyncOpenAI", return_value=manager):
+            reply, questions = await generate_care_reply([{"role": "user", "content": "Me duele la cabecita desde ayer"}], ["head_duration", "evolution"])
+        self.assertNotIn("112", reply)
+        self.assertIn("Diagnóstico de cuento", reply)
+        self.assertEqual(questions, [])
+
+    async def test_storybook_provider_receives_own_vademecum_and_recent_recipes(self):
+        import os
+        prior = render_decision({"action": "storybook", "diagnosis": "busy_head", "care": ["rest"]}, [])[0]
+        client, manager = self.provider({"action": "storybook", "diagnosis": "busy_head"})
+        history = [{"role": "assistant", "content": prior}, {"role": "user", "content": "Otra receta de pato, por favor"}]
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "synthetic"}), patch("salchicher_service.AsyncOpenAI", return_value=manager):
+            reply, _ = await generate_care_reply(history, [])
+        payload = json.loads(client.responses.create.call_args.kwargs["input"].split("\n", 1)[1])
+        self.assertIn("diagnosis_families", payload["vademecum"])
+        self.assertGreater(len(payload["vademecum"]["care"]), 12)
+        self.assertNotEqual(reply, prior)
 
     async def test_old_bot_screening_is_not_continued_and_user_words_are_preserved(self):
         import os

@@ -114,31 +114,97 @@
     return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
   }
 
+  const storyPrescriptions = [
+    { topic: /\b(?:cabeza|cabecita)\b/, name: 'Cabecita con feria de cascabeles', care: 'Cerramos la taquilla de la feria un ratito: un rincón tranquilo, el volumen bajito y una nube de papel con los recados que pueden esperar. El Oso puede encargarse de uno, si te apetece.' },
+    { topic: /\b(?:alas?|aleteo|aleteando)\b/, name: 'Alas con demasiados recados', care: 'Colgamos el cartel «Hoy vuelo bajito», dejamos una tarea para otro rato y buscamos una postura cómoda. El Oso puede hacer de perchero de abrazos, con tu permiso.' },
+    { topic: /\b(?:membranas?|patitas?)\b/, name: 'Membranas de paseo interminable', care: 'Aparcamos las patitas en un sitio cómodo y dibujamos un estanque donde todos los caminos terminan en un sillón. La siguiente expedición puede ser pequeñita y cuando te apetezca.' },
+    { topic: /\bpico\b/, name: 'Pico en huelga de parloteo', care: 'Le concedemos al pico un rato sin recados ni conversaciones obligatorias. Puedes elegir silencio, unas palabras suaves o una merienda que ya te guste; el Oso escucha sin poner deberes.' },
+    { topic: /\bdiente huevil\b/, name: 'Diente huevil con ganas de ceremonia', care: 'Dibujamos una medalla de papel para el diente huevil y celebramos una ceremonia diminuta desde el sillón. El único discurso obligatorio lo da mi sombrero imaginario.' },
+    { topic: /\b(?:tripa|tripota|barriga|barriguita|estomago)\b/, name: 'Tripota con reunión de mariposas', care: 'Las mariposas del cuento aparcan sus maletines. Puedes aflojar los recados, ponerte cómoda y pedir compañía tranquila. En el cuaderno dibujamos una ventanita de estanque para que las mariposas miren el paisaje.' },
+    { topic: /\b(?:mojo|mimos|abrazos?)\b/, name: 'Abrazómetro a media luz', care: 'Encendemos una lucecita dibujada por cada mimo que te apetezca pedir: una nota bonita, una canción suave o un abrazo del Oso. Tú eliges cuáles y puedes cambiar de idea.' },
+    { topic: /\b(?:plumas?|cansad[ao]|cansancio)\b/, name: 'Plumaje con arrugas de lunes', care: 'Declaramos una tarde sin examen de productividad. Elige una cosa pequeña y agradable, deja las demás en el perchero del cuento y pide al Oso compañía o un ratito de cuidado de plumas, si te apetece.' }
+  ];
+
+  function storyPrescription(input, priorMessages, history) {
+    if (/^(?:hola|holi|buenas|gracias|muchas gracias|adios|hasta luego)\b/.test(input) || /\b(?:cuento|historia|relato)\b/.test(input)) return null;
+    const recent = priorMessages.slice(-4).map(function (item) { return normalize(item.text || item.content); });
+    const context = recent.concat(input).join(' ');
+    // A recipe follows listening: keep the latest topic and require a description plus a detail.
+    let topic = null;
+    const messages = recent.concat(input).reverse().map(function (message) { return message.replace(/\b(?:receta de mimos|diagnostico de pato)\b/g, ''); });
+    const complaints = messages.filter(function (message) { return /\b(?:duele|molesta|molestan|tengo|necesito|cansada|cansado|revuelta|revueltas)\b/.test(message); });
+    for (const message of complaints.concat(messages)) {
+      topic = storyPrescriptions.find(function (entry) { return entry.name.startsWith('Diente huevil') && entry.topic.test(message); }) || storyPrescriptions.find(function (entry) { return entry.topic.test(message); });
+      if (topic) break;
+    }
+    const hasDetail = /\b(?:desde|hace|ayer|hoy|horas?|dias?|rato|siempre|al (?:abrir|cerrar|caminar)|despues|todo el rato|un lado|los dos lados|por toda|poco|mucho|suficientes?|mas mimos)\b/.test(context);
+    const asksForRecipe = /\b(?:receta|diagnostico|tratamiento)\b/.test(input);
+    const lastReply = (Array.isArray(history) ? history : []).filter(function (message) { return message.role === 'assistant' || message.role === 'animal'; }).slice(-1)[0];
+    if (!asksForRecipe && /receta de mimos:/i.test(lastReply?.text || lastReply?.content || '')) return null;
+    if (!topic || !hasDetail || (priorMessages.length < 2 && !asksForRecipe)) return null;
+    return 'Con lo que me has contado, pongo este sello en el cuaderno, Patita: «' + topic.name + '». Es nuestro diagnóstico de pato.\n\nReceta de mimos: ' + topic.care + '\n\n¿Te apetece esa receta o la cambiamos a tu gusto?';
+  }
+
+  function explicitUrgency(input) {
+    // Keep the demo aligned with salchicher_triage.py: current, asserted signals, not intensity alone.
+    const value = input.replace(/\bno (?:puedo|consigo) respirar de (?:la )?risa\b|\bme (?:estoy )?ahogando (?:de risa|en (?:el )?(?:papeleo|trabajo))\b|\b(?:me explota|me va a explotar) la cabeza (?:de|con) (?:tanto |el )?(?:trabajo|papeleo)\b/g, ' ');
+    const clauses = value.split(/[.;!?\n]+|\b(?:pero|sin embargo)\b|\by\s+(?=(?:ahora|hoy|no|me|tengo|estoy|siento|noto|se me|he perdido|ya)\b)/);
+    const current = /\b(?:ahora|hoy|en este momento|todavia|sigo|sigue|desde)\b/;
+    const past = /\b(?:ayer|anteayer|anoche|la semana pasada|el ano pasado|hace anos|cuando era|de pequena|tuve|tenia|sentia|notaba|me dolia|no podia|me costaba|me faltaba|me ahogue|me desmaye)\b/;
+    const resolved = /\b(?:ya estoy bien|ya se (?:me )?paso|ya no me pasa|ya resuelto)\b/;
+    const hypothetical = /\b(?:que significa|que significa decir|por ejemplo|un ejemplo|la frase|si algun dia|si me pasara|si tuviera|si no pudiera|en el cuento|en la pelicula)\b/;
+    const negative = /\b(?:no|nunca|ni|sin|niego)\s+(?:(?:tengo|siento|noto|hay|presento|esta|estan|tiene|tienen|he|tenido|me|ha|es|era|fue|cierto|verdad|que|empezo|aparecio|empezado|aparecido|lo|los|la|el|las|un|una|mucho|nada|ningun|ninguna|ahora)\s+)*$/;
+    const direct = [
+      /\bno (?:puedo|consigo) respirar\b|\bme (?:cuesta|falta) (?:mucho )?(?:respirar|el aire)\b|\bme (?:estoy )?(?:ahogando|ahogo)\b|\bdificultad (?:para|al) respirar\b/,
+      /\b(?:(?:tengo|siento|noto) (?:un )?)?dolor (?:muy |fuerte |intenso )*(?:en (?:el )?|de )?pecho\b|\bme duele (?:mucho )?el pecho\b|\blabios (?:azules|morados)\b/,
+      /\b(?:lengua|garganta) (?:muy )?hinchada\b|\b(?:lengua|labios) (?:muy )?hinchad[ao]s?\b|\bse me (?:ha |han )?hinchado (?:la lengua|los labios)\b|\bme he desmayado\b/,
+      /\bno puedo (?:tragar|beber)\b(?!\s+(?:alcohol|vino|cerveza|cafe)\b)|\bsangrado (?:muy )?(?:abundante|incontrolable)\b|\b(?:estoy sangrando|sangro) sin parar\b/,
+      /\bno (?:puedo|consigo) articular (?:las )?palabras\b|\bhablo arrastrando (?:las )?palabras\b|\bse me ha (?:torcido|caido) (?:un lado de )?la cara\b/,
+      /\bno (?:puedo|consigo) mover (?:un|el) lado (?:de mi|del) cuerpo\b|\b(?:ahora|de repente|de pronto) no (?:puedo|consigo) (?:hablar|(?:mover|levantar) (?:el|un|la|una|mi) (?:brazo|pierna))\b/,
+      /\b(?:he perdido|acabo de perder) (?:de repente )?la (?:vision|vista)\b|\bno veo nada (?:por|con) (?:un|el) ojo\b/,
+      // Existing explicit blood/poison reports remain guarded in the local demo too.
+      /\b(?:(?:vomito|vomitando|vomitado) sangre|sangre (?:al vomitar|en (?:mis |las )?(?:heces|deposiciones)))\b|\b(?:intoxicacion|me he intoxicado|he (?:tomado|bebido|ingerido) (?:veneno|lejia|un producto de limpieza))\b/
+    ];
+    const headache = /\b(?:dolor (?:(?:muy |fuerte |intenso |explosivo |violento |violentisimo |insoportable )*)de (?:cabeza|cabecita)|cefalea|me duele (?:mucho |muy fuerte )?la (?:cabeza|cabecita))\b/;
+    const sudden = /\b(?:repentin[oa]|subit[oa]|de repente|de golpe|de pronto|como un trueno|en trueno|en (?:pocos )?segundos)\b/;
+    const extreme = /\b(?:explosiv[oa]|violent[oa]|violentisim[oa]|fortisim[oa]|intensisim[oa]|insoportable|muy fuerte|muy intens[oa]|maxima intensidad en (?:pocos )?segundos)\b/;
+    const worst = /\b(?:el )?peor (?:dolor de (?:cabeza|cabecita) )?(?:de|en) (?:toda )?mi vida\b/;
+    function asserted(clause, pattern) {
+      for (const match of clause.matchAll(new RegExp(pattern.source, 'g'))) {
+        const before = clause.slice(0, match.index), prefix = before.split(',').pop();
+        if (!negative.test(prefix) && !(past.test(before) && !current.test(before))) return true;
+      }
+      return false;
+    }
+    return clauses.some(function (clause) {
+      if (!clause.trim() || hypothetical.test(clause) || ((past.test(clause) || resolved.test(clause)) && !current.test(clause))) return false;
+      return direct.some(function (pattern) { return asserted(clause, pattern); }) || (asserted(clause, headache) && (asserted(clause, worst) || (asserted(clause, sudden) && asserted(clause, extreme))));
+    });
+  }
+
   function careResponse(characterId, input, history) {
     // Remove explicit symptom denials, while preserving separate affirmative clauses.
     const signals = input
       .replace(/\bno puedo respirar de (?:la )?risa\b/g, '')
+      .replace(/\bno me duele (?:el )?pecho\b/g, '')
       .replace(/\bno (?:tengo|siento|hay|presento) (?:ningun[a]? )?(?:fiebre|dolor(?: (?:fuerte|intenso|insoportable))?|dificultad (?:para|al) respirar|sangre (?:en (?:las )?heces|al vomitar))\b/g, '')
       .replace(/\bno (?:he vomitado|vomito) sangre\b/g, '')
       .replace(/\bno (?:me he desmayado|me desmayo|se me (?:ha )?hinchado (?:la lengua|los labios))\b/g, '');
 
-    const breathingEmergency = /\b(?:no pued[oe] respirar|me (?:cuesta respirar|ahogo)|dificultad (?:para|al) respirar)\b/.test(signals);
-    const bloodEmergency = /\b(?:(?:vomito|vomitando|vomitado) sangre|sangre (?:al vomitar|en (?:mis |las )?(?:heces|deposiciones)))\b/.test(signals);
-    const collapseEmergency = /\b(?:me (?:he desmayado|desmayo)|se ha desmayado|he tenido un desmayo)\b/.test(signals);
-    const swellingEmergency = /\b(?:hinchazon (?:en|de) (?:la lengua|los labios)|(?:lengua|labios) (?:muy )?hinchad[ao]s?|se me (?:ha |han )?hinchado (?:la lengua|los labios))\b/.test(signals);
-    const poisoningEmergency = /\b(?:intoxicacion|me he intoxicado|he (?:tomado|bebido|ingerido) (?:veneno|lejia|un producto de limpieza))\b/.test(signals);
-    const duckOnlyPain = characterId === 'salchicher' && /\b(?:pico|alas?|membranas?|diente huevil|plumas?)\b/.test(signals) && !/\b(?:cabeza|cabecita|pecho|tripa|tripota|barriga|estomago|real|humano)\b/.test(signals);
-    const severePain = !duckOnlyPain && /\b(?:dolor (?:muy )?(?:fuerte|intenso|insoportable)|(?:me )?duele[^.!?;]{0,45}\b(?:muchisimo|mucho|muy fuerte|intensamente|demasiado))\b/.test(signals);
-
-    if (breathingEmergency || bloodEmergency || collapseEmergency || swellingEmergency || poisoningEmergency || severePain) {
+    // Intensity words alone do not turn the duck consultation into an emergency.
+    const severePain = characterId !== 'salchicher' && /\b(?:dolor (?:muy )?(?:fuerte|intenso|insoportable)|(?:me )?duele[^.!?;]{0,45}\b(?:muchisimo|mucho|muy fuerte|intensamente|demasiado))\b/.test(signals);
+    if (explicitUrgency(input) || severePain) {
       return 'Patita, lo que describes necesita ayuda médica urgente. Llama al 112 ahora o pide a alguien que llame y se quede contigo. No esperes a seguir esta conversación.';
     }
 
     const priorMessages = Array.isArray(history) ? history.filter(function (item) { return item && item.role === 'user'; }) : [];
     const previousInput = priorMessages.length ? normalize(priorMessages[priorMessages.length - 1].text || priorMessages[priorMessages.length - 1].content) : '';
     const humanPlan = /\b(?:medico|medica|doctor humano|doctora humana)\b/.test(input) && /\b(?:me (?:ha |han )?(?:dicho|recetado|mandado|diagnosticado)|me (?:dijo|receto|mando)|diagnostico del)\b/.test(input);
-    const medicineRequest = /\b(?:que (?:medicamento|pastilla|dosis)|que tengo que tomar|cuant[oa]s?[^.!?]{0,30}(?:tomar|tomo|pastillas?|dosis)|cambi[ao]r? (?:la |mi )?dosis|puedo tomar|debo tomar)\b/.test(input) || (!humanPlan && /\b(?:medicamentos?|pastillas?|dosis|antibioticos?|ibuprofeno|paracetamol)\b/.test(input));
-    if (medicineRequest || /\b(?:diagnostico medico real|que enfermedad tengo|necesito (?:un )?medico)\b/.test(input)) {
+    const drugMention = /\b(?:medicamentos?|pastillas?|antibioticos?|ibuprofeno|paracetamol|aspirina|analgesicos?|suplementos?)\b/.test(input);
+    const fictionalDose = /\b(?:mojo de oso|jalea de nubes|mimos|abrazos)\b/.test(input) && !drugMention;
+    const asksAboutDose = !fictionalDose && /\b(?:dosis|miligramos?|mg|cambiar (?:la |mi )?pauta)\b/.test(input);
+    const medicineRequest = asksAboutDose || (drugMention && (!humanPlan || /\b(?:que|cuanto|cuanta|cuantos|cuantas|puedo|debo|cambio|cambiar)\b/.test(input))) || /\bque tengo que tomar\b/.test(input);
+    if (medicineRequest || /\b(?:diagnostico (?:medico )?real|que enfermedad tengo (?:de verdad|realmente)|necesito (?:un )?medico)\b/.test(input)) {
       return 'Esa duda sobre medicamentos, dosis o un diagnóstico real corresponde a un profesional, Patita. Consúltala con tu médico o farmacéutico. Puedo ayudarte a escribir la pregunta.';
     }
     if (characterId === 'salchicher' && humanPlan) {
@@ -146,13 +212,23 @@
     }
     const painContext = /\b(?:dolor|duele|molestia|molestias|tripota|tripa|barriga|estomago)\b/.test(signals + ' ' + previousInput);
     const persistentSymptoms = /\b(?:persiste|persistente|empeora|empeorando|va a peor|no se me (?:pasa|quita)|no se (?:pasa|quita)|llevo (?:varios|muchos|dos|tres|cuatro|cinco|\d+) dias|desde hace (?:varios|muchos|dos|tres|cuatro|cinco|\d+) dias)\b/.test(signals);
-    if (painContext && persistentSymptoms && (characterId !== 'salchicher' || /\b(?:empeora|empeorando|va a peor)\b/.test(signals))) {
+    if (painContext && persistentSymptoms && characterId !== 'salchicher') {
       return 'Patita, si esa molestia sigue o está empeorando, es momento de consultarlo con un profesional sanitario. ¿Puedes pedir que te valoren?';
+    }
+    if (characterId === 'salchicher' && painContext && /\b(?:empeora|empeorando|va a peor)\b/.test(signals)) {
+      return 'Lo anoto, Patita. Antes de seguir con la receta de cuento, ¿qué ha cambiado desde que empezó: el lugar, la intensidad o cuándo lo notas?';
     }
     if (characterId !== 'salchicher' && /\b(?:diagnostico|diagnosticar|tratamiento)\b/.test(input)) {
       return 'Un diagnóstico real corresponde a un profesional, Patita. Yo puedo acompañarte y ayudarte a poner en palabras lo que quieres preguntar.';
     }
-    if (characterId === 'salchicher' && /\b(?:diagnostico|diagnosticar|receta|tratamiento)\b/.test(input)) {
+    if (characterId === 'salchicher' && /\b(?:compota|manzana|fruta|verdura|agua|merienda)\b/.test(input) && /\b(?:puedo|debo|tomar|comer|apetece|quiero|cuanta|cuanto)\b/.test(input)) {
+      return 'La compota, la fruta o el agua pueden formar parte de una merienda corriente, Patita: elige algo que ya te siente bien y te apetezca. En nuestra receta de cuento lo acompañamos de un mantel de nenúfares dibujados y compañía del Oso, si la quieres. ¿Qué te apetece poner en la mesa?';
+    }
+    if (characterId === 'salchicher') {
+      const prescription = storyPrescription(input, priorMessages, history);
+      if (prescription) return prescription;
+    }
+    if (characterId === 'salchicher' && /\b(?:diagnostico|diagnosticar|receta|tratamiento|enfermedad)\b/.test(input)) {
       return 'Abro una ficha para nuestro diagnóstico de pato, Patita. Primero necesito escucharte: ¿qué notas en el pico, las alas, las membranas o la cabecita? Después prepararemos una receta de mimos con el sello del consultorio de cuento.';
     }
     if (characterId === 'salchicher' && /\b(?:cabeza|cabecita)\b/.test(input + ' ' + previousInput)) {
