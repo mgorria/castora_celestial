@@ -8,11 +8,11 @@ from aiohttp import web
 from account_service import AccountError
 
 COOKIE = "__Host-castori_session"
-PUBLIC_GET = ("state", "events", "request", "history", "stories", "story", "consultations", "consultation")
-PUBLIC_POST = ("message", "callback", "consultation-action", "consultation-message", "read")
+PUBLIC_GET = ("state", "events", "request", "history", "stories", "story", "consultations", "consultation", "push-status")
+PUBLIC_POST = ("message", "callback", "consultation-action", "consultation-message", "read", "push-subscribe", "push-unsubscribe")
 ADMIN_GET = ("admin-state", "admin-events", "admin-invitation", "admin-owner-invitation", "admin-auth")
 ADMIN_POST = ("admin-action", "admin-callback", "admin-invitation", "admin-owner-invitation", "admin-auth")
-ASSET_EXTENSIONS = {".html", ".css", ".js", ".png", ".jpg", ".jpeg", ".webp", ".svg", ".woff", ".woff2", ".ico"}
+ASSET_EXTENSIONS = {".html", ".css", ".js", ".png", ".jpg", ".jpeg", ".webp", ".svg", ".woff", ".woff2", ".ico", ".webmanifest"}
 
 
 def canonical_origin(value):
@@ -42,7 +42,7 @@ class Portal:
         response.headers.update({
             "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
             "Referrer-Policy": "no-referrer", "X-Frame-Options": "DENY",
-            "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+            "Content-Security-Policy": "default-src 'none'; script-src 'self'; worker-src 'self'; manifest-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
         })
         return response
 
@@ -181,7 +181,13 @@ class Portal:
                 or not target.is_file() or any(part.startswith(".") for part in Path(relative).parts)
                 or any(p.is_symlink() for p in [requested, *requested.parents] if p != self.root.parent)):
             raise web.HTTPNotFound()
-        return web.FileResponse(target)
+        response = web.FileResponse(target)
+        if target.suffix.lower() == ".webmanifest":
+            response.content_type = "application/manifest+json"
+        if relative == "service-worker.js":
+            response.headers["Service-Worker-Allowed"] = "/castori/"
+            response.content_type = "text/javascript"
+        return response
 
     def install(self, app):
         app.router.add_get("/", self.index)

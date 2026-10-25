@@ -1,0 +1,20 @@
+.castori-notifications[hidden] { display: none; }
+.castori-notifications { margin: 18px 36px 0; color: var(--ink, #513947); }
+.notification-card { display: flex; align-items: center; gap: 18px; padding: 18px 22px; background: var(--panel, #fffafc); border: 1px solid var(--line, #ead8e1); border-radius: 18px; box-shadow: 0 5px 20px #7e4e6210; }
+.notification-copy { flex: 1; min-width: 0; }
+.notification-copy strong { display: block; font-size: .94rem; line-height: 1.5; }
+.notification-copy p { margin: 6px 0 0; font-size: .85rem; line-height: 1.6; }
+.notification-copy ol { margin: 10px 0 0; padding-left: 22px; font-size: .85rem; line-height: 1.7; }
+.notification-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.notification-actions button { min-height: 42px; }
+.notification-settings { display: flex; align-items: center; justify-content: flex-end; gap: 10px; font-size: .8rem; }
+.notification-settings .text-button { padding: 7px 0; }
+.notification-state { color: var(--muted, #76636c); }
+.notification-notice { color: var(--ink, #513947); }
+.castori-notifications button:focus-visible { outline: 3px solid #b77991; outline-offset: 3px; }
+@media (max-width: 720px) {
+  .castori-notifications { margin: 14px 18px 0; }
+  .notification-card { align-items: stretch; flex-direction: column; gap: 12px; padding: 17px; }
+  .notification-actions { justify-content: flex-start; }
+  .notification-settings { flex-wrap: wrap; }
+}

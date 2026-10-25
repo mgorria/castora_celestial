@@ -1,0 +1,15 @@
+{
+  "id": "/castori/",
+  "name": "Oficina Castori",
+  "short_name": "Oficina Castori",
+  "description": "Tu rincón de la Castora Celestial.",
+  "lang": "es",
+  "start_url": "/castori/",
+  "scope": "/castori/",
+  "display": "standalone",
+  "background_color": "#fff7fa",
+  "theme_color": "#fff7fa",
+  "icons": [
+    { "src": "/castori/assets/castori.png", "sizes": "1254x1254", "type": "image/png", "purpose": "any" }
+  ]
+}

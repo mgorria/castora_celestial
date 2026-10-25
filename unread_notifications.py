@@ -46,13 +46,51 @@ def _event_metadata(event):
     stamp = event.get("timestamp", 0)
     if not isinstance(stamp, (float, int)) or isinstance(stamp, bool):
         stamp = 0
-    return {"latest_id": event["id"], "read_id": 0, "latest_at": stamp}
+    return {"latest_id": event["id"], "read_id": 0, "latest_at": stamp, "pending_ids": []}
+
+
+def _pending_ids(data, chat_id, animal, sub, entry):
+    """Known unread IDs survive inbox trimming; never mutate on a read path."""
+    read_id, latest_id = entry.get("read_id", 0), entry.get("latest_id", 0)
+    events = [event for event in data.get("web_bridge", {}).get("inboxes", {}).get(_scope(chat_id, animal), [])
+              if event.get("role") == "assistant" and _positive_id(event.get("id"))
+              and event.get("animal", animal) == animal and _consultation(animal, event) == sub]
+    stored = entry.get("pending_ids")
+    if isinstance(stored, list):
+        ids = {identity for identity in stored if _positive_id(identity) and read_id < identity <= latest_id}
+    else:
+        # Migration cannot reconstruct already-discarded historical IDs. Preserve
+        # the old latest-cursor reminder without moving its read baseline.
+        ids = {event["id"] for event in events if read_id < event["id"] <= latest_id}
+        if latest_id > read_id and not any(event["id"] == latest_id for event in events):
+            ids.add(latest_id)
+    if animal == "salchicher":
+        ids.difference_update(event["id"] for event in events if retired_automatic_message(event))
+        if sub == DEFAULT_SCOPE:
+            # General clinic letters are deliberately transient. Removing or
+            # expiring their content must not leave a persistent phantom badge.
+            now = time.time()
+            ids = {identity for identity in ids if _doctor_scope_exists(data, chat_id, sub, now, identity)}
+    return sorted(ids)
 
 
 def initialize(data):
     """Treat retained historical events as read once, without importing text."""
     if isinstance(data.get(STORE_KEY), dict) and data[STORE_KEY].get("version") == 1:
-        return False
+        changed = False
+        for scope, records in data[STORE_KEY].get("scopes", {}).items():
+            try:
+                identity, animal = scope.split(":", 1)
+                chat_id = int(identity)
+            except (ValueError, TypeError):
+                continue
+            if not _positive_id(chat_id) or animal not in ANIMALS:
+                continue
+            for sub, entry in records.items():
+                if not isinstance(entry.get("pending_ids"), list):
+                    entry["pending_ids"] = _pending_ids(data, chat_id, animal, sub, entry)
+                    changed = True
+        return changed
     data[STORE_KEY] = {"version": 1, "scopes": {}, "deliveries": {}}
     state = data[STORE_KEY]
     for scope, events in data.get("web_bridge", {}).get("inboxes", {}).items():
@@ -88,7 +126,11 @@ def record(data, chat_id, animal, event):
     previous = records.get(sub, {})
     if event["id"] <= previous.get("latest_id", 0):
         return False
-    records[sub] = {**_event_metadata(event), "read_id": previous.get("read_id", 0)}
+    ids = _pending_ids(data, chat_id, animal, sub, previous)
+    if not (animal == "salchicher" and retired_automatic_message(event)):
+        ids.append(event["id"])
+    records[sub] = {**_event_metadata(event), "read_id": previous.get("read_id", 0),
+                    "pending_ids": ids}
     return True
 
 
@@ -114,9 +156,9 @@ def acknowledge(data, chat_id, animal, event_id, consultation_id=None):
     entry = data.get(STORE_KEY, {}).get("scopes", {}).get(_scope(chat_id, animal), {}).get(sub)
     if not entry:
         return False
-    # The latest recorded ID remains verifiable even after the bounded inbox has
-    # been trimmed. Older ACKs must match an event still in this exact sub-scope.
-    known = event_id == entry.get("latest_id") or any(
+    # Persisted unread IDs also prove scope membership after the inbox is trimmed.
+    ids = _pending_ids(data, chat_id, animal, sub, entry)
+    known = event_id in ids or event_id in (entry.get("latest_id"), entry.get("read_id")) or any(
         event.get("id") == event_id and event.get("animal", animal) == animal
         and event.get("role") == "assistant"
         and _consultation(animal, event) == sub
@@ -125,6 +167,7 @@ def acknowledge(data, chat_id, animal, event_id, consultation_id=None):
     if not known:
         return False
     entry["read_id"] = max(entry.get("read_id", 0), min(event_id, entry["latest_id"]))
+    entry["pending_ids"] = [identity for identity in ids if identity > entry["read_id"]]
     return True
 
 
@@ -164,18 +207,7 @@ def _visible_doctor_unread_id(data, chat_id, sub, entry):
     latest source is a known retired template, an earlier visible unread event
     still deserves its reminder and can be acknowledged by its unchanged ID.
     """
-    latest_id = entry.get("latest_id", 0)
-    events = [event for event in data.get("web_bridge", {}).get("inboxes", {})
-              .get(_scope(chat_id, "salchicher"), [])
-              if event.get("role") == "assistant" and _positive_id(event.get("id"))
-              and event.get("animal", "salchicher") == "salchicher"
-              and _consultation("salchicher", event) == sub]
-    latest_event = next((event for event in events if event["id"] == latest_id), None)
-    if latest_event is None or not retired_automatic_message(latest_event):
-        return latest_id
-    return max((event["id"] for event in events
-                if entry.get("read_id", 0) < event["id"] <= latest_id
-                and not retired_automatic_message(event)), default=0)
+    return max(_pending_ids(data, chat_id, "salchicher", sub, entry), default=0)
 
 
 def pending(data, chat_id):
@@ -189,16 +221,43 @@ def pending(data, chat_id):
         for sub, entry in scopes.get(_scope(chat_id, animal), {}).items():
             if entry.get("latest_id", 0) <= entry.get("read_id", 0):
                 continue
-            event_id = entry["latest_id"]
+            event_id = (_visible_doctor_unread_id(data, chat_id, sub, entry) if animal == "salchicher"
+                        else max(_pending_ids(data, chat_id, animal, sub, entry), default=0))
+            if not event_id:
+                continue
             if animal == "salchicher":
-                event_id = _visible_doctor_unread_id(data, chat_id, sub, entry)
-                if not event_id or not _doctor_scope_exists(data, chat_id, sub, now, event_id):
+                if not _doctor_scope_exists(data, chat_id, sub, now, event_id):
                     continue
             item = {"animal": animal, "event_id": event_id}
             if sub != DEFAULT_SCOPE:
                 item["consultation_id"] = sub
             result.append(item)
     return result
+
+
+def summary(data, chat_id):
+    """Public unread metadata for one person's inbox, without message contents."""
+    outstanding = {(item["animal"], item.get("consultation_id") or DEFAULT_SCOPE): item["event_id"]
+                   for item in pending(data, chat_id)}
+    stored = data.get(STORE_KEY, {}).get("scopes", {})
+    animals = {}
+    for animal in sorted(ANIMALS):
+        scopes = []
+        for sub, entry in stored.get(_scope(chat_id, animal), {}).items():
+            read_id = entry.get("read_id", 0)
+            latest_id = outstanding.get((animal, sub), entry.get("latest_id", 0))
+            count = 0
+            if (animal, sub) in outstanding:
+                count = sum(identity <= latest_id for identity in _pending_ids(data, chat_id, animal, sub, entry))
+            scopes.append({"consultation_id": None if sub == DEFAULT_SCOPE else sub,
+                           "count": count, "latest_id": latest_id, "read_id": read_id})
+        count = sum(item["count"] for item in scopes)
+        general = next((item for item in scopes if item["consultation_id"] is None), {})
+        animals[animal] = {"count": count, "has_new": count > 0, "scopes": scopes,
+                           "latest_id": max((item["latest_id"] for item in scopes), default=0),
+                           "read_id": general.get("read_id", 0)}
+    return {"total_messages": sum(item["count"] for item in animals.values()),
+            "total_chats": sum(item["has_new"] for item in animals.values()), "animals": animals}
 
 
 class UnreadNotifier:

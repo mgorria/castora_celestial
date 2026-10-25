@@ -132,6 +132,8 @@ class WebBridge:
         self.observed_apps: set[int] = set()
         self.site = None
         self.maintenance_task = None
+        self.push_service = None
+        self.push_task = None
 
     def _read(self) -> tuple[dict, dict]:
         data = copy.deepcopy(self.load())
@@ -330,6 +332,11 @@ class WebBridge:
             event["message_id"] = int(message_id)
         events.append(event)
         unread.record(data, chat_id, animal, event)
+        if self.push_service is not None:
+            try:
+                self.push_service.enqueue(data, animal, chat_id, event)
+            except Exception as exc:
+                logger.warning("Push enqueue unavailable: %s", type(exc).__name__)
         self._queue_history(data, animal, chat_id, event)
         state["inboxes"][scope] = events[-MAX_EVENTS:]
         self.save(data)
@@ -824,6 +831,16 @@ class WebBridge:
         self.site = web.TCPSite(self.runner, host, port)
         await self.site.start()
         self.maintenance_task = asyncio.create_task(self._maintenance_loop())
+        if self.push_service is not None:
+            self.push_task = asyncio.create_task(self._push_loop())
+
+    async def _push_loop(self):
+        while True:
+            await asyncio.sleep(2)
+            try:
+                await self.push_service.tick()
+            except Exception as exc:
+                logger.warning("Push delivery unavailable: %s", type(exc).__name__)
 
     async def _maintenance_loop(self):
         while True:
@@ -835,6 +852,10 @@ class WebBridge:
                 logger.warning("Web retention cleanup failed: %s", type(exc).__name__)
 
     async def close(self) -> None:
+        if self.push_task:
+            self.push_task.cancel()
+            await asyncio.gather(self.push_task, return_exceptions=True)
+            self.push_task = None
         if self.maintenance_task:
             self.maintenance_task.cancel()
             await asyncio.gather(self.maintenance_task, return_exceptions=True)
@@ -883,6 +904,7 @@ class WebBridge:
         consultation = data.get("salchicher", {}).get("sessions", {}).get(str(chat_id), {})
         active = self._active_consultation(data, chat_id)
         result = {"actor": request["actor"], "read_only": read_only, "characters": characters, "wishes": public_wishes,
+                  "unread": unread.summary(data, chat_id),
                   "private_consultation": {"active": active, "sharing": active},
                   "shared_between_users": True,
                   "history": {"enabled": self.history_provider is not None, "excluded_animals": ["salchicher"]},
@@ -1115,7 +1137,8 @@ class WebBridge:
         visible = [{key: value for key, value in event.items() if key not in {"timestamp", "requires_consultation"}}
                    for event in events if (reset or event.get("revision", event["id"]) > after)
                    and not (animal == "salchicher" and retired_automatic_message(event))]
-        return web.json_response({"events": visible, "cursor": state["sequence"], "reset": reset})
+        return web.json_response({"events": visible, "cursor": state["sequence"], "reset": reset,
+                                  "unread": unread.summary(data, chat_id)})
 
     async def _mark_read(self, request):
         # Reading the shared house as Miguel must never consume Sandra's mail.
@@ -1140,7 +1163,47 @@ class WebBridge:
                                   body["event_id"], body["consultation_id"]):
             return _failure("invalid_read")
         self.save(data)
-        return web.json_response({"ok": True})
+        return web.json_response({"ok": True, "unread": unread.summary(data, request["chat_id"])})
+
+    def _push_authorized(self, request):
+        return (bool(request.get("portal_session")) and request.get("actor") == "sandra"
+                and request.get("chat_id") == self.resolve_actor("sandra")
+                and request.get("chat_id") != self.resolve_actor("owner"))
+
+    async def _push_status(self, request):
+        if request.query:
+            return _failure("invalid_push_request")
+        if not self._push_authorized(request) or self.push_service is None:
+            return web.json_response({"available": False, "public_key": None, "subscribed": False, "device_count": 0})
+        return web.json_response(self.push_service.status(request["chat_id"]))
+
+    async def _push_mutation(self, request, *, subscribe):
+        if not self._push_authorized(request):
+            return _failure("read_only", 403)
+        if request.query:
+            return _failure("invalid_push_request")
+        if self.push_service is None:
+            return _failure("push_unavailable", 503)
+        try:
+            body = await request.json()
+        except (ValueError, UnicodeError):
+            return _failure("invalid_push_request")
+        field = "subscription" if subscribe else "endpoint"
+        if not isinstance(body, dict) or set(body) != {field}:
+            return _failure("invalid_push_request")
+        from web_push import WebPushError
+        try:
+            result = (self.push_service.subscribe(request["chat_id"], body[field]) if subscribe
+                      else self.push_service.unsubscribe(request["chat_id"], body[field]))
+        except WebPushError as exc:
+            return _failure(exc.code, exc.status)
+        return web.json_response(result)
+
+    async def _push_subscribe(self, request):
+        return await self._push_mutation(request, subscribe=True)
+
+    async def _push_unsubscribe(self, request):
+        return await self._push_mutation(request, subscribe=False)
 
     async def _request_status(self, request):
         request_id = request.query.get("request_id", "")

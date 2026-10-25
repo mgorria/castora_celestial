@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock
 
 from unread_notifications import (
     NOTICE_TEXT, STORE_KEY, UnreadNotifier, acknowledge, forget, initialize,
-    latest, pending, record,
+    latest, pending, record, summary,
 )
 from salchicher_copy import LEGACY_GREETING, LEGACY_QUESTIONS
 
@@ -72,6 +72,110 @@ class UnreadLedgerTests(unittest.TestCase):
         self.assertFalse(acknowledge(self.data, 11, "mimosuga", 9))
         self.assertTrue(acknowledge(self.data, 11, "mimosuga", 10))
         self.assertFalse(pending(self.data, 11))
+
+    def test_unread_count_and_partial_ack_survive_full_inbox_trimming(self):
+        for identity in range(1, 101):
+            add(self.data, identity)
+        self.assertEqual(summary(self.data, 11)["total_messages"], 100)
+        for identity in range(101, 301):
+            add(self.data, identity, role="user")
+        self.data["web_bridge"]["inboxes"]["11:mimosuga"] = self.data["web_bridge"]["inboxes"]["11:mimosuga"][-200:]
+        self.assertEqual(summary(self.data, 11)["total_messages"], 100)
+        self.assertTrue(acknowledge(self.data, 11, "mimosuga", 40))
+        self.assertEqual(summary(self.data, 11)["total_messages"], 60)
+        self.assertTrue(acknowledge(self.data, 11, "mimosuga", 40))
+        self.assertEqual(summary(self.data, 11)["total_messages"], 60)
+        self.assertFalse(acknowledge(self.data, 11, "mimosuga", 101))
+        add(self.data, 301)
+        self.assertEqual(summary(self.data, 11)["total_messages"], 61)
+        self.assertTrue(acknowledge(self.data, 11, "mimosuga", 100))
+        self.assertEqual(summary(self.data, 11)["total_messages"], 1)
+        self.assertEqual(pending(self.data, 11), [{"animal": "mimosuga", "event_id": 301}])
+        self.assertNotIn("PRIVATE MESSAGE BODY", json.dumps(self.data[STORE_KEY]))
+
+    def test_legacy_migration_preserves_baselines_and_delivery_reservations(self):
+        data = {STORE_KEY: {"version": 1, "scopes": {
+            "11:mimosuga": {"_": {"latest_id": 8, "read_id": 5, "latest_at": time.time()}},
+            "11:castori": {"_": {"latest_id": 9, "read_id": 9, "latest_at": time.time()}},
+        }, "deliveries": {"previous-slot": {"status": "sent"}}},
+            "web_bridge": {"inboxes": {
+                "11:mimosuga": [event(2), event(5), event(6), event(8)],
+                "11:castori": [event(9, "castori")],
+            }}}
+        before = copy.deepcopy(pending(data, 11))
+        self.assertTrue(initialize(data))
+        self.assertFalse(initialize(data))
+        self.assertEqual(pending(data, 11), before)
+        self.assertEqual(summary(data, 11)["total_messages"], 2)
+        entry = data[STORE_KEY]["scopes"]["11:mimosuga"]["_"]
+        self.assertEqual((entry["read_id"], entry["latest_id"], entry["pending_ids"]), (5, 8, [6, 8]))
+        self.assertEqual(data[STORE_KEY]["scopes"]["11:castori"]["_"]["pending_ids"], [])
+        self.assertEqual(data[STORE_KEY]["deliveries"], {"previous-slot": {"status": "sent"}})
+        self.assertNotIn("PRIVATE MESSAGE BODY", json.dumps(data[STORE_KEY]))
+
+    def test_legacy_trimmed_cursor_keeps_existing_pending_without_inventing_ids(self):
+        data = {STORE_KEY: {"version": 1, "scopes": {
+            "11:mimosuga": {"_": {"latest_id": 200, "read_id": 20, "latest_at": time.time()}}}, "deliveries": {}}}
+        self.assertTrue(initialize(data))
+        self.assertEqual(data[STORE_KEY]["scopes"]["11:mimosuga"]["_"]["pending_ids"], [200])
+        self.assertEqual(summary(data, 11)["total_messages"], 1)
+        self.assertFalse(acknowledge(data, 11, "mimosuga", 100))
+        self.assertTrue(acknowledge(data, 11, "mimosuga", 200))
+        self.assertEqual(summary(data, 11)["total_messages"], 0)
+
+    def test_legacy_retired_latest_is_not_reintroduced_after_migration_and_trim(self):
+        data = {STORE_KEY: {"version": 1, "scopes": {
+            "11:salchicher": {"kept": {"latest_id": 2, "read_id": 0, "latest_at": time.time()}}}, "deliveries": {}},
+            "salchicher": {"consultations": {"11": {"kept": {"retained": True}}}},
+            "web_bridge": {"inboxes": {"11:salchicher": [
+                event(1, "salchicher", consultation_id="kept"),
+                event(2, "salchicher", consultation_id="kept", text=LEGACY_GREETING),
+            ]}}}
+        self.assertTrue(initialize(data))
+        self.assertEqual(data[STORE_KEY]["scopes"]["11:salchicher"]["kept"]["pending_ids"], [1])
+        data["web_bridge"]["inboxes"]["11:salchicher"] = []
+        self.assertEqual(pending(data, 11), [{"animal": "salchicher", "event_id": 1, "consultation_id": "kept"}])
+        self.assertEqual(summary(data, 11)["total_messages"], 1)
+
+    def test_first_initialization_marks_historical_ids_read_not_pending(self):
+        data = {"web_bridge": {"inboxes": {"11:mimosuga": [event(1), event(2), event(3)]}}}
+        initialize(data)
+        entry = data[STORE_KEY]["scopes"]["11:mimosuga"]["_"]
+        self.assertEqual((entry["read_id"], entry["pending_ids"]), (3, []))
+        self.assertEqual(summary(data, 11)["total_messages"], 0)
+        add(data, 4)
+        self.assertEqual(summary(data, 11)["total_messages"], 1)
+
+    def test_duplicate_and_edit_do_not_increment_persistent_count(self):
+        original = add(self.data, 1)
+        self.assertFalse(record(self.data, 11, "mimosuga", original))
+        self.assertFalse(record(self.data, 11, "mimosuga", {**original, "revision": 999}))
+        add(self.data, 2)
+        self.assertEqual(summary(self.data, 11)["total_messages"], 2)
+        acknowledge(self.data, 11, "mimosuga", 1)
+        self.assertFalse(record(self.data, 11, "mimosuga", original))
+        self.assertEqual(summary(self.data, 11)["total_messages"], 1)
+
+    def test_retained_doctor_ids_survive_trimming_without_reviving_retired_copy(self):
+        self.data["salchicher"] = {"consultations": {"11": {"kept": {"retained": True}}}}
+        add(self.data, 1, "salchicher", consultation_id="kept", text="Una nota del doctor")
+        add(self.data, 2, "salchicher", consultation_id="kept", text=LEGACY_GREETING)
+        add(self.data, 3, "salchicher", consultation_id="kept", text="Otra nota del doctor")
+        self.assertEqual(summary(self.data, 11)["total_messages"], 2)
+        self.data["web_bridge"]["inboxes"]["11:salchicher"] = []
+        self.assertEqual(summary(self.data, 11)["total_messages"], 2)
+        self.assertTrue(acknowledge(self.data, 11, "salchicher", 1, "kept"))
+        self.assertEqual(summary(self.data, 11)["total_messages"], 1)
+        self.assertFalse(acknowledge(self.data, 11, "salchicher", 1, "other"))
+        del self.data["salchicher"]["consultations"]["11"]["kept"]
+        self.assertEqual(summary(self.data, 11)["total_messages"], 0)
+
+    def test_expired_general_doctor_ids_do_not_inflate_fresh_letter_count(self):
+        add(self.data, 1, "salchicher", timestamp=time.time() - 49 * 3600)
+        add(self.data, 2, "salchicher")
+        self.assertEqual(summary(self.data, 11)["total_messages"], 1)
+        self.data["web_bridge"]["inboxes"]["11:salchicher"] = []
+        self.assertEqual(summary(self.data, 11)["total_messages"], 0)
 
     def test_duplicate_and_keyboard_revision_do_not_reopen_read_event(self):
         item = add(self.data, 2)

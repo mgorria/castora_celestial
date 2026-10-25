@@ -53,7 +53,8 @@
   let serverState = { characters: [], wishes: [] }, connectionError = '', connectionStatus = 0, connectVersion = 0, actorKey, liveEpoch = 0;
   let pollTimer, pollController, pollVersion = 0;
   const liveChats = {}, cursors = {}, deliveryNotes = {}, requests = new Map();
-  const readReceipts = new Map(), readRequests = new Map();
+  const readReceipts = new Map(), readRequests = new Map(), unreadBoundaries = new Map();
+  let unreadPollTimer, unreadPollVersion = 0, stateReadVersion = 0, initialChatScroll = null;
   // Connected text stays in memory only, scoped to the signed-in actor.
   const archives = {};
   const newPage = () => ({ items: [], loaded: false, loading: false, error: '', nextCursor: null, hasMore: false, available: true, version: 0, controller: null });
@@ -77,15 +78,92 @@
   const deskChatVisible = () => view === 'control' && adminTab === 'chats' && canUseControl();
   const chatVisible = id => view === 'chat' && activeId === id || deskChatVisible() && deskAnimal === id;
   const isSandra = () => serverState.actor === 'sandra' || serverState.actor?.role === 'sandra';
+  const unreadKey = (animal, consultationId = null) => animal + ':' + (consultationId || '');
+  const nonnegative = value => Number.isSafeInteger(value) && value >= 0 ? value : 0;
+  function unreadAnimal(id) { return mode === 'live' ? serverState.unread?.animals?.[id] || {} : {}; }
+  function unreadCount(id, consultationId) {
+    const animal = unreadAnimal(id);
+    if (consultationId === undefined) return nonnegative(animal.count);
+    return nonnegative(animal.scopes?.find(scope => (scope.consultation_id || null) === (consultationId || null))?.count);
+  }
+  function unreadTotal() { return mode === 'live' ? ids.reduce((total, id) => total + unreadCount(id), 0) : 0; }
+  function orderedIds() { return ids.slice().sort((a, b) => Number(unreadCount(b) > 0) - Number(unreadCount(a) > 0)); }
+  function unreadBadge(count, extra = '') { return count > 0 ? `<span class="unread-badge ${extra}" aria-label="${count} ${count === 1 ? 'mensaje nuevo' : 'mensajes nuevos'}"><strong>${count > 99 ? '99+' : count}</strong> ${count === 1 ? 'Nuevo' : 'Nuevos'}</span>` : ''; }
+  function unreadBoundary(animal, consultationId = null) {
+    if (mode !== 'live') return null;
+    const key = unreadKey(animal, consultationId);
+    if (!unreadBoundaries.has(key)) {
+      const item = unreadAnimal(animal);
+      const scope = item.scopes?.find(scope => (scope.consultation_id || null) === (consultationId || null));
+      const cursor = scope?.read_id ?? (consultationId == null ? item.read_id : undefined);
+      if (!Number.isSafeInteger(cursor) || cursor < 0) return null;
+      unreadBoundaries.set(key, cursor);
+    }
+    return unreadBoundaries.get(key);
+  }
+  function isUnreadMessage(animal, message, consultationId = null) {
+    const cursor = unreadBoundary(animal, consultationId), eventId = message.event_id ?? message.id;
+    return mode === 'live' && message.role === 'assistant' && cursor !== null && Number.isSafeInteger(eventId) && eventId > cursor;
+  }
+  function unreadOverview() {
+    const count = unreadTotal(), chats = ids.filter(id => unreadCount(id) > 0).length;
+    return count ? `<section class="unread-overview" aria-label="Mensajes nuevos"><span class="unread-overview-icon" aria-hidden="true">${icon('chat')}</span><div><strong>${count} ${count === 1 ? 'mensaje nuevo te espera' : 'mensajes nuevos te esperan'}</strong><p>En ${chats} ${chats === 1 ? 'conversación' : 'conversaciones'}. Abre la que te apetezca primero.</p></div><button class="button" data-chat="${orderedIds()[0]}">Leer los nuevos ${icon('arrow')}</button></section>` : '';
+  }
+  function renderUnreadChrome() {
+    const count = unreadTotal(), menu = document.getElementById('mobile-menu');
+    menu.innerHTML = `${icon('menu')}${count ? `<span class="mobile-unread-count">${count > 99 ? '99+' : count}<span class="sr-only"> mensajes nuevos</span></span>` : ''}`;
+    menu.setAttribute('aria-label', count ? `Abrir menú, ${count} mensajes nuevos` : 'Abrir menú');
+    for (const button of document.querySelectorAll('.nav-item[data-view="conversations"]')) {
+      button.querySelector('.unread-badge')?.remove();
+      if (count) button.insertAdjacentHTML('beforeend', unreadBadge(count, 'nav-unread'));
+    }
+  }
+  function applyUnread(unread) {
+    if (!unread || typeof unread.animals !== 'object' || !unread.animals) return;
+    const animals = {};
+    for (const [id, item] of Object.entries(unread.animals)) {
+      if (!item || typeof item !== 'object') continue;
+      const scopes = Array.isArray(item.scopes) ? item.scopes.map(scope => {
+        const acknowledged = readReceipts.get(unreadKey(id, scope.consultation_id)) || 0;
+        return acknowledged >= nonnegative(scope.latest_id) && acknowledged > nonnegative(scope.read_id) ? { ...scope, count: 0, read_id: acknowledged } : scope;
+      }) : null;
+      animals[id] = scopes ? { ...item, scopes, count: scopes.reduce((n, scope) => n + nonnegative(scope.count), 0), has_new: scopes.some(scope => nonnegative(scope.count) > 0) } : item;
+    }
+    unread = { ...unread, animals };
+    const changed = JSON.stringify(serverState.unread) !== JSON.stringify(unread);
+    serverState.unread = unread;
+    if (mode !== 'live' || !changed) return;
+    renderFriends(); syncNotifications();
+    if (view === 'home' || view === 'conversations') main.innerHTML = view === 'home' ? home() : conversations();
+    if (view === 'clinic' || view === 'consultation') experiences?.refreshUnread?.();
+  }
+  function syncNotifications() {
+    Promise.resolve(notifications?.update?.({ portal: account.portal, authenticated: account.authenticated,
+      actor: serverState.actor || account.actor, unreadCount: unreadTotal() })).catch(() => {});
+  }
+  function stopUnreadPolling() { unreadPollVersion++; clearTimeout(unreadPollTimer); }
+  function startUnreadPolling() {
+    stopUnreadPolling(); const version = unreadPollVersion;
+    const run = async () => {
+      if (version !== unreadPollVersion || mode !== 'live' || accountLocked()) return;
+      if (document.visibilityState !== 'hidden') { try { await refreshServerState(); } catch (_) { /* The last confirmed counters remain visible. */ } }
+      if (version === unreadPollVersion && mode === 'live') unreadPollTimer = setTimeout(run, 12000);
+    };
+    unreadPollTimer = setTimeout(run, 12000);
+  }
   async function acknowledgeRead(animal, eventId, consultationId = null) {
-    if (mode !== 'live' || !isSandra() || document.visibilityState !== 'visible' || !bridge.read
+    if (mode !== 'live' || !isSandra() || document.visibilityState !== 'visible' || (document.hasFocus && !document.hasFocus()) || !bridge.read
         || !Number.isSafeInteger(eventId) || eventId <= 0) return;
     const key = animal + ':' + (consultationId || ''), epoch = liveEpoch;
     if ((readReceipts.get(key) || 0) >= eventId || readRequests.has(key)) return;
     const record = { epoch, eventId }; readRequests.set(key, record);
     try {
-      await bridge.read({ animal, event_id: eventId, consultation_id: consultationId });
-      if (epoch === liveEpoch) readReceipts.set(key, Math.max(eventId, readReceipts.get(key) || 0));
+      const result = await bridge.read({ animal, event_id: eventId, consultation_id: consultationId });
+      if (epoch === liveEpoch) {
+        readReceipts.set(key, Math.max(eventId, readReceipts.get(key) || 0));
+        if (result?.unread) applyUnread(result.unread);
+        await refreshServerState();
+      }
     } catch (_) { /* A later visible render/poll retries this idempotent acknowledgement. */ }
     finally { if (readRequests.get(key) === record) readRequests.delete(key); }
   }
@@ -123,9 +201,10 @@
     if (id === 'corte') return `<span class="${avatar ? 'avatar avatar-symbol' : 'court-portrait'}" aria-hidden="true"><span>⚖</span>${avatar ? '' : '<small>la corte celestial</small>'}</span>`;
     return `<img class="${avatar ? 'avatar' : ''}" src="assets/${id === 'vaca' ? 'vaca-v2' : id}.png" alt="${avatar ? '' : esc(characters[id].name)}" ${avatar ? '' : 'loading="lazy"'}>`;
   }
+  const notifications = window.CastoriNotifications?.create({ bridge, toast });
   const experiences = window.CastoriExperiences?.create({ bridge, esc, icon, portrait, formatDate, formatTime, uid,
     mode: () => mode, epoch: () => liveEpoch, ready, readOnly, navigate, toast, showModal, closeModal: () => modal.close(), submitLive,
-    refreshState: refreshServerState, acknowledgeRead, modalOpen: () => modal.open,
+    refreshState: refreshServerState, acknowledgeRead, updateUnread: applyUnread, unreadCount, unreadBadge, isUnreadMessage, unreadBoundary, modalOpen: () => modal.open,
     wishes: () => mode === 'demo' ? state.wishes.map(w => ({ ...w, name: w.text })) : (serverState.wishes || []),
     demoWish: (action, wish) => { if (mode !== 'demo') return; if (action === 'add') state.wishes.push(wish); else if (action === 'remove') state.wishes = state.wishes.filter(w => w.id !== wish.id); else { const w = state.wishes.find(w => w.id === wish.id); if (w) w.favorite = !w.favorite; } persist(); }
   });
@@ -160,8 +239,8 @@
       if (accountLocked()) renderAccountGate(); else { document.getElementById('account-gate').innerHTML = ''; account.code = ''; fromHash(); connect(); }
     } catch (_) { if (version !== accountVersion) return; account.loading = false; account.error = 'No hemos podido comprobar tu acceso. Vuelve a intentarlo en un momento.'; renderAccountGate(); }
   }
-  function clearAccountContent() {
-    connectVersion++; stopPolling(); clearLiveState(); sending.clear(); callbackBusy.clear(); serverState = { characters: [], wishes: [] }; actorKey = undefined;
+  function clearAccountContent(keepNotifications = false) {
+    connectVersion++; stopPolling(); clearLiveState(keepNotifications); sending.clear(); callbackBusy.clear(); serverState = { characters: [], wishes: [] }; actorKey = undefined;
     main.innerHTML = ''; document.getElementById('friend-nav').innerHTML = ''; document.getElementById('connection-banner').innerHTML = ''; document.getElementById('modal-content').innerHTML = ''; closeMenu();
   }
   function expireAccountSession() {
@@ -182,10 +261,11 @@
   }
   async function logoutAccount() {
     if (!account.portal || account.loading) return;
-    const version = ++accountVersion; account.loading = true; account.authenticated = false; account.code = ''; account.error = ''; account.screen = 'login'; mode = 'offline'; clearAccountContent(); renderAccountGate();
-    try { await bridge.accountLogout(); if (version !== accountVersion) return; account.username = ''; }
+    let cleanup; try { cleanup = notifications?.beforeLogout?.(); } catch (error) { cleanup = Promise.reject(error); }
+    const version = ++accountVersion; account.loading = true; account.authenticated = false; account.code = ''; account.error = ''; account.screen = 'login'; mode = 'offline'; clearAccountContent(true); renderAccountGate();
+    try { try { await cleanup; } catch (_) { /* Push cleanup must never keep the account signed in. */ } await bridge.accountLogout(); if (version !== accountVersion) return; account.username = ''; }
     catch (error) { if (version !== accountVersion) return; account.error = 'Tu rincón se ha cerrado aquí, pero no pudimos confirmar el cierre de tu sesión. Vuelve a pulsar «Cerrar sesión» antes de dejar este dispositivo.'; }
-    finally { if (version === accountVersion) { account.loading = false; renderAccountGate(); if (account.error) document.getElementById('account-error').insertAdjacentHTML('beforeend', '<button class="text-button" data-account-logout>Reintentar cerrar sesión</button>'); } }
+    finally { notifications?.reset?.(); if (version === accountVersion) { account.loading = false; renderAccountGate(); if (account.error) document.getElementById('account-error').insertAdjacentHTML('beforeend', '<button class="text-button" data-account-logout>Reintentar cerrar sesión</button>'); } }
   }
   function renderConnection() {
     const banner = document.getElementById('connection-banner'); let heading, copy, buttons;
@@ -199,12 +279,14 @@
     const controlNav = document.getElementById('control-nav'); controlNav.hidden = !canOpenControl(); controlNav.querySelector('span').textContent = mode === 'demo' ? 'Vista de Miguel' : 'Despacho del Castor';
   }
   function renderFriends() {
-    document.getElementById('friend-nav').innerHTML = ids.map(id => `<button class="friend-link ${['chat', 'clinic', 'consultation', 'vaca'].includes(view) && activeId === id ? 'active' : ''}" data-chat="${id}">${portrait(id, true)}<span class="friend-name">${esc(characters[id].name)}<small>${esc(status(id))}</small></span><span class="online-dot ${ready(id) && mode === 'live' ? '' : 'offline'}" aria-hidden="true"></span></button>`).join('');
+    const friends = document.getElementById('friend-nav'), html = orderedIds().map(id => `<button class="friend-link ${unreadCount(id) ? 'has-unread' : ''} ${['chat', 'clinic', 'consultation', 'vaca'].includes(view) && activeId === id ? 'active' : ''}" data-chat="${id}">${portrait(id, true)}<span class="friend-name">${esc(characters[id].name)}<small>${esc(unreadCount(id) ? 'Hay mensajes por leer' : status(id))}</small></span>${unreadCount(id) ? unreadBadge(unreadCount(id)) : `<span class="online-dot ${ready(id) && mode === 'live' ? '' : 'offline'}" aria-hidden="true"></span>`}</button>`).join('');
+    if (friends.innerHTML !== html) friends.innerHTML = html;
+    renderUnreadChrome();
   }
   function title(eyebrow, heading, text) { return `<div class="page-title"><div class="eyebrow">${icon('star')}${esc(eyebrow)}</div><h1>${esc(heading)}</h1><p>${esc(text)}</p></div>`; }
-  function card(id) { return `<button class="character-card" data-chat="${id}"><div class="portrait-wrap">${portrait(id)}</div><h3>${esc(characters[id].name)}</h3><p>${esc(details[id].short)}</p><span class="card-bottom">${esc(ready(id) ? (id === 'salchicher' ? 'Visitar el consultorio' : id === 'vaca' ? 'Charlar con la Vaca' : 'Entrar a charlar') : status(id))} ${icon('arrow')}</span></button>`; }
+  function card(id) { return `<button class="character-card ${unreadCount(id) ? 'has-unread' : ''}" data-chat="${id}"><div class="portrait-wrap">${portrait(id)}${unreadBadge(unreadCount(id), 'card-unread')}</div><h3>${esc(characters[id].name)}</h3><p>${esc(details[id].short)}</p><span class="card-bottom">${esc(ready(id) ? (id === 'salchicher' ? 'Visitar el consultorio' : id === 'vaca' ? 'Charlar con la Vaca' : 'Entrar a charlar') : status(id))} ${icon('arrow')}</span></button>`; }
   function home() {
-    return `<section class="hero" aria-labelledby="welcome-title"><img class="hero-art" src="assets/casa-celestial-v2.png" alt="Castori, Mimosuga y la Vaca Mágica en una oficina iluminada dentro de un árbol"><div class="hero-content"><div class="eyebrow">${icon('star')} UN LUGAR HECHO DE CARIÑO</div><h1 id="welcome-title">Qué bien que estés<br>aquí, <em>Patita.</em></h1><p>Al otro lado hay una historia, un abrazo<br>y alguien con ganas de escucharte.</p><div class="hero-buttons"><button class="button" data-chat="mimosuga">¿Charlamos un ratito? ${icon('arrow')}</button><button class="text-button" id="discover-friends">Conocer a mis amigos</button></div></div><div class="hero-caption">${icon('heart')} Pasa. Estás en casa.</div></section><section id="our-friends"><div class="section-heading"><div><h2>¿Con quién te apetece hablar?</h2><p>Tu pequeño universo, con todas sus historias.</p></div><span class="aside-note">Siempre hay una silla para ti.</span></div><div class="character-grid">${ids.map(card).join('')}</div></section><div class="below-home"><button class="story-feature" data-story="${stories[0].id}"><span class="mini-book">${icon('book')}</span><span><span class="eyebrow">UN CUENTO PARA TI</span><h3>${esc(stories[0].title)}</h3><p>Una historia de bienvenida, guardada para ti.</p></span>${icon('arrow')}</button><div class="daily-note"><span>✧</span><div><span class="eyebrow">UNA COSITA PARA RECORDAR</span><blockquote>Lo bonito también está<br>en los días normales.</blockquote></div></div></div>`;
+    return `${unreadOverview()}<section class="hero" aria-labelledby="welcome-title"><img class="hero-art" src="assets/casa-celestial-v2.png" alt="Castori, Mimosuga y la Vaca Mágica en una oficina iluminada dentro de un árbol"><div class="hero-content"><div class="eyebrow">${icon('star')} UN LUGAR HECHO DE CARIÑO</div><h1 id="welcome-title">Qué bien que estés<br>aquí, <em>Patita.</em></h1><p>Al otro lado hay una historia, un abrazo<br>y alguien con ganas de escucharte.</p><div class="hero-buttons"><button class="button" data-chat="mimosuga">¿Charlamos un ratito? ${icon('arrow')}</button><button class="text-button" id="discover-friends">Conocer a mis amigos</button></div></div><div class="hero-caption">${icon('heart')} Pasa. Estás en casa.</div></section><section id="our-friends"><div class="section-heading"><div><h2>¿Con quién te apetece hablar?</h2><p>Tu pequeño universo, con todas sus historias.</p></div><span class="aside-note">Siempre hay una silla para ti.</span></div><div class="character-grid">${orderedIds().map(card).join('')}</div></section><div class="below-home"><button class="story-feature" data-story="${stories[0].id}"><span class="mini-book">${icon('book')}</span><span><span class="eyebrow">UN CUENTO PARA TI</span><h3>${esc(stories[0].title)}</h3><p>Una historia de bienvenida, guardada para ti.</p></span>${icon('arrow')}</button><div class="daily-note"><span>✧</span><div><span class="eyebrow">UNA COSITA PARA RECORDAR</span><blockquote>Lo bonito también está<br>en los días normales.</blockquote></div></div></div>`;
   }
   function demoHistory(id) {
     if (id === 'corte') return [];
@@ -229,7 +311,7 @@
   }
   function chatHistory(id) { return mode === 'demo' ? demoHistory(id) : mode === 'live' ? connectedHistory(id) : []; }
   function conversations() {
-    return title('Siempre cerquita', 'Una conversación, un pequeño refugio.', mode === 'demo' ? 'Conversaciones de ejemplo guardadas en este navegador.' : 'Abre una conversación para recibir sus mensajes y botones.') + ids.map(id => { const last = chatHistory(id).at(-1); const text = last ? last.text : status(id); return `<button class="list-card" data-chat="${id}">${portrait(id, true)}<span><h2>${esc(characters[id].name)}</h2><p>${esc(text.length > 110 ? text.slice(0, 110) + '…' : text)}</p></span>${icon('arrow')}</button>`; }).join('');
+    return title('Siempre cerquita', 'Una conversación, un pequeño refugio.', mode === 'demo' ? 'Conversaciones de ejemplo guardadas en este navegador.' : 'Abre una conversación para recibir sus mensajes y botones.') + unreadOverview() + orderedIds().map(id => { const last = chatHistory(id).at(-1); const text = last ? last.text : status(id); return `<button class="list-card ${unreadCount(id) ? 'has-unread' : ''}" data-chat="${id}">${portrait(id, true)}<span><h2>${esc(characters[id].name)} ${unreadBadge(unreadCount(id))}</h2><p>${esc(text.length > 110 ? text.slice(0, 110) + '…' : text)}</p></span>${icon('arrow')}</button>`; }).join('');
   }
   function messageButtons(message) {
     if (mode !== 'live' || !Array.isArray(message.buttons)) return '';
@@ -250,15 +332,17 @@
   }
   function renderMessages(id) {
     const messages = chatHistory(id).filter(m => id !== 'salchicher' || !m.consultation_id && m.role === 'assistant'); const label = mode === 'demo' ? 'CONVERSACIÓN DE DEMOSTRACIÓN' : (readOnly() ? 'CONVERSACIÓN DE PATITA CON ' : 'TU CONVERSACIÓN CON ') + characters[id].name.toUpperCase(); let empty = '';
-    let previousDate = '';
+    let previousDate = '', firstUnread = true;
     if (!messages.length) {
       const text = config(id)?.reason === 'owner_uses_centralita' && mode !== 'demo' ? 'Este personaje se atiende desde tu Centralita. La conversación de Patita permanece separada de tu sesión de administrador.' : !ready(id) ? (id === 'dulcimiel' ? 'Dulcimiel todavía está preparando su rincón. Su conversación estará disponible próximamente.' : mode === 'checking' ? 'Abriendo la puerta…' : 'Ahora no podemos abrir esta conversación. Vuelve a llamar en un ratito.') : readOnly() ? 'Los mensajes de Patita y de este amigo aparecerán aquí. Puedes escribir como el animal desde el Despacho del Castor.' : id === 'salchicher' ? 'El consultorio de cuento guarda tus preguntas y las recetas de mimos de Salchicher.' : id === 'castori' ? 'Deja tu mensaje en la oficina. Castori la leerá en cuanto llegue su turno.' : id === 'corte' ? 'Presenta una acusación de cuento. Los siguientes pasos aparecerán aquí.' : 'Escribe cuando quieras. Los mensajes de esta conversación aparecerán aquí.';
       empty = `<div class="chat-empty">${icon(id === 'corte' ? 'star' : 'chat')}<p>${esc(text)}</p></div>`;
     }
     return historyControl(id) + `<div class="chat-date">UN RATITO PARA TI · ${esc(label)}</div>` + empty + messages.map(m => {
-      const assistant = m.role !== 'user'; const saved = state.memories.some(x => x.messageId === m.id);
+      const assistant = m.role !== 'user', unread = isUnreadMessage(id, m, m.consultation_id || null);
+      const divider = unread && firstUnread ? '<div class="unread-divider" role="separator"><span>Mensajes nuevos desde aquí</span></div>' : ''; if (unread) firstUnread = false;
+      const saved = state.memories.some(x => x.messageId === m.id);
       const date = formatDate(m.time), separator = mode === 'live' && date && date !== previousDate ? `<div class="message-date">${esc(date)}</div>` : ''; previousDate = date;
-      return separator + `<div class="message-row ${assistant ? '' : 'user'}">${assistant ? portrait(id, true) : ''}<div class="message-content"><div class="message">${esc(m.text)}</div>${messageButtons(m)}<div class="message-meta">${assistant ? esc(characters[id].name) : readOnly() ? 'Patita' : 'Tú'}${formatTime(m.time) ? ' · ' + formatTime(m.time) : ''}${mode === 'demo' && assistant ? `<button class="${saved ? 'saved' : ''}" data-save-message="${esc(m.id)}" aria-label="${saved ? 'Quitar de' : 'Guardar en'} mis recuerdos del boceto" aria-pressed="${saved}">${icon('heart')}</button>` : ''}</div></div></div>`;
+      return separator + divider + `<div class="message-row ${assistant ? '' : 'user'} ${unread ? 'message-unread' : ''}">${assistant ? portrait(id, true) : ''}<div class="message-content"><div class="message">${esc(m.text)}</div>${messageButtons(m)}<div class="message-meta">${assistant ? esc(characters[id].name) : readOnly() ? 'Patita' : 'Tú'}${formatTime(m.time) ? ' · ' + formatTime(m.time) : ''}${mode === 'demo' && assistant ? `<button class="${saved ? 'saved' : ''}" data-save-message="${esc(m.id)}" aria-label="${saved ? 'Quitar de' : 'Guardar en'} mis recuerdos del boceto" aria-pressed="${saved}">${icon('heart')}</button>` : ''}</div></div></div>`;
     }).join('') + (mode === 'demo' && pending.has(id) ? `<div class="message-row">${portrait(id, true)}<div class="message"><div class="typing" role="status" aria-label="Preparando una respuesta de ejemplo"><span></span><span></span><span></span></div></div></div>` : '');
   }
   function chatActions(id) {
@@ -788,16 +872,19 @@
     if (experiences && next === 'chat' && id === 'salchicher') next = 'clinic';
     if (experiences && next === 'wishes') next = 'vaca';
     const experienceId = next === 'consultation' ? (id && !ids.includes(id) ? id : experiences?.selectedId()) : null;
+    if (next !== view || (id && id !== activeId && id !== experiences?.selectedId())) unreadBoundaries.clear();
+    initialChatScroll = next === 'chat' ? activeId : null;
     experiences?.leave();
     if (view === 'control' && next !== 'control') { clearInvitationSecret(); if (account.portal && isOwner() && mode === 'live' && !(adminAuth.loading && adminAuth.revocationPending)) lockPortalDesk(); }
     if (next === 'control' && view !== 'control' && account.portal && isOwner()) { adminAuth.portalPrepared = false; adminAuth.requirePassword = true; adminAuth.unlocked = false; adminAuth.checked = false; }
     stopPolling(); stopAdminReads(); cancelArchiveReads(); if (modal.open) modal.close(); if (next === 'chat' && !ids.includes(id)) next = 'home'; view = next; if (id && ids.includes(id)) activeId = id;
     if (next === 'clinic' || next === 'consultation') activeId = 'salchicher'; else if (next === 'vaca') activeId = 'vaca';
+    if (next === 'chat') { initialChatScroll = activeId; unreadBoundary(activeId); }
     const views = { home, conversations, library, memories, wishes, control }; main.innerHTML = experiences && ['clinic', 'consultation', 'vaca'].includes(next) ? experiences.render(next, experienceId) : next === 'chat' ? chat(activeId) : (views[next] || home)();
     const labels = { home: 'Mi rincón', conversations: 'Conversaciones', library: 'La biblioteca', memories: 'Mis recuerdos', wishes: 'Cuaderno de ilusiones', control: 'Despacho del Castor', clinic: 'El consultorio de Salchicher', consultation: 'Mi consulta', vaca: 'El establo de las ilusiones' };
     document.getElementById('breadcrumb-current').textContent = next === 'chat' ? characters[activeId].name : labels[next] || 'Mi rincón';
     document.querySelectorAll('.nav-item').forEach(b => { const active = b.dataset.view === next || (next === 'chat' && b.dataset.view === 'conversations'); b.classList.toggle('active', active); if (active) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); b.querySelector('.nav-dot')?.remove(); if (active) b.insertAdjacentHTML('beforeend', '<span class="nav-dot"></span>'); });
-    renderFriends(); renderConnection(); closeMenu();
+    renderFriends(); renderConnection(); syncNotifications(); closeMenu();
     const nextHash = next === 'consultation' ? '#consultation/' + encodeURIComponent(experienceId || '') : next === 'chat' ? `#${activeId === 'vaca' ? 'carta' : 'chat'}/${activeId}` : `#${next === 'home' ? 'inicio' : next}`; if (updateHash && location.hash !== nextHash) history.pushState(null, '', nextHash);
     window.scrollTo(0, 0); if (next === 'chat') { scrollChat(); bindComposer(); }
     if (next === 'wishes') document.getElementById('wish-form').addEventListener('submit', addWish);
@@ -809,7 +896,18 @@
     if (['clinic', 'consultation', 'vaca'].includes(next)) experiences?.enter(next);
     acknowledgeChatRead();
   }
-  function scrollChat() { const log = document.getElementById('chat-messages'); if (log) log.scrollTop = log.scrollHeight; }
+  function scrollChat() {
+    const log = document.getElementById('chat-messages'); if (!log) return;
+    if (initialChatScroll === activeId) {
+      const divider = log.querySelector('.unread-divider');
+      if (divider && Number.isFinite(divider.offsetTop)) {
+        log.scrollTop = Math.max(0, divider.offsetTop - 12);
+        if (archives[activeId]?.loaded) initialChatScroll = null;
+        return;
+      }
+    }
+    log.scrollTop = log.scrollHeight;
+  }
   function refreshChat(forceScroll = false, prepended = false) {
     if (deskChatVisible()) { refreshDeskChat(forceScroll, prepended); return; }
     if (view !== 'chat') return;
@@ -822,6 +920,7 @@
     // Concurrent post-send and regular polls must never restore an older revision.
     if (Number.isFinite(Number(payload.cursor)) && Number(payload.cursor) < (cursors[id] || 0)) return;
     if (payload.reset) clearHistory(id);
+    if (payload.unread) applyUnread(payload.unread);
     let changed = !liveChats[id] || Boolean(payload.reset);
     const byId = new Map((payload.reset ? [] : liveChats[id] || []).map(m => [String(m.id), m]));
     for (const event of payload.events || []) {
@@ -837,25 +936,30 @@
     if (view === 'chat' && activeId === id) acknowledgeChatRead();
   }
   async function refreshServerState(signal) {
-    const data = await bridge.state(signal); if (!data || !Array.isArray(data.characters)) throw new Error('La puerta necesita un momentito. Vuelve a intentarlo en un ratito.');
+    const stateEpoch = liveEpoch, version = ++stateReadVersion;
+    const data = await bridge.state(signal); if (stateEpoch !== liveEpoch || version !== stateReadVersion) return data; if (!data || !Array.isArray(data.characters)) throw new Error('La puerta necesita un momentito. Vuelve a intentarlo en un ratito.');
     const nextActor = JSON.stringify(data.actor);
     const actorChanged = actorKey !== undefined && actorKey !== nextActor;
     if (actorChanged) clearLiveState();
+    const unreadChanged = JSON.stringify(serverState.unread) !== JSON.stringify(data.unread);
     actorKey = nextActor; serverState = data;
     if (actorChanged && mode === 'live') { navigate(view, activeId, false); return data; }
     if (mode === 'live') {
-      renderFriends();
+      renderFriends(); syncNotifications();
+      if (unreadChanged && (view === 'home' || view === 'conversations')) main.innerHTML = view === 'home' ? home() : conversations();
+      if (unreadChanged && (view === 'clinic' || view === 'consultation')) experiences?.refreshUnread?.();
       if (view === 'wishes') document.getElementById('wish-list').innerHTML = wishRows();
       if (view === 'vaca') experiences?.refreshWishes();
       if (view === 'chat') {
         document.querySelectorAll('[data-command]').forEach(b => { b.disabled = !canCommand(activeId, b.dataset.command); });
-        document.getElementById('chat-input').disabled = readOnly() || !ready(activeId); refreshChat();
+        document.getElementById('chat-input').disabled = readOnly() || !ready(activeId);
       }
     }
     return data;
   }
-  function clearLiveState() {
-    readReceipts.clear(); readRequests.clear();
+  function clearLiveState(keepNotifications = false) {
+    stopUnreadPolling(); if (!keepNotifications) notifications?.reset?.();
+    readReceipts.clear(); readRequests.clear(); unreadBoundaries.clear(); initialChatScroll = null;
     experiences?.clear();
     liveEpoch++; cancelArchiveReads(); if (modal.open) modal.close(); document.getElementById('modal-content').innerHTML = '';
     clearAdminAuth(); clearAdminState();
@@ -889,7 +993,7 @@
     const version = ++connectVersion; mode = 'checking'; connectionError = ''; connectionStatus = 0; navigate(view, activeId, false);
     try { await refreshServerState(); if (version !== connectVersion) return; mode = 'live'; }
     catch (error) { if (version !== connectVersion) return; mode = 'offline'; connectionStatus = error.status || 0; connectionError = error.message === 'La puerta necesita un momentito. Vuelve a intentarlo en un ratito.' ? 'Ahora no podemos abrir tu rincón. Vuelve a llamar en un ratito.' : error.message; }
-    navigate(view, activeId, false);
+    navigate(view, activeId, false); if (mode === 'live') startUnreadPolling();
   }
   function exploreDemo() {
     if (!canExploreDemo() || accountLocked()) return;
@@ -1065,7 +1169,8 @@
   document.getElementById('modal-close').addEventListener('click', () => modal.close());
   modal.addEventListener('close', cancelStory);
   modal.addEventListener('close', acknowledgeVisibleRead);
-  document.addEventListener('visibilitychange', acknowledgeVisibleRead);
+  document.addEventListener('visibilitychange', () => { acknowledgeVisibleRead(); if (document.visibilityState === 'visible' && mode === 'live') refreshServerState().catch(() => {}); });
+  window.addEventListener('focus', acknowledgeVisibleRead);
   document.addEventListener('scroll', acknowledgeVisibleRead, true);
   modal.addEventListener('click', e => { if (e.target === modal) { const r = modal.getBoundingClientRect(); if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) modal.close(); } });
   document.getElementById('mobile-menu').setAttribute('aria-expanded', 'false');
@@ -1073,5 +1178,5 @@
   document.getElementById('mobile-shade').addEventListener('click', closeMenu);
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMenu(); });
   function fromHash() { if (accountLocked()) return; const path = location.hash.slice(1).split('/'); if (path[0] === 'consultation' && path[1]) { let id; try { id = decodeURIComponent(path[1]); } catch (_) { navigate('clinic', null, false); return; } navigate('consultation', id, false); } else if (path[0] === 'carta' && path[1] === 'vaca') navigate('chat', 'vaca', false, true); else if (path[0] === 'chat' && ids.includes(path[1])) navigate('chat', path[1], false); else navigate(['conversations', 'library', 'memories', 'wishes', 'control', 'clinic', 'vaca'].includes(path[0]) ? path[0] : 'home', null, false); }
-  window.addEventListener('hashchange', fromHash); window.addEventListener('pageshow', event => { if (event.persisted && account.portal && isOwner() && view === 'control') { adminAuth.portalPrepared = false; loadAdminAuth(); } }); window.addEventListener('pagehide', () => { if (account.portal && isOwner() && view === 'control') lockPortalDesk(); stopPolling(); stopAdminReads(); cancelArchiveReads(); clearInvitationSecret(); }); bridge.onUnauthorized?.(expireAccountSession); applyTheme(); bootstrapAccount();
+  window.addEventListener('hashchange', fromHash); window.addEventListener('pageshow', event => { if (mode === 'live') startUnreadPolling(); if (event.persisted && account.portal && isOwner() && view === 'control') { adminAuth.portalPrepared = false; loadAdminAuth(); } }); window.addEventListener('pagehide', () => { if (account.portal && isOwner() && view === 'control') lockPortalDesk(); stopUnreadPolling(); stopPolling(); stopAdminReads(); cancelArchiveReads(); clearInvitationSecret(); }); bridge.onUnauthorized?.(expireAccountSession); applyTheme(); bootstrapAccount();
 }());

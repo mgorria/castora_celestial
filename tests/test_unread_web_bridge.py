@@ -63,7 +63,10 @@ class UnreadBridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(unread.pending(self.data, 11)), 1)
         response = await self.read(event)
         self.assertEqual(response.status, 200)
-        self.assertEqual(await response.json(), {"ok": True})
+        receipt = await response.json()
+        self.assertTrue(receipt["ok"])
+        self.assertEqual(receipt["unread"]["total_messages"], 0)
+        self.assertEqual(receipt["unread"]["animals"]["mimosuga"]["read_id"], event["id"])
         self.assertEqual(unread.pending(self.data, 11), [])
 
     async def test_cursor_cannot_ack_future_another_animal_or_another_person(self):

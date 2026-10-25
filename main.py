@@ -2969,6 +2969,8 @@ async def main() -> None:
             account_service=accounts, portal_origin=portal_origin, get_consultorio=lambda: salchicher,
             admin_access=admin_access)
         if web_bridge.portal:
+            from web_push import WebPushService
+            web_bridge.push_service = WebPushService(load_data, save_data, resolve_web_actor)
             data = load_data()
             if initialize_unread(data):
                 save_data(data)
