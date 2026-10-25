@@ -54,7 +54,7 @@ COMMANDS = {
 }
 CALLBACK_PREFIXES = {"mimosuga": "cuento:", "corte": "courtdef:", "salchicher": "salchicher:"}
 ADMIN_COMMANDS = frozenset({
-    "start", "status", "historial", "programar", "programados", "cancelar",
+    "start", "status", "historial", "programar", "programar_mimosuga", "programados", "cancelar",
     "pausar_programas", "reanudar_programas", "mimosuga_auto", "mimosuga_pendientes", "salchicher_auto",
     "vaca_auto", "vaca_ayuda", "vaca_deseos", "vaca_visita", "vaca_visitas",
     "vaca_activar", "vaca_texto", "vaca_hora", "vaca_fecha", "vaca_cancelar", "vaca_pausa",

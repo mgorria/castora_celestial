@@ -78,6 +78,7 @@ Desde tu Telegram, abre **Centralita Magica** y usa:
 /alegar Niego los hechos y solicito atenuante por preparacion de cafe.
 /caso_estado
 /programar mimosuga lunes 09:00 Que tengas buena semana, patita.
+/programar_mimosuga lunes 06:00
 /programar mimosuga 21/06/2026 16:00 Tengo algo que contarte, sol mio.
 /programados
 /cancelar id_de_programacion
@@ -89,6 +90,14 @@ Desde tu Telegram, abre **Centralita Magica** y usa:
 Las respuestas que Sandra envie a Oficina Castori se copiaran automaticamente a tu chat privado con Centralita.
 El historial guarda los ultimos mensajes de cada animal en `data.json`.
 Los mensajes programados pueden ser semanales o de una fecha exacta, se revisan periodicamente y se envian en la zona horaria configurada.
+`/programar_mimosuga lunes 06:00` crea un saludo cariñoso nuevo cada lunes en la
+oficina de Patita. Usa la fecha local, la época del año y los últimos ocho saludos
+para variar temas y formas de hablar; no consulta conversaciones personales.
+Requiere entrega web y la identidad de Patita en la oficina, respeta la pausa global
+y se cancela con `/cancelar ID`. Repetir el comando no duplica el mismo horario.
+La generación tiene un tiempo máximo y una alternativa cariñosa si no está
+disponible. Los envíos se reservan antes de entregarlos y no se repiten si su
+resultado es incierto. Esta programación no envía copias por Telegram.
 Si algo raro ocurre, `/pausar_programas` detiene los envios programados hasta usar `/reanudar_programas`.
 `/status` muestra el estado general: bots vinculados, Railway/worker, base de datos,
 OpenAI, programaciones, respuestas suaves de Mimosuga, cuentos y comandos utiles.

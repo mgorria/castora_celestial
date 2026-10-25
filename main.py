@@ -34,6 +34,7 @@ from vaca import Vaca
 from vaca_campaigns import VacaCampaigns
 from web_bridge import RecordingExtBot, WebBridge
 from unread_notifications import UnreadNotifier, initialize as initialize_unread
+from mimosuga_mornings import generate_monday_greeting
 from history_service import HistoryService
 from admin_service import AdminService
 from lore_utils import (
@@ -615,6 +616,7 @@ async def central_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         f"{animal_commands}\n"
         "/historial <animal> [cantidad]\n"
         "/programar <animal> <dia|DD/MM/AAAA> <HH:MM> <mensaje>\n"
+        "/programar_mimosuga lunes <HH:MM> (un cariño nuevo cada semana)\n"
         "/programados\n"
         "/cancelar <id>\n"
         "/pausar_programas\n"
@@ -878,6 +880,71 @@ async def central_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await update.effective_chat.send_message(
         "Programacion creada:\n" + format_schedule(schedule)
     )
+
+
+def mimosuga_monday_recipient() -> int | None:
+    """This recurring greeting belongs only to Patita's office."""
+    # Portal identity is authoritative; legacy Telegram bindings can differ.
+    recipient = resolve_web_actor("sandra")
+    app = animal_apps.get("mimosuga")
+    if (type(recipient) is not int or recipient <= 0 or not app
+            or recipient == owner_chat_id()
+            or web_bridge is None or web_bridge.portal is None
+            or os.getenv("CASTORI_WEB_ONLY_DELIVERY", "true").lower() != "true"):
+        return None
+    return recipient
+
+
+async def central_schedule_mimosuga(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_chat or not is_private_owner(update):
+        return
+    if len(context.args) != 2 or context.args[0].lower() != "lunes":
+        await update.effective_chat.send_message("Uso: /programar_mimosuga lunes HH:MM")
+        return
+    try:
+        hour, minute = parse_schedule_time(context.args[1])
+    except ValueError:
+        await update.effective_chat.send_message("Hora no válida. Usa formato HH:MM.")
+        return
+    if mimosuga_monday_recipient() is None:
+        await update.effective_chat.send_message("Mimosuga necesita tener vinculada la oficina de Patita antes de programar sus lunes.")
+        return
+    when = f"{hour:02d}:{minute:02d}"
+    schedules = get_schedules()
+    matches = [item for item in schedules if item.get("animal_key") == "mimosuga"
+               and item.get("kind", "weekly") == "weekly" and item.get("weekday") == 0
+               and item.get("time") == when]
+    if matches:
+        if len(matches) == 1 and matches[0].get("generator") == "mimosuga_monday":
+            await update.effective_chat.send_message("Esta programación ya existe:\n" + format_schedule(matches[0]))
+        else:
+            await update.effective_chat.send_message("Ya hay un mensaje de Mimosuga en ese horario. Revisa /programados antes de crear otro; no se ha duplicado.")
+        return
+    if schedules_paused():
+        await update.effective_chat.send_message("Las programaciones están pausadas. No he activado ni reanudado ningún envío.")
+        return
+    now = datetime.now(APP_TIMEZONE)
+    schedule = {
+        "id": uuid.uuid4().hex[:8], "kind": "weekly", "animal_key": "mimosuga",
+        "weekday": 0, "time": when, "generator": "mimosuga_monday",
+        "delivery": "office", "greeting_history": [],
+        "text": "Un mensaje cariñoso nuevo de Mimosuga para Patita, según la fecha y la época del año.",
+        "last_sent_date": now.date().isoformat() if now.weekday() == 0 and (now.hour, now.minute) >= (hour, minute) else None,
+    }
+    schedules.append(schedule)
+    save_schedules(schedules)
+    await update.effective_chat.send_message("Programación creada en la oficina:\n" + format_schedule(schedule) + f"\nZona horaria: {APP_TIMEZONE}.")
+
+
+def remember_mimosuga_greeting(schedule_id: str, text: str) -> None:
+    # Reload after generation/delivery: never overwrite changes made while awaiting.
+    schedules = get_schedules()
+    for item in schedules:
+        if item.get("id") == schedule_id and item.get("generator") == "mimosuga_monday":
+            history = [value for value in item.get("greeting_history", []) if isinstance(value, str)]
+            item["greeting_history"] = [*history, text][-8:]
+            save_schedules(schedules)
+            return
 
 
 async def central_schedules(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1945,7 +2012,8 @@ async def send_as_animal(
 
 async def send_scheduled_message(schedule: dict[str, Any]) -> bool:
     animal_key = schedule["animal_key"]
-    partner_chat_id = get_partner_chat_id(animal_key)
+    generated_greeting = schedule.get("generator") == "mimosuga_monday"
+    partner_chat_id = mimosuga_monday_recipient() if generated_greeting else get_partner_chat_id(animal_key)
     animal_app = animal_apps.get(animal_key)
     if not partner_chat_id or not animal_app:
         logger.warning(
@@ -1954,7 +2022,22 @@ async def send_scheduled_message(schedule: dict[str, Any]) -> bool:
         )
         return False
 
-    text = schedule["text"]
+    if generated_greeting:
+        if (animal_key != "mimosuga" or partner_chat_id != mimosuga_monday_recipient()
+                or schedules_paused()):
+            logger.warning("Mimosuga Monday delivery unavailable: office recipient changed")
+            return False
+        text = await generate_monday_greeting(
+            on_date=datetime.now(APP_TIMEZONE).date(),
+            recent_messages=[value for value in schedule.get("greeting_history", []) if isinstance(value, str)][-8:],
+        )
+        # Configuration or a cancellation may change during generation.
+        if (partner_chat_id != mimosuga_monday_recipient() or schedules_paused()
+                or not any(item.get("id") == schedule["id"] and item.get("generator") == "mimosuga_monday"
+                           for item in get_schedules())):
+            return False
+    else:
+        text = schedule["text"]
     if has_out_of_character_language(text):
         schedules = get_schedules()
         newly_blocked = False
@@ -1974,6 +2057,11 @@ async def send_scheduled_message(schedule: dict[str, Any]) -> bool:
     consultation = salchicher.active_consultation(partner_chat_id) if animal_key == "salchicher" and salchicher else None
     await animal_app.bot.send_chat_action(partner_chat_id, ChatAction.TYPING)
     await animal_app.bot.send_message(chat_id=partner_chat_id, text=text)
+    if generated_greeting:
+        try:
+            remember_mimosuga_greeting(schedule["id"], text)
+        except Exception as exc:
+            logger.warning("Mimosuga greeting memory unavailable after delivery: %s", type(exc).__name__)
     if consultation:
         try:
             salchicher.record_manual_delivery(partner_chat_id, text, consultation["id"])
@@ -1981,7 +2069,7 @@ async def send_scheduled_message(schedule: dict[str, Any]) -> bool:
             logger.warning("Scheduled consultation archive unavailable: %s", type(exc).__name__)
     append_history(animal_key, "out", text)
 
-    if centralita_app:
+    if centralita_app and not generated_greeting:
         await centralita_app.bot.send_message(
             chat_id=owner_chat_id(),
             text=(
@@ -2706,6 +2794,7 @@ def build_centralita_app() -> Application:
     app.add_handler(CommandHandler("status", central_status))
     app.add_handler(CommandHandler("historial", central_history))
     app.add_handler(CommandHandler("programar", central_schedule))
+    app.add_handler(CommandHandler("programar_mimosuga", central_schedule_mimosuga))
     app.add_handler(CommandHandler("programados", central_schedules))
     app.add_handler(CommandHandler("cancelar", central_cancel_schedule))
     app.add_handler(CommandHandler("pausar_programas", central_pause_schedules))
