@@ -1926,8 +1926,15 @@ async def send_as_animal(
     if animal_key == "vaca":
         await vaca_send_public(partner_chat_id, text)
     else:
+        consultation = salchicher.active_consultation(partner_chat_id) if animal_key == "salchicher" and salchicher else None
         await animal_app.bot.send_chat_action(partner_chat_id, ChatAction.TYPING)
         await animal_app.bot.send_message(chat_id=partner_chat_id, text=text)
+        if consultation:
+            try:
+                salchicher.record_manual_delivery(partner_chat_id, text, consultation["id"])
+            except Exception as exc:
+                # A successful delivery must never be retried because archival failed.
+                logger.warning("Manual consultation archive unavailable: %s", type(exc).__name__)
         append_history(animal_key, "out", text)
     await update.effective_chat.send_message(
         f"Enviado desde {ANIMALS[animal_key]['display_name']}."
@@ -1962,8 +1969,14 @@ async def send_scheduled_message(schedule: dict[str, Any]) -> bool:
                           "del personaje. Cancélala y prepara una nueva versión; el texto original se conserva.")
                 )
         return False
+    consultation = salchicher.active_consultation(partner_chat_id) if animal_key == "salchicher" and salchicher else None
     await animal_app.bot.send_chat_action(partner_chat_id, ChatAction.TYPING)
     await animal_app.bot.send_message(chat_id=partner_chat_id, text=text)
+    if consultation:
+        try:
+            salchicher.record_manual_delivery(partner_chat_id, text, consultation["id"])
+        except Exception as exc:
+            logger.warning("Scheduled consultation archive unavailable: %s", type(exc).__name__)
     append_history(animal_key, "out", text)
 
     if centralita_app:

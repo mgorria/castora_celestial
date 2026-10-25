@@ -50,7 +50,7 @@ class HistoryBridgeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await self.get(route, authenticated=False)).status, 401)
         response = await self.get("history?animal=mimosuga&limit=20&before=YWJj", actor="owner")
         self.assertEqual(response.status, 200)
-        self.provider.page.assert_awaited_once_with("owner", 22, "mimosuga", before="YWJj", limit=20)
+        self.provider.page.assert_awaited_once_with("sandra", 11, "mimosuga", before="YWJj", limit=20)
         response = await self.get("stories?limit=5")
         self.assertEqual(response.status, 200)
         self.provider.stories.assert_awaited_once_with("sandra", 11, before=None, limit=5)

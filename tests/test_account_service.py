@@ -60,11 +60,11 @@ class Connection:
         if query.startswith("delete from portal_auth_limits"):
             self.data["limits"] = {key: value for key, value in self.data["limits"].items() if value[0] >= args[0]}
         elif query.startswith("insert into portal_invitations"):
-            code_hash, chat_id, reset, account_id, created_at, expires_at = args
+            code_hash, chat_id, reset, account_id, created_at, expires_at, actor = args
             if code_hash in self.data["invitations"]:
                 raise AssertionError("Unique code constraint")
             self.data["invitations"][code_hash] = dict(code_hash=code_hash, chat_id=chat_id, reset=reset,
-                account_id=account_id, created_at=created_at, expires_at=expires_at, consumed_at=None, revoked_at=None)
+                account_id=account_id, created_at=created_at, expires_at=expires_at, actor=actor, consumed_at=None, revoked_at=None)
         elif query.startswith("update portal_invitations set revoked_at"):
             for row in self.data["invitations"].values():
                 if row["chat_id"] == args[0] and row["consumed_at"] is None and row["revoked_at"] is None:
@@ -113,7 +113,7 @@ class Connection:
                 rows = [row for row in self.data["accounts"].values() if row["chat_id"] == args[0]]
             elif "where username" in query:
                 rows = [row for row in self.data["accounts"].values()
-                        if row["username"] == args[0] and row["chat_id"] == args[1]]
+                        if row["username"] == args[0] and (len(args) == 1 or row["chat_id"] == args[1])]
             else:
                 rows = [self.data["accounts"][args[0]]] if args[0] in self.data["accounts"] else []
             return copy.deepcopy(rows[0]) if rows else None
@@ -125,11 +125,12 @@ class Connection:
             rows.sort(key=lambda row: row["created_at"], reverse=True)
             return copy.deepcopy(rows[0]) if rows else None
         if query.startswith("insert into portal_accounts"):
-            identity, chat_id, username, password_hash, now = args
-            if any(row["chat_id"] == chat_id or row["username"] == username for row in self.data["accounts"].values()):
+            identity, chat_id, username, password_hash, now, actor = args
+            if any(row["chat_id"] == chat_id or row["username"] == username or row["actor"] == actor
+                   for row in self.data["accounts"].values()):
                 raise AssertionError("Unique account constraint")
             row = dict(id=identity, chat_id=chat_id, username=username, password_hash=password_hash,
-                       auth_version=1, created_at=now, updated_at=now)
+                       auth_version=1, created_at=now, updated_at=now, actor=actor)
             self.data["accounts"][identity] = row
             return copy.deepcopy(row)
         if query.startswith("update portal_accounts set password_hash"):
@@ -146,9 +147,9 @@ class Connection:
             if not session or session["revoked_at"] is not None or session["expires_at"] <= args[1]:
                 return None
             account = self.data["accounts"].get(session["account_id"])
-            if not account or account["auth_version"] != session["auth_version"] or account["chat_id"] != args[2]:
+            if not account or account["auth_version"] != session["auth_version"]:
                 return None
-            return dict(username=account["username"], chat_id=account["chat_id"], expires_at=session["expires_at"])
+            return dict(username=account["username"], chat_id=account["chat_id"], expires_at=session["expires_at"], actor=account["actor"])
         raise AssertionError(f"Unexpected fetchrow: {query}")
 
 
@@ -202,6 +203,7 @@ class AccountTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(invite["code"]), 43)
         self.assertEqual(len(session["token"]), 43)
         self.assertEqual(session["username"], "patita")
+        self.assertEqual(session["actor"], "sandra")
         account = next(iter(self.pool.data["accounts"].values()))
         self.assertEqual(account["chat_id"], 11)
         self.assertTrue(account["password_hash"].startswith("$argon2id$v=19$m=65536,t=3,p=4$"))
@@ -376,6 +378,101 @@ class AccountTests(unittest.IsolatedAsyncioTestCase):
         await self.assert_error("rate_limited", self.service.register("bad", "newuser", PASSWORD, "203.0.113.1"), 429)
         self.assertNotIn("patita", str(self.pool.data["limits"]))
         self.assertNotIn("203.0.113.1", str(self.pool.data["limits"]))
+
+    async def test_both_people_have_distinct_accounts_roles_and_password_policies(self):
+        sandra_invite, sandra = await self.register()
+        owner_invite = await self.service.create_invitation(actor="owner")
+        owner = await self.service.register(owner_invite["code"], "miguel", "x", "192.0.2.2")
+        self.assertEqual(owner["actor"], "owner")
+        self.assertEqual(sandra["actor"], "sandra")
+        self.assertEqual((await self.service.get_session(owner["token"]))["chat_id"], 22)
+        self.assertEqual((await self.service.get_session(sandra["token"]))["chat_id"], 11)
+        self.assertEqual((await self.service.login("miguel", "x"))["actor"], "owner")
+        self.assertEqual((await self.service.login("patita", PASSWORD))["actor"], "sandra")
+        self.assertEqual(len(self.pool.data["accounts"]), 2)
+        await self.assert_error("account_exists", self.service.create_invitation(actor="owner"), 409)
+        await self.assert_error("account_identity_unavailable", self.service.create_invitation(actor="visitor"), 503)
+        await self.assert_error("invalid_credentials", self.service.login("miguel", ""), 401)
+
+    async def test_owner_invitation_does_not_replace_sandras_and_revocation_is_scoped(self):
+        sandra_invite = await self.service.create_invitation()
+        owner_invite = await self.service.create_invitation(actor="owner")
+        self.assertTrue((await self.service.invitation_status())["active"])
+        self.assertTrue((await self.service.invitation_status(actor="owner"))["active"])
+        owner = await self.service.register(owner_invite["code"], "miguel", "x")
+        sandra = await self.service.register(sandra_invite["code"], "patita", PASSWORD)
+        await self.service.revoke_sessions(actor="owner")
+        self.assertIsNone(await self.service.get_session(owner["token"]))
+        self.assertIsNotNone(await self.service.get_session(sandra["token"]))
+        reset = await self.service.create_invitation(reset=True, actor="owner")
+        renewed = await self.service.register(reset["code"], "miguel", "y")
+        self.assertEqual(renewed["actor"], "owner")
+        await self.assert_error("invalid_credentials", self.service.login("miguel", "x"), 401)
+        self.assertIsNotNone(await self.service.login("miguel", "y"))
+
+    async def test_swapped_ids_never_promote_a_sandra_account_or_invitation(self):
+        _, sandra = await self.register()
+        owner_invite = await self.service.create_invitation(actor="owner")
+        self.identities.update(sandra=22, owner=11)
+        self.assertIsNone(await self.service.get_session(sandra["token"]))
+        await self.assert_error("invalid_credentials", self.service.login("patita", PASSWORD), 401)
+        await self.assert_error("invalid_invitation", self.service.register(owner_invite["code"], "miguel", "x"))
+
+    async def test_role_mapping_is_rechecked_after_password_verification(self):
+        invite = await self.service.create_invitation(actor="owner")
+        owner = await self.service.register(invite["code"], "miguel", "x")
+        verify = self.service._verify
+        async def rebound(password_hash, password):
+            result = await verify(password_hash, password)
+            self.identities["owner"] = 33
+            return result
+        with patch.object(self.service, "_verify", rebound):
+            await self.assert_error("invalid_credentials", self.service.login("miguel", "x"), 401)
+        self.assertIsNone(await self.service.get_session(owner["token"]))
+
+    async def test_real_login_sessions_enforce_two_person_portal_permissions(self):
+        from aiohttp.test_utils import TestClient, TestServer
+        from portal import COOKIE
+        from web_bridge import WebBridge
+
+        await self.register()
+        owner_invite = await self.service.create_invitation(actor="owner")
+        await self.service.register(owner_invite["code"], "miguel", "x")
+        bridge_data = {}
+        def save(value):
+            bridge_data.clear()
+            bridge_data.update(value)
+        bridge = WebBridge(lambda: copy.deepcopy(bridge_data), save, lambda: {},
+            lambda actor: self.identities.get(actor), token="test-only-transport-secret-01234567890123456789",
+            account_service=self.service, portal_origin="https://casa.example",
+            get_admin_app=lambda: object(), admin_state_provider=lambda: {"marker": "owner-desk"})
+        client = TestClient(TestServer(bridge.create_app()))
+        await client.start_server()
+        try:
+            for username, password, role in (("patita", PASSWORD, "sandra"), ("miguel", "x", "owner")):
+                response = await client.post("/api/account/login", json={"username": username, "password": password},
+                                             headers={"Origin": "https://casa.example"})
+                self.assertEqual(response.status, 200)
+                self.assertEqual((await response.json())["actor"], role)
+                cookie = {"Cookie": f"{COOKIE}={response.cookies[COOKIE].value}"}
+                session = await client.get("/api/account/session", headers=cookie)
+                self.assertEqual((await session.json())["actor"], role)
+                desk = await client.get("/api/bridge/admin-state", headers={**cookie, "X-Castori-Actor": "owner"})
+                self.assertEqual(desk.status, 200 if role == "owner" else 403)
+                if role == "owner":
+                    self.assertEqual((await desk.json())["marker"], "owner-desk")
+                    action = await client.post("/api/bridge/message", json={"animal": "mimosuga", "text": "test"},
+                                               headers={**cookie, "Origin": "https://casa.example"})
+                    self.assertEqual(action.status, 403)
+                    self.assertEqual((await action.json())["error"], "read_only")
+                logout = await client.post("/api/account/logout", json={},
+                                           headers={**cookie, "Origin": "https://casa.example"})
+                self.assertEqual(logout.status, 200)
+                denied = await client.get("/api/bridge/admin-state", headers=cookie)
+                self.assertEqual(denied.status, 401)
+        finally:
+            await client.close()
+            await bridge.close()
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-"""Private care episodes, with opt-in history and legacy Telegram consent."""
+"""Care episodes shared by Sandra and Miguel, with opt-in retained history."""
 
 import asyncio
 import copy
@@ -18,7 +18,7 @@ INACTIVITY_SECONDS = 30 * 24 * 60 * 60
 MAX_MESSAGES = 24
 CONSULTATION_GREETING = (
     "¡Adelante, patita! Te guardé el sillón junto a la ventana. Me pongo las gafitas "
-    "y abro nuestro cuaderno de cuidados. Cuéntame qué notas y desde cuándo, "
+    "y abro nuestro cuaderno de cuidados, que podéis leer tú y el Oso. Cuéntame qué notas y desde cuándo, "
     "y vamos pasito a pasito."
 )
 INTRO = (
@@ -243,6 +243,12 @@ class Salchicher:
         state.setdefault("sessions", {})[str(chat_id)] = session
         self.store(state)
 
+    def record_manual_delivery(self, chat_id: int, content: str, consultation_id: str | None) -> None:
+        """Keep an actually delivered owner reply in the same active care episode."""
+        session = self.session(chat_id)
+        if consultation_id and session and session.get("consultation_id") == consultation_id:
+            self._save_message(chat_id, session, "assistant", content)
+
     def forget(self, chat_id: int) -> None:
         self._cancel_worker(chat_id)
         state = self.state()
@@ -286,7 +292,7 @@ class Salchicher:
         current = self.active_consultation(update.effective_chat.id)
         if current:
             retention = (
-                "Elegiste guardar este historial privado para volver a leerlo: se conserva "
+                "Elegiste guardar este historial, que podéis leer tú y el Oso: se conserva "
                 "hasta que lo borres. Si pasan 30 días sin actividad, la consulta se cierra "
                 "por inactividad; eso no significa que te hayas recuperado."
                 if current["retained"] else
@@ -302,8 +308,8 @@ class Salchicher:
             )
             return
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("Abrir consulta privada", callback_data="salchicher:private")],
-            [InlineKeyboardButton("Abrir y compartir con el Oso", callback_data="salchicher:shared")],
+            [InlineKeyboardButton("Abrir consulta", callback_data="salchicher:private")],
+            [InlineKeyboardButton("Abrir y avisar al Oso", callback_data="salchicher:shared")],
         ])
         await update.effective_chat.send_message(INTRO, reply_markup=keyboard)
 

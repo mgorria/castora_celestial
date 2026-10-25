@@ -36,6 +36,18 @@ class ConsultationTests(unittest.IsolatedAsyncioTestCase):
     async def finish(self):
         await asyncio.wait_for(asyncio.gather(*list(self.bot.tasks.values())), timeout=2)
 
+    async def test_manual_delivery_stays_in_the_episode_that_was_open_when_sent(self):
+        episode = self.bot.start_consultation(1, retain_history=True)
+        self.bot.record_manual_delivery(1, "Te he dejado una mantita, patita.", episode["id"])
+        stored = self.bot.get_consultation(1, episode["id"])
+        self.assertEqual(stored["messages"][-1]["content"], "Te he dejado una mantita, patita.")
+        self.assertEqual(stored["messages"][-1]["role"], "assistant")
+        self.bot.close_consultation(1, episode["id"])
+        next_episode = self.bot.start_consultation(1, retain_history=True)
+        self.bot.record_manual_delivery(1, "Respuesta tardía", episode["id"])
+        self.assertEqual(len(self.bot.get_consultation(1, next_episode["id"])["messages"]), 1)
+        self.send.assert_not_awaited()
+
     async def test_explicit_history_choice_and_private_by_default(self):
         for choice in (None, 0, 1, "true", "false"):
             with self.subTest(choice=choice), self.assertRaisesRegex(ValueError, "consent_required"):

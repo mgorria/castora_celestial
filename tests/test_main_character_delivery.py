@@ -8,6 +8,32 @@ import main
 
 
 class CharacterDeliveryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_manual_doctor_delivery_is_visible_in_shared_consultation(self):
+        owner_chat = SimpleNamespace(send_message=AsyncMock())
+        update = SimpleNamespace(effective_chat=owner_chat, message=object())
+        context = SimpleNamespace(args=['Te', 'acerco', 'una', 'mantita.'])
+        animal_bot = SimpleNamespace(send_message=AsyncMock(), send_chat_action=AsyncMock())
+        doctor = SimpleNamespace(active_consultation=Mock(return_value={'id': 'care-one'}), record_manual_delivery=Mock())
+        with patch.object(main, 'is_owner', return_value=True), \
+             patch.object(main, 'get_partner_chat_id', return_value=11), \
+             patch.object(main, 'animal_apps', {'salchicher': SimpleNamespace(bot=animal_bot)}), \
+             patch.object(main, 'salchicher', doctor), patch.object(main, 'append_history'):
+            await main.send_as_animal('salchicher', update, context)
+        animal_bot.send_message.assert_awaited_once_with(chat_id=11, text='Te acerco una mantita.')
+        doctor.record_manual_delivery.assert_called_once_with(11, 'Te acerco una mantita.', 'care-one')
+
+    async def test_scheduled_doctor_archive_failure_never_retries_successful_delivery(self):
+        animal_bot = SimpleNamespace(send_message=AsyncMock(), send_chat_action=AsyncMock())
+        doctor = SimpleNamespace(active_consultation=Mock(return_value={'id': 'care-one'}),
+                                 record_manual_delivery=Mock(side_effect=RuntimeError('storage')))
+        with patch.object(main, 'get_partner_chat_id', return_value=11), \
+             patch.object(main, 'animal_apps', {'salchicher': SimpleNamespace(bot=animal_bot)}), \
+             patch.object(main, 'salchicher', doctor), patch.object(main, 'append_history'), \
+             patch.object(main, 'centralita_app', None):
+            result = await main.send_scheduled_message({'id':'care-schedule', 'animal_key':'salchicher', 'text':'Un abrazo, patita.'})
+        self.assertTrue(result)
+        animal_bot.send_message.assert_awaited_once()
+
     async def test_owner_accusation_cannot_echo_a_technical_aside_to_sandra(self):
         owner_chat = SimpleNamespace(send_message=AsyncMock())
         update = SimpleNamespace(effective_chat=owner_chat)

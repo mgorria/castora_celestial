@@ -195,7 +195,7 @@ class WebIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("answerCallbackQuery", [c[0] for c in self.requests[0].calls])
         self.notify.assert_not_awaited()
 
-    async def test_send_chunks_are_all_mirrored_once_and_only_in_the_patient_inbox(self):
+    async def test_send_chunks_are_mirrored_once_and_visible_in_both_house_views(self):
         self.seed_consultation()
         text = "Primera parte. " * 350 + "\n\n" + "Segunda parte. " * 350
         await main.salchicher_send(11, text)
@@ -203,7 +203,8 @@ class WebIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([e["text"] for e in actual], main.split_telegram_text(text))
         self.assertGreater(len(actual), 1)
         self.assertEqual(len({e["message_id"] for e in actual}), len(actual))
-        self.assertEqual((await self.events("owner"))["events"], [])
+        self.assertEqual((await self.events("owner"))["events"], actual)
+        self.assertNotIn("22:salchicher", self.data["web_bridge"]["inboxes"])
 
     async def test_active_input_not_duplicated_and_forget_from_telegram_or_web_purges(self):
         for origin in ("telegram", "web"):
@@ -242,14 +243,14 @@ class WebIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_owner_start_cannot_rebind_any_existing_recipient(self):
         before = copy.deepcopy(self.data)
         response = await self.post("/start", headers=OWNER_HEADERS)
-        self.assertEqual(response.status, 409)
+        self.assertEqual(response.status, 403)
         response = await self.post("/start", animal="mimosuga", headers=OWNER_HEADERS, request_id="request002")
         self.assertEqual(response.status, 403)
         for key, value in before.items():
             self.assertEqual(self.data[key], value)
         self.assertIsNone(self.doctor.session(22))
 
-    async def test_consultation_routes_keep_archive_private_and_delete_it_completely(self):
+    async def test_consultation_archive_is_shared_read_only_and_deleted_for_both(self):
         start = await self.client.post("/castori-web/consultation-action", headers=HEADERS,
             json={"action": "start", "retain_history": True})
         item = (await start.json())["consultation"]
@@ -267,14 +268,16 @@ class WebIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(listing["active_id"], item["id"])
         self.assertNotIn("messages", listing["consultations"][0])
         owner = await self.client.get("/castori-web/consultations", headers=OWNER_HEADERS)
-        self.assertEqual((await owner.json())["consultations"], [])
+        self.assertEqual((await owner.json())["consultations"], listing["consultations"])
         for action in (None, "close", "delete"):
             if action:
                 forbidden = await self.client.post("/castori-web/consultation-action", headers=OWNER_HEADERS,
                     json={"action": action, "consultation_id": item["id"]})
             else:
                 forbidden = await self.client.get("/castori-web/consultation?id=" + item["id"], headers=OWNER_HEADERS)
-            self.assertEqual(forbidden.status, 404)
+            self.assertEqual(forbidden.status, 403 if action else 200)
+            if not action:
+                self.assertIn("SINTOMA_ARCHIVADO", str((await forbidden.json())["consultation"]["messages"]))
         close = await self.client.post("/castori-web/consultation-action", headers=HEADERS,
             json={"action": "close", "consultation_id": item["id"]})
         closed = (await close.json())["consultation"]
@@ -284,11 +287,15 @@ class WebIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.events())["events"], [])
         detail = await self.client.get("/castori-web/consultation?id=" + item["id"], headers=HEADERS)
         self.assertEqual(detail.status, 200)
+        owner_detail = await self.client.get("/castori-web/consultation?id=" + item["id"], headers=OWNER_HEADERS)
+        self.assertEqual(await owner_detail.json(), await detail.json())
         delete = await self.client.post("/castori-web/consultation-action", headers=HEADERS,
             json={"action": "delete", "consultation_id": item["id"]})
         self.assertEqual(await delete.json(), {"consultation": None, "deleted": True})
         self.assertNotIn("SINTOMA_ARCHIVADO", json.dumps(self.data))
         self.assertNotIn("CUIDADO_PRIVADO", json.dumps(self.data))
+        for headers in (HEADERS, OWNER_HEADERS):
+            self.assertEqual((await self.client.get("/castori-web/consultation?id=" + item["id"], headers=headers)).status, 404)
         self.notify.assert_not_awaited()
 
     async def test_temporary_consultation_close_erases_history_instead_of_archiving(self):
@@ -359,7 +366,7 @@ class WebIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(response.status, 400)
         response = await self.client.post("/castori-web/consultation-message", headers=OWNER_HEADERS,
             json={"consultation_id": item["id"], "text": "No usar la consulta de Sandra", "request_id": "owner001"})
-        self.assertEqual(response.status, 409)
+        self.assertEqual(response.status, 403)
 
     async def test_urgent_notice_survives_temporary_deletion_and_retained_closure(self):
         for retained in (False, True):

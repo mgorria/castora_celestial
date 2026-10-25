@@ -97,26 +97,27 @@ class WebBridgeTests(unittest.IsolatedAsyncioTestCase):
         response = await self.client.get("/castori-web/state", headers=HEADERS)
         state = await response.json()
         self.assertEqual(state["wishes"][0]["name"], "Libro")
-        self.assertEqual(state["private_consultation"], {"active": True, "sharing": False})
+        self.assertEqual(state["private_consultation"], {"active": True, "sharing": True})
         self.assertFalse(next(c for c in state["characters"] if c["id"] == "dulcimiel")["available"])
         self.assertNotIn("NO_PUBLICAR", str(state))
         self.assertNotIn("SINTOMA_PRIVADO", str(state))
         response = await self.client.get("/castori-web/state", headers=OWNER_HEADERS)
         state = await response.json()
-        self.assertEqual(state["wishes"][0]["name"], "Prueba dueño")
-        self.assertFalse(state["private_consultation"]["active"])
+        self.assertEqual(state["wishes"][0]["name"], "Libro")
+        self.assertTrue(state["private_consultation"]["active"])
+        self.assertTrue(state["read_only"])
         for character in state["characters"]:
-            if character["id"] in {"castori", "mimosuga", "corte"}:
-                self.assertFalse(character["available"])
-                self.assertEqual(character["reason"], "owner_uses_centralita")
+            self.assertEqual(character["available"], character["id"] in self.apps)
+            self.assertEqual(character["commands"], [])
 
-    async def test_events_isolate_actors_animals_and_ineligible_ids(self):
+    async def test_shared_events_read_sandra_scope_and_keep_telegram_storage_separate(self):
         self.bridge.record("salchicher", 11, "Privado Sandra", message_id=1)
         self.bridge.record("salchicher", 22, "Privado propietario", message_id=2)
         self.bridge.record("mimosuga", 11, "Cuento", message_id=3)
         self.assertIsNone(self.bridge.record("salchicher", 33, "Intruso"))
         self.assertEqual([e["text"] for e in (await self.get_events("salchicher"))["events"]], ["Privado Sandra"])
-        self.assertEqual([e["text"] for e in (await self.get_events("salchicher", headers=OWNER_HEADERS))["events"]], ["Privado propietario"])
+        self.assertEqual([e["text"] for e in (await self.get_events("salchicher", headers=OWNER_HEADERS))["events"]], ["Privado Sandra"])
+        self.assertEqual(self.data["web_bridge"]["inboxes"]["22:salchicher"][0]["text"], "Privado propietario")
         self.assertEqual([e["text"] for e in (await self.get_events())["events"]], ["Cuento"])
 
     async def test_dispatch_builds_real_update_and_command_entity(self):
@@ -261,7 +262,8 @@ class WebBridgeTests(unittest.IsolatedAsyncioTestCase):
         after = await self.get_events("salchicher", before["cursor"])
         self.assertTrue(after["reset"])
         self.assertEqual(after["events"], [])
-        self.assertEqual(len((await self.get_events("salchicher", headers=OWNER_HEADERS))["events"]), 1)
+        self.assertEqual((await self.get_events("salchicher", headers=OWNER_HEADERS))["events"], [])
+        self.assertEqual(self.data["web_bridge"]["inboxes"]["22:salchicher"][0]["text"], "Privado propietario")
         self.assertEqual(self.data["vaca"]["sessions"]["11"]["wishes"][0]["name"], "Libro")
 
     async def test_private_events_expire_at_48_hours_and_invalidate_callbacks(self):

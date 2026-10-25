@@ -287,7 +287,7 @@ probarlo desde su propio chat con Salchicher, sin vincular su ID como el de Pati
 Si ella opta por compartir, Control recibe un resumen por respuesta con el bloque
 de entrada y la respuesta completa. Si elige privado no se reenvian sus textos.
 
-En la web, **Iniciar consulta** abre un episodio de cuidados privado. Sandra acepta
+En la web, **Iniciar consulta** abre un episodio de cuidados compartido entre Sandra y Miguel. Sandra acepta
 el procesamiento de sus mensajes y elige por separado si quiere conservar la
 consulta en su historial; guardar no viene activado por defecto. Las consultas
 antiguas de Telegram no se importan ni adquieren permiso de archivo por abrir la web.
@@ -506,7 +506,7 @@ No subas nunca el archivo `.env` ni `data.json` al repositorio. Ya estan incluid
 
 `web_bridge.py` añade un transporte autenticado dentro del proceso existente. Se activa sólo al configurar `CASTORI_WEB_TOKEN`; sin esa variable Telegram sigue funcionando como antes. `CASTORI_WEB_HOST` por defecto escucha sólo en loopback y `PORT` por defecto es 8080. En Railway usar `0.0.0.0` y un endpoint HTTPS dirigido a ese puerto.
 
-`CASTORI_PORTAL_ORIGIN` habilita el portal propio de Sandra en ese origen HTTPS. `portal.py` sirve únicamente `portal_web/` y las APIs de cuenta; su cookie siempre representa a Sandra y nunca autentica Centralita. `account_service.py` guarda en PostgreSQL cuentas Argon2id, hashes de invitaciones de un uso con 48 horas y sesiones revocables de siete días. El panel privado de Miguel crea/revoca invitaciones mediante `/castori-web/admin-invitation`. Una invitación de recuperación requiere el usuario original, cambia su contraseña e invalida las sesiones previas. El origen de los POST se compara con la configuración fija, sin confiar en Host ni X-Forwarded-Host. No hay registro abierto ni rol elegido por el navegador.
+`CASTORI_PORTAL_ORIGIN` habilita una sola entrada HTTPS para Sandra y Miguel, con usuario y contraseña. Las cuentas e invitaciones guardan su rol (`sandra` u `owner`) en PostgreSQL; sólo existen esas dos identidades configuradas. Las cuentas anteriores conservan el rol Sandra. La sesión del propietario permite el **Despacho del Castor** y la de Sandra nunca lo permite. La vista normal de Miguel lee los datos de Sandra pero rechaza todos los POST de conversación, deseos y consultas. Los envíos administrativos conservan la identidad de Miguel y usan los mismos handlers de Centralita. `account_service.py` conserva Argon2id, invitaciones de un uso con 48 horas y sesiones revocables de siete días. `/admin-invitation` gestiona el acceso de Sandra y `/admin-owner-invitation` el de Miguel; ambos exigen propietario autenticado. La primera llave de Miguel se prepara desde el Site privado y su bloqueo existente. La recuperación exige el usuario original, cambia la contraseña e invalida las sesiones anteriores. No hay registro abierto ni rol elegido por el navegador.
 
 Los archivos públicos se sincronizan desde el Site con `node sites/oficina-castori/scripts/prepare-portal.mjs` antes del despliegue. No copiar fuentes del bot, configuración ni datos a `portal_web/`.
 
@@ -518,17 +518,17 @@ Los handlers, base de datos, historial, revisiones de Centralita, colas y schedu
 
 Los eventos nuevos, salvo Salchicher, se encolan en `data.json` antes de recortar el espejo y se archivan de forma idempotente en PostgreSQL. Una caída de la base de datos conserva la cola para reintentar sin reenviar mensajes a Telegram. `/olvidar` de la Vaca incrementa una época persistente, limpia el historial local y borra el archivo anterior cuando la base vuelve a estar disponible; la época impide que los mensajes olvidados reaparezcan. Sus deseos siguen en su almacenamiento propio.
 
-Salchicher sólo guarda texto de usuario después del consentimiento. Su espejo temporal caduca en un máximo de 48 horas y se purga al cerrar, borrar o caducar el episodio o usar `/olvidar`. El historial consentido del consultorio vive aparte en `data.json`; no entra en el archivo general de PostgreSQL ni se entrega a Centralita. Las sesiones e historiales del propietario y Sandra permanecen separados, también al conocer el identificador de una consulta ajena.
+Salchicher sólo guarda texto de usuario después del consentimiento de historial. Su espejo temporal caduca en un máximo de 48 horas y se purga al cerrar, borrar o caducar el episodio o usar `/olvidar`. El historial consentido del consultorio vive aparte en `data.json`; no entra en el archivo general de PostgreSQL. Por elección explícita del propietario, las consultas de Sandra y sus respuestas se comparten con Miguel, incluidas las consultas conservadas. Miguel sólo puede leerlas en la vista normal; el Despacho permite escribir como Salchicher. Las respuestas manuales y programadas realmente entregadas se incorporan al episodio que seguía activo, sin arrastrarlas a una consulta nueva.
 
 ### API del consultorio web
 
-Estas rutas usan el prefijo interno `/castori-web/` o el prefijo del portal `/api/bridge/`. La cookie del portal siempre identifica a Sandra; las solicitudes servidor a servidor resuelven el actor en el servidor. Ninguna ruta acepta `actor`, `chat_id` o un destinatario en su cuerpo o parámetros. Los POST del portal exigen el origen HTTPS configurado y JSON.
+Estas rutas usan el prefijo interno `/castori-web/` o el prefijo del portal `/api/bridge/`. La cookie del portal identifica el rol guardado en la cuenta; las solicitudes servidor a servidor resuelven el actor en el servidor. Los GET de la casa proyectan siempre la conversación de Sandra; recibos y operaciones administrativas mantienen el actor autenticado. Ninguna ruta acepta `actor`, `chat_id` o un destinatario en su cuerpo o parámetros. Los POST del portal exigen el origen HTTPS configurado y JSON, y sólo Sandra puede usar los POST normales.
 
 | Ruta | Entrada | Resultado |
 | --- | --- | --- |
 | `GET consultations` | Sin parámetros | Resúmenes propios y `active_id`; no incluye mensajes |
 | `GET consultation` | `?id=ID` | Detalle y mensajes del episodio propio, o 404 |
-| `POST consultation-action` | `{"action":"start","retain_history":true}`; booleano obligatorio | Consulta privada con saludo inicial; 409 si ya hay una activa |
+| `POST consultation-action` | `{"action":"start","retain_history":true}`; booleano obligatorio | Consulta compartida con saludo inicial; 409 si ya hay una activa |
 | `POST consultation-action` | `{"action":"close","consultation_id":"ID"}` | Cierra por declaración de mejoría; elimina si era temporal |
 | `POST consultation-action` | `{"action":"delete","consultation_id":"ID"}` | Borra sólo el episodio propio seleccionado |
 | `POST consultation-message` | `{"consultation_id":"ID","text":"…","request_id":"…"}` | Recibo idempotente; 409 si no corresponde a la consulta activa |

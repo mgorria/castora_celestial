@@ -435,6 +435,16 @@ class WebBridge:
     def _admin_authorized(self, request) -> bool:
         return request["actor"] == "owner" and self._is_admin_owner(request["chat_id"])
 
+    def _view_identity(self, request):
+        """Both people read Sandra's house; only administration keeps the owner scope."""
+        if request["actor"] != "owner":
+            return request["actor"], request["chat_id"]
+        chat_id = self.resolve_actor("sandra")
+        if (not isinstance(chat_id, int) or isinstance(chat_id, bool) or chat_id <= 0
+                or chat_id == self.resolve_actor("owner")):
+            raise web.HTTPServiceUnavailable()
+        return "sandra", chat_id
+
     async def _admin_state(self, request):
         if not self._admin_authorized(request):
             return _failure("owner_required", 403)
@@ -593,6 +603,12 @@ class WebBridge:
             self._set_status(key, status)
 
     async def _admin_invitation(self, request):
+        return await self._invitation(request, "sandra")
+
+    async def _admin_owner_invitation(self, request):
+        return await self._invitation(request, "owner")
+
+    async def _invitation(self, request, actor):
         if not self._admin_authorized(request):
             return _failure("owner_required", 403)
         if self.account_service is None or self.portal is None:
@@ -602,7 +618,7 @@ class WebBridge:
             if request.query:
                 return _failure("invalid_query")
             if request.method == "GET":
-                result = await self.account_service.invitation_status()
+                result = await self.account_service.invitation_status(**({"actor": actor} if actor == "owner" else {}))
             else:
                 if request.content_type != "application/json":
                     return _failure("json_required", 415)
@@ -614,11 +630,12 @@ class WebBridge:
                         or body["action"] not in {"create", "reset", "revoke"}):
                     return _failure("invalid_body")
                 if body["action"] == "revoke":
-                    await self.account_service.revoke_invitation()
-                    result = await self.account_service.invitation_status()
+                    await self.account_service.revoke_invitation(**({"actor": actor} if actor == "owner" else {}))
+                    result = await self.account_service.invitation_status(**({"actor": actor} if actor == "owner" else {}))
                 else:
-                    result = await self.account_service.create_invitation(reset=body["action"] == "reset")
-                    result["invite_url"] = self.portal.origin + "/castori/#invite/" + quote(result["code"], safe="")
+                    result = await self.account_service.create_invitation(reset=body["action"] == "reset", **({"actor": actor} if actor == "owner" else {}))
+                    fragment = "owner-invite" if actor == "owner" else "invite"
+                    result["invite_url"] = self.portal.origin + "/castori/#" + fragment + "/" + quote(result["code"], safe="")
             result["portal_url"] = self.portal.origin + "/castori/"
             if isinstance(result.get("expires_at"), datetime):
                 result["expires_at"] = result["expires_at"].isoformat()
@@ -628,6 +645,9 @@ class WebBridge:
 
     async def _admin_access_status(self, request):
         from admin_access import AdminAccessError
+        if request.get("portal_owner") is True and self._admin_authorized(request):
+            return {"configured": True, "unlocked": True,
+                    "expires_at": request["portal_session"]["expires_at"], "permission_based": True}
         if self.admin_access is None:
             raise AdminAccessError("admin_auth_unavailable", 503)
         if len(request.headers.getall("X-Castori-Owner-Id", [])) != 1:
@@ -655,6 +675,10 @@ class WebBridge:
             return _failure("owner_required", 403)
         if request.query:
             return _failure("invalid_admin_query")
+        if request.get("portal_owner") is True:
+            if request.method != "GET":
+                return _failure("account_logout_required", 400)
+            return web.json_response(await self._admin_access_status(request), headers={"Cache-Control": "no-store"})
         try:
             # Validate the trusted identity and storage even for mutations. A
             # missing password never makes any other admin endpoint public.
@@ -699,6 +723,10 @@ class WebBridge:
             if not actor:
                 return _failure("actor_unavailable", 403)
             request["actor"], request["chat_id"] = actor
+            if (request["actor"] == "owner" and request.method == "POST"
+                    and request.path in {"/castori-web/" + name for name in
+                        ("message", "callback", "consultation-action", "consultation-message")}):
+                return _failure("read_only", 403)
             try:
                 if request.path.startswith("/castori-web/admin-"):
                     if not self._admin_authorized(request):
@@ -738,6 +766,8 @@ class WebBridge:
         app.router.add_post("/castori-web/admin-callback", self._admin_callback)
         app.router.add_get("/castori-web/admin-invitation", self._admin_invitation)
         app.router.add_post("/castori-web/admin-invitation", self._admin_invitation)
+        app.router.add_get("/castori-web/admin-owner-invitation", self._admin_owner_invitation)
+        app.router.add_post("/castori-web/admin-owner-invitation", self._admin_owner_invitation)
         if self.portal:
             self.portal.install(app)
         return app
@@ -796,7 +826,8 @@ class WebBridge:
         self.maintenance()
         data = self.load()
         apps = self.get_apps()
-        chat_id = request["chat_id"]
+        view_actor, chat_id = self._view_identity(request)
+        read_only = request["actor"] == "owner"
         mimosuga = data.get("auto_replies", {}).get("mimosuga", {})
         characters = []
         for animal in ANIMALS:
@@ -805,19 +836,18 @@ class WebBridge:
                 mode = mimosuga.get("mode", "review") if mimosuga.get("enabled", False) else "manual"
             if animal in {"vaca", "salchicher"} and not data.get(animal, {}).get("enabled", True):
                 mode = "paused"
-            owner_unsupported = request["actor"] == "owner" and animal in {"castori", "mimosuga", "corte"}
-            characters.append({"id": animal, "available": animal in apps and not owner_unsupported,
-                               "mode": mode, "commands": sorted(COMMANDS[animal]),
-                               "reason": "owner_uses_centralita" if owner_unsupported else
-                                         ("animal_unavailable" if animal not in apps else "")})
+            characters.append({"id": animal, "available": animal in apps,
+                               "mode": mode, "commands": [] if read_only else sorted(COMMANDS[animal]),
+                               "reason": "animal_unavailable" if animal not in apps else ""})
         wishes = data.get("vaca", {}).get("sessions", {}).get(str(chat_id), {}).get("wishes", [])
         public_wishes = [{key: item.get(key, False if key == "favorite" else "")
                           for key in ("id", "name", "details", "url", "favorite")}
                          for item in wishes[:60] if isinstance(item, dict)]
         consultation = data.get("salchicher", {}).get("sessions", {}).get(str(chat_id), {})
         active = self._active_consultation(data, chat_id)
-        result = {"actor": request["actor"], "characters": characters, "wishes": public_wishes,
-                  "private_consultation": {"active": active, "sharing": bool(consultation.get("shared")) if active else False},
+        result = {"actor": request["actor"], "read_only": read_only, "characters": characters, "wishes": public_wishes,
+                  "private_consultation": {"active": active, "sharing": active},
+                  "shared_between_users": True,
                   "history": {"enabled": self.history_provider is not None, "excluded_animals": ["salchicher"]},
                   "stories": {"enabled": self.history_provider is not None}}
         doctor = self.get_consultorio()
@@ -826,7 +856,7 @@ class WebBridge:
                                  "active_id": current["id"] if current else None}
         # Optional provider must itself return an explicit public projection, not load_data().
         if self.state_provider:
-            extra = self.state_provider(request["actor"], chat_id)
+            extra = self.state_provider(view_actor, chat_id)
             if asyncio.iscoroutine(extra):
                 extra = await extra
             if isinstance(extra, dict):
@@ -839,7 +869,8 @@ class WebBridge:
         doctor = self.get_consultorio()
         if doctor is None:
             return _failure("consultorio_unavailable", 503)
-        consultations = doctor.list_consultations(request["chat_id"])
+        _, chat_id = self._view_identity(request)
+        consultations = doctor.list_consultations(chat_id)
         active = next((entry["id"] for entry in consultations if entry["status"] == "active"), None)
         return web.json_response({"consultations": consultations, "active_id": active})
 
@@ -854,7 +885,8 @@ class WebBridge:
         doctor = self.get_consultorio()
         if doctor is None:
             return _failure("consultorio_unavailable", 503)
-        item = doctor.get_consultation(request["chat_id"], request.query["id"])
+        _, chat_id = self._view_identity(request)
+        item = doctor.get_consultation(chat_id, request.query["id"])
         return web.json_response({"consultation": item}) if item else _failure("consultation_not_found", 404)
 
     async def _consultation_action(self, request):
@@ -970,7 +1002,8 @@ class WebBridge:
         if self.history_provider is None:
             return _failure("history_unavailable", 503)
         try:
-            result = await self.history_provider.page(request["actor"], request["chat_id"], animal,
+            view_actor, chat_id = self._view_identity(request)
+            result = await self.history_provider.page(view_actor, chat_id, animal,
                                                        before=before, limit=limit)
         except ValueError:
             return _failure("invalid_cursor")
@@ -989,7 +1022,8 @@ class WebBridge:
         if self.history_provider is None:
             return _failure("stories_unavailable", 503)
         try:
-            result = await self.history_provider.stories(request["actor"], request["chat_id"], before=before, limit=limit)
+            view_actor, chat_id = self._view_identity(request)
+            result = await self.history_provider.stories(view_actor, chat_id, before=before, limit=limit)
         except ValueError:
             return _failure("invalid_cursor")
         except Exception as exc:
@@ -1006,7 +1040,8 @@ class WebBridge:
         if self.history_provider is None:
             return _failure("stories_unavailable", 503)
         try:
-            result = await self.history_provider.story(request["actor"], request["chat_id"], int(raw_id))
+            view_actor, chat_id = self._view_identity(request)
+            result = await self.history_provider.story(view_actor, chat_id, int(raw_id))
         except Exception as exc:
             logger.warning("Story read unavailable: %s", type(exc).__name__)
             return _failure("stories_unavailable", 503)
@@ -1025,7 +1060,8 @@ class WebBridge:
         data, state = self._read()
         if self._clean(state, data):
             self.save(data)
-        scope = self._scope(request["chat_id"], animal)
+        _, chat_id = self._view_identity(request)
+        scope = self._scope(chat_id, animal)
         events = state["inboxes"].get(scope, [])
         reset = state["resets"].get(scope, 0) > after
         visible = [{key: value for key, value in event.items() if key not in {"timestamp", "requires_consultation"}}

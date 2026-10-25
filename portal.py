@@ -1,4 +1,4 @@
-"""Sandra's invitation portal. Its cookie never authenticates the owner bridge."""
+"""Two-person invitation portal; database sessions decide the allowed role."""
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -10,6 +10,8 @@ from account_service import AccountError
 COOKIE = "__Host-castori_session"
 PUBLIC_GET = ("state", "events", "request", "history", "stories", "story", "consultations", "consultation")
 PUBLIC_POST = ("message", "callback", "consultation-action", "consultation-message")
+ADMIN_GET = ("admin-state", "admin-events", "admin-invitation", "admin-owner-invitation", "admin-auth")
+ADMIN_POST = ("admin-action", "admin-callback", "admin-invitation", "admin-owner-invitation", "admin-auth")
 ASSET_EXTENSIONS = {".html", ".css", ".js", ".png", ".jpg", ".jpeg", ".webp", ".svg", ".woff", ".woff2", ".ico"}
 
 
@@ -56,13 +58,20 @@ class Portal:
                     return self.protect(failure("json_required", 415))
             if request.path.startswith("/api/bridge/"):
                 route = request.path.removeprefix("/api/bridge/")
-                if route not in PUBLIC_GET + PUBLIC_POST:
+                if route not in PUBLIC_GET + PUBLIC_POST + ADMIN_GET + ADMIN_POST:
                     return self.protect(failure("not_found", 404))
                 session = await self._session(request)
                 if not session:
                     return self.protect(failure("sign_in_required", 401))
                 # Only the DB session and current server mapping can bind this role.
-                request["actor"], request["chat_id"] = "sandra", session["chat_id"]
+                # Browser headers and JSON never participate in this decision.
+                request["actor"], request["chat_id"] = session["actor"], session["chat_id"]
+                request["portal_session"] = session
+                request["portal_owner"] = session["actor"] == "owner"
+                if route in ADMIN_GET + ADMIN_POST and not request["portal_owner"]:
+                    return self.protect(failure("owner_required", 403))
+                if route in PUBLIC_POST and request["portal_owner"]:
+                    return self.protect(failure("read_only", 403))
             response = await handler(request)
         except AccountError as exc:
             response = failure(exc.code, exc.status)
@@ -73,13 +82,28 @@ class Portal:
             response = failure("temporarily_unavailable", 503)
         return self.protect(response)
 
+    @staticmethod
+    def _session_token(request):
+        # Parse every header before a cookie parser can discard duplicate names.
+        # Ambiguous cookies must never choose which person's session to use.
+        values = []
+        for header in request.headers.getall("Cookie", []):
+            for part in header.split(";"):
+                name, _, value = part.strip().partition("=")
+                if name.strip() == COOKIE:
+                    values.append(value)
+        return values[0] if len(values) == 1 else ""
+
     async def _session(self, request):
         if self.accounts is None:
             raise web.HTTPServiceUnavailable()
-        raw = request.cookies.get(COOKIE, "")
+        raw = self._session_token(request)
         session = await self.accounts.get_session(raw) if raw else None
-        if (not session or session.get("actor") != "sandra"
-                or session.get("chat_id") != self.bridge.resolve_actor("sandra")):
+        if (not session or session.get("actor") not in ("sandra", "owner")
+                or not isinstance(session.get("chat_id"), int) or isinstance(session.get("chat_id"), bool)
+                or session["chat_id"] <= 0
+                or session["chat_id"] != self.bridge.resolve_actor(session["actor"])
+                or self.bridge.resolve_actor("sandra") == self.bridge.resolve_actor("owner")):
             return None
         return session
 
@@ -88,6 +112,7 @@ class Portal:
         result = {"portal": True, "authenticated": bool(session)}
         if session:
             result["username"] = session["username"]
+            result["actor"] = session["actor"]
         return web.json_response(result)
 
     @staticmethod
@@ -105,7 +130,7 @@ class Portal:
 
     @staticmethod
     def signed_in(result):
-        response = web.json_response({"authenticated": True, "username": result["username"]})
+        response = web.json_response({"authenticated": True, "username": result["username"], "actor": result["actor"]})
         expires = result["expires_at"]
         if isinstance(expires, str):
             expires = datetime.fromisoformat(expires.replace("Z", "+00:00"))
@@ -134,7 +159,9 @@ class Portal:
         await self.body(request, ())
         if not self.accounts:
             return failure("temporarily_unavailable", 503)
-        await self.accounts.logout(request.cookies.get(COOKIE, ""))
+        raw = self._session_token(request)
+        if raw:
+            await self.accounts.logout(raw)
         response = web.json_response({"authenticated": False})
         response.del_cookie(COOKIE, secure=True, httponly=True, samesite="Strict", path="/")
         return response
@@ -163,4 +190,8 @@ class Portal:
             handler = self.bridge._request_status if name == "request" else getattr(self.bridge, "_" + name.replace("-", "_"))
             app.router.add_get("/api/bridge/" + name, handler)
         for name in PUBLIC_POST:
+            app.router.add_post("/api/bridge/" + name, getattr(self.bridge, "_" + name.replace("-", "_")))
+        for name in ADMIN_GET:
+            app.router.add_get("/api/bridge/" + name, getattr(self.bridge, "_" + name.replace("-", "_")))
+        for name in ADMIN_POST:
             app.router.add_post("/api/bridge/" + name, getattr(self.bridge, "_" + name.replace("-", "_")))

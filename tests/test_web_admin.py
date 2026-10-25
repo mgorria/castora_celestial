@@ -110,11 +110,13 @@ class AdminBridgeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_all_admin_routes_require_owner_before_provider_or_dispatch(self):
         for headers, expected in (({}, 401), (SANDRA_HEADERS, 403)):
-            for path in ("admin-state", "admin-events"):
+            for path in ("admin-state", "admin-events", "admin-auth", "admin-invitation", "admin-owner-invitation"):
                 response = await self.client.get(f"/castori-web/{path}", headers=headers)
                 self.assertEqual(response.status, expected)
             for path, body in (("admin-action", {"text": "/status", "request_id": "denied001"}),
-                    ("admin-callback", {"event_id": 1, "data": "autoreply:1:send", "request_id": "denied002"})):
+                    ("admin-callback", {"event_id": 1, "data": "autoreply:1:send", "request_id": "denied002"}),
+                    ("admin-invitation", {"action": "create"}),
+                    ("admin-owner-invitation", {"action": "create"})):
                 response = await self.client.post(f"/castori-web/{path}", headers=headers, json=body)
                 self.assertEqual(response.status, expected)
         self.provider.assert_not_awaited()
@@ -178,6 +180,13 @@ class AdminBridgeTests(unittest.IsolatedAsyncioTestCase):
         central_sends = [params for endpoint, params in self.transports[0].calls if endpoint == "sendMessage"]
         self.assertTrue(central_sends)
         self.assertTrue(all(int(params["chat_id"]) == 22 for params in central_sends))
+        for headers in (HEADERS, SANDRA_HEADERS):
+            response = await self.client.get("/castori-web/events?animal=castori", headers=headers)
+            self.assertEqual([event["text"] for event in (await response.json())["events"]],
+                             ["Mensaje de prueba privado"])
+        duplicate = await self.action("/castori Mensaje de prueba privado", "send0001")
+        self.assertTrue((await duplicate.json())["duplicate"])
+        self.assertEqual(sum(endpoint == "sendMessage" for endpoint, _ in self.transports[1].calls), 1)
 
     async def test_admin_notifications_are_owner_only_ephemeral_and_never_animal_history(self):
         await self.app.bot.send_message(22, "REGALO_PRIVADO_AVISO_COMPARTIDO")

@@ -1,4 +1,4 @@
-"""Invitation-only Sandra accounts, backed by the existing PostgreSQL pool.
+"""Invitation-only Sandra and owner accounts, using the existing PostgreSQL pool.
 
 This module never reads an actor or Telegram ID from a browser. Owner-only
 invitation methods must be protected by the calling transport. Raw invitation
@@ -78,13 +78,28 @@ class AccountService:
             raise AccountError("accounts_unavailable", 503)
         return value.astimezone(timezone.utc)
 
-    def _sandra_id(self):
-        value = self.resolve_actor("sandra")
-        owner = self.resolve_actor("owner")
+    def _actor_id(self, actor):
+        if actor not in ("sandra", "owner"):
+            raise AccountError("account_identity_unavailable", 503)
+        value = self.resolve_actor(actor)
+        other = self.resolve_actor("owner" if actor == "sandra" else "sandra")
         if (not isinstance(value, int) or isinstance(value, bool) or not 0 < value <= 2**63 - 1
-                or value == owner):
+                or value == other):
             raise AccountError("account_identity_unavailable", 503)
         return value
+
+    def _sandra_id(self):
+        return self._actor_id("sandra")
+
+    def _bound_actor(self, record):
+        """A stored role never follows a changed or swapped chat-id binding."""
+        actor = record.get("actor") if record else None
+        if actor not in ("sandra", "owner"):
+            return None
+        try:
+            return actor if record["chat_id"] == self._actor_id(actor) else None
+        except AccountError:
+            return None
 
     @staticmethod
     def normalize_username(value):
@@ -96,8 +111,9 @@ class AccountService:
         return value
 
     @staticmethod
-    def _password(value):
-        if not isinstance(value, str) or not 12 <= len(value) <= 128:
+    def _password(value, actor="sandra"):
+        minimum = 1 if actor == "owner" else 12
+        if not isinstance(value, str) or not minimum <= len(value) <= 128:
             raise AccountError("invalid_password")
         return value
 
@@ -163,6 +179,7 @@ class AccountService:
                 create table if not exists portal_accounts (
                     id uuid primary key,
                     chat_id bigint not null unique check (chat_id > 0),
+                    actor text not null default 'sandra' check (actor in ('sandra', 'owner')),
                     username varchar(32) not null unique,
                     password_hash text not null,
                     auth_version bigint not null default 1,
@@ -172,6 +189,7 @@ class AccountService:
                 create table if not exists portal_invitations (
                     code_hash char(64) primary key,
                     chat_id bigint not null check (chat_id > 0),
+                    actor text not null default 'sandra' check (actor in ('sandra', 'owner')),
                     reset boolean not null,
                     account_id uuid references portal_accounts(id),
                     created_at timestamptz not null,
@@ -196,6 +214,11 @@ class AccountService:
                     window_start timestamptz not null,
                     attempts integer not null
                 );
+                alter table portal_accounts add column if not exists actor text not null
+                    default 'sandra' check (actor in ('sandra', 'owner'));
+                alter table portal_invitations add column if not exists actor text not null
+                    default 'sandra' check (actor in ('sandra', 'owner'));
+                create unique index if not exists portal_accounts_actor_idx on portal_accounts (actor);
             """)
         await self._dummy()
 
@@ -205,10 +228,10 @@ class AccountService:
         await conn.execute("select pg_advisory_xact_lock($1::bigint)", chat_id)
 
     @_storage_errors
-    async def create_invitation(self, reset=False):
+    async def create_invitation(self, reset=False, actor="sandra"):
         if not isinstance(reset, bool):
             raise AccountError("invalid_invitation")
-        chat_id, now = self._sandra_id(), self._now()
+        chat_id, now = self._actor_id(actor), self._now()
         code = secrets.token_urlsafe(32)
         async with self.get_pool().acquire() as conn:
             async with conn.transaction():
@@ -218,19 +241,19 @@ class AccountService:
                     raise AccountError("account_exists", 409)
                 if not account and reset:
                     raise AccountError("no_account", 409)
-                if self._sandra_id() != chat_id:
+                if self._actor_id(actor) != chat_id or account and self._bound_actor(account) != actor:
                     raise AccountError("account_identity_unavailable", 503)
                 await conn.execute("""update portal_invitations set revoked_at = $2
                     where chat_id = $1 and consumed_at is null and revoked_at is null""", chat_id, now)
                 await conn.execute("""insert into portal_invitations
-                    (code_hash, chat_id, reset, account_id, created_at, expires_at)
-                    values ($1, $2, $3, $4, $5, $6)""",
-                    _digest(code), chat_id, reset, account["id"] if account else None, now, now + INVITATION_LIFETIME)
+                    (code_hash, chat_id, reset, account_id, created_at, expires_at, actor)
+                    values ($1, $2, $3, $4, $5, $6, $7)""",
+                    _digest(code), chat_id, reset, account["id"] if account else None, now, now + INVITATION_LIFETIME, actor)
         return {"code": code, "expires_at": _iso(now + INVITATION_LIFETIME), "reset": reset}
 
     @_storage_errors
-    async def invitation_status(self):
-        chat_id, now = self._sandra_id(), self._now()
+    async def invitation_status(self, actor="sandra"):
+        chat_id, now = self._actor_id(actor), self._now()
         async with self.get_pool().acquire() as conn:
             account = await conn.fetchval("select exists(select 1 from portal_accounts where chat_id = $1)", chat_id)
             row = await conn.fetchrow("""select expires_at, reset from portal_invitations
@@ -240,8 +263,8 @@ class AccountService:
                 "expires_at": _iso(row["expires_at"]) if row else None, "reset": bool(row["reset"]) if row else False}
 
     @_storage_errors
-    async def revoke_invitation(self):
-        chat_id, now = self._sandra_id(), self._now()
+    async def revoke_invitation(self, actor="sandra"):
+        chat_id, now = self._actor_id(actor), self._now()
         async with self.get_pool().acquire() as conn:
             async with conn.transaction():
                 await self._scope_lock(conn, chat_id)
@@ -250,12 +273,15 @@ class AccountService:
         return {"revoked": True}
 
     async def _new_session(self, conn, account, now):
+        actor = self._bound_actor(account)
+        if actor is None:
+            raise AccountError("invalid_credentials", 401)
         raw = secrets.token_urlsafe(32)
         await conn.execute("""insert into portal_sessions
             (token_hash, account_id, auth_version, created_at, expires_at) values ($1, $2, $3, $4, $5)""",
             _digest(raw), account["id"], account["auth_version"], now, now + SESSION_LIFETIME)
         await conn.execute("delete from portal_sessions where account_id = $1 and expires_at <= $2", account["id"], now)
-        return {"token": raw, "expires_at": _iso(now + SESSION_LIFETIME), "username": account["username"]}
+        return {"token": raw, "expires_at": _iso(now + SESSION_LIFETIME), "username": account["username"], "actor": actor}
 
     @_storage_errors
     async def register(self, code, username, password, ip=None):
@@ -267,10 +293,18 @@ class AccountService:
         await self._rate_limit("register", ip, username)
         if invalid_username:
             raise AccountError("invalid_username")
-        password = self._password(password)
         if not isinstance(code, str) or not SECRET.fullmatch(code):
             raise AccountError("invalid_invitation")
-        chat_id = self._sandra_id()
+        # Look up the invitation's fixed server-side identity before hashing. Recheck
+        # the same record under the scope lock before consuming it below.
+        async with self.get_pool().acquire() as conn:
+            proposed = await conn.fetchrow("select * from portal_invitations where code_hash = $1", _digest(code))
+        actor = self._bound_actor(proposed)
+        if (actor is None or proposed["consumed_at"] is not None or proposed["revoked_at"] is not None
+                or proposed["expires_at"] <= self._now()):
+            raise AccountError("invalid_invitation")
+        chat_id = proposed["chat_id"]
+        password = self._password(password, actor)
         password_hash = await self._hash(password)
         async with self.get_pool().acquire() as conn:
             async with conn.transaction():
@@ -279,11 +313,12 @@ class AccountService:
                 now = self._now()
                 if (not invitation or invitation["chat_id"] != chat_id or invitation["consumed_at"] is not None
                         or invitation["revoked_at"] is not None or invitation["expires_at"] <= now
-                        or self._sandra_id() != chat_id):
+                        or self._bound_actor(invitation) != actor):
                     raise AccountError("invalid_invitation")
                 account = await conn.fetchrow("select * from portal_accounts where chat_id = $1 for update", chat_id)
                 if invitation["reset"]:
-                    if not account or invitation["account_id"] != account["id"] or username != account["username"]:
+                    if (not account or self._bound_actor(account) != actor
+                            or invitation["account_id"] != account["id"] or username != account["username"]):
                         raise AccountError("invalid_invitation")
                     account = await conn.fetchrow("""update portal_accounts set password_hash = $2,
                         auth_version = auth_version + 1, updated_at = $3 where id = $1 returning *""",
@@ -297,8 +332,8 @@ class AccountService:
                     if existing:
                         raise AccountError("invalid_invitation")
                     account = await conn.fetchrow("""insert into portal_accounts
-                        (id, chat_id, username, password_hash, auth_version, created_at, updated_at)
-                        values ($1, $2, $3, $4, 1, $5, $5) returning *""", uuid4(), chat_id, username, password_hash, now)
+                        (id, chat_id, username, password_hash, auth_version, created_at, updated_at, actor)
+                        values ($1, $2, $3, $4, 1, $5, $5, $6) returning *""", uuid4(), chat_id, username, password_hash, now, actor)
                 await conn.execute("update portal_invitations set consumed_at = $2 where code_hash = $1", _digest(code), now)
                 # Revoke every outstanding code, including reset links created in another tab.
                 await conn.execute("""update portal_invitations set revoked_at = $2
@@ -315,13 +350,13 @@ class AccountService:
             normalized, invalid_username = "invalid", True
         await self._rate_limit("login", ip, normalized)
         try:
-            password = self._password(password)
+            password = self._password(password, "owner")
         except AccountError:
             raise AccountError("invalid_credentials", 401) from None
-        chat_id = self._sandra_id()
         async with self.get_pool().acquire() as conn:
-            account = await conn.fetchrow("select * from portal_accounts where username = $1 and chat_id = $2", normalized, chat_id)
-        if invalid_username:
+            account = await conn.fetchrow("select * from portal_accounts where username = $1", normalized)
+        actor = self._bound_actor(account)
+        if invalid_username or actor is None or actor == "sandra" and len(password) < 12:
             account = None
         valid = await self._verify(account["password_hash"] if account else await self._dummy(), password)
         if not account or not valid:
@@ -332,7 +367,7 @@ class AccountService:
             async with conn.transaction():
                 current = await conn.fetchrow("select * from portal_accounts where id = $1 for update", account["id"])
                 if (not current or current["auth_version"] != account["auth_version"]
-                        or current["password_hash"] != account["password_hash"] or self._sandra_id() != chat_id):
+                        or current["password_hash"] != account["password_hash"] or self._bound_actor(current) != actor):
                     raise AccountError("invalid_credentials", 401)
                 if self.hasher.check_needs_rehash(current["password_hash"]):
                     new_hash = await self._hash(password)
@@ -345,15 +380,16 @@ class AccountService:
     async def get_session(self, raw_token):
         if not isinstance(raw_token, str) or not SECRET.fullmatch(raw_token):
             return None
-        now, chat_id = self._now(), self._sandra_id()
+        now = self._now()
         async with self.get_pool().acquire() as conn:
-            row = await conn.fetchrow("""select a.username, a.chat_id, s.expires_at from portal_sessions s
+            row = await conn.fetchrow("""select a.username, a.chat_id, s.expires_at, a.actor from portal_sessions s
                 join portal_accounts a on a.id = s.account_id and a.auth_version = s.auth_version
-                where s.token_hash = $1 and s.revoked_at is null and s.expires_at > $2 and a.chat_id = $3""",
-                _digest(raw_token), now, chat_id)
-        if not row or row["expires_at"] <= self._now() or self._sandra_id() != chat_id:
+                where s.token_hash = $1 and s.revoked_at is null and s.expires_at > $2""",
+                _digest(raw_token), now)
+        actor = self._bound_actor(row)
+        if not row or row["expires_at"] <= self._now() or actor is None:
             return None
-        return {"actor": "sandra", "chat_id": row["chat_id"], "username": row["username"],
+        return {"actor": actor, "chat_id": row["chat_id"], "username": row["username"],
                 "expires_at": _iso(row["expires_at"])}
 
     @_storage_errors
@@ -365,8 +401,8 @@ class AccountService:
         return {"logged_out": True}
 
     @_storage_errors
-    async def revoke_sessions(self):
-        chat_id, now = self._sandra_id(), self._now()
+    async def revoke_sessions(self, actor="sandra"):
+        chat_id, now = self._actor_id(actor), self._now()
         async with self.get_pool().acquire() as conn:
             async with conn.transaction():
                 await self._scope_lock(conn, chat_id)

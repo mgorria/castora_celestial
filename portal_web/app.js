@@ -44,9 +44,11 @@
     }
   } catch (_) { /* Colours still work when device storage is unavailable. */ }
   const main = document.getElementById('main'), modal = document.getElementById('modal');
-  const account = { checked: false, portal: false, authenticated: false, username: '', screen: 'login', code: '', loading: false, error: '', help: false };
+  const account = { actor: null, ownerInvite: false, checked: false, portal: false, authenticated: false, username: '', screen: 'login', code: '', loading: false, error: '', help: false };
   let accountVersion = 0;
   const invitation = { data: null, secret: null, loading: false, error: '', uncertain: false, version: 0, controller: null };
+  const ownerInvitation = { data: null, secret: null, loading: false, error: '', uncertain: false, version: 0, controller: null };
+  let deskAnimal = 'mimosuga';
   let view = 'home', activeId = 'mimosuga', mode = 'checking', toastTimer;
   let serverState = { characters: [], wishes: [] }, connectionError = '', connectionStatus = 0, connectVersion = 0, actorKey, liveEpoch = 0;
   let pollTimer, pollController, pollVersion = 0;
@@ -68,14 +70,17 @@
   const config = id => serverState.characters.find(c => c && c.id === id);
   const ready = id => mode === 'demo' ? id !== 'corte' : mode === 'live' && Boolean(config(id)?.available);
   const isOwner = () => serverState.actor === 'owner' || serverState.actor?.role === 'owner';
-  const canOpenControl = () => !account.portal && (mode === 'demo' || mode === 'live' && isOwner());
+  const readOnly = () => mode === 'live' && (isOwner() || serverState.read_only === true);
+  const canOpenControl = () => mode === 'demo' || mode === 'live' && isOwner();
+  const deskChatVisible = () => view === 'control' && adminTab === 'chats' && canUseControl();
+  const chatVisible = id => view === 'chat' && activeId === id || deskChatVisible() && deskAnimal === id;
   const canUseControl = () => canOpenControl() && (mode === 'demo' || adminAuth.unlocked && Date.parse(adminAuth.expiresAt) > Date.now());
   // Preview tools are available only on a local development host, never in Sandra's portal.
   const canExploreDemo = () => !account.portal && ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
   const accountLocked = () => !account.checked || account.portal && !account.authenticated;
   function canCommand(id, command) {
     const list = config(id)?.commands;
-    return ready(id) && Array.isArray(list) && list.some(c => String(typeof c === 'object' ? c.command : c).replace(/^\//, '') === command.replace(/^\//, ''));
+    return !readOnly() && ready(id) && Array.isArray(list) && list.some(c => String(typeof c === 'object' ? c.command : c).replace(/^\//, '') === command.replace(/^\//, ''));
   }
   function status(id) {
     if (mode === 'demo') return id === 'corte' ? 'Disponible al conectar' : 'Conversación de ejemplo';
@@ -92,7 +97,7 @@
     return `<img class="${avatar ? 'avatar' : ''}" src="assets/${id === 'vaca' ? 'vaca-v2' : id}.png" alt="${avatar ? '' : esc(characters[id].name)}" ${avatar ? '' : 'loading="lazy"'}>`;
   }
   const experiences = window.CastoriExperiences?.create({ bridge, esc, icon, portrait, formatDate, formatTime, uid,
-    mode: () => mode, epoch: () => liveEpoch, ready, navigate, toast, showModal, closeModal: () => modal.close(), submitLive,
+    mode: () => mode, epoch: () => liveEpoch, ready, readOnly, navigate, toast, showModal, closeModal: () => modal.close(), submitLive,
     refreshState: refreshServerState,
     wishes: () => mode === 'demo' ? state.wishes.map(w => ({ ...w, name: w.text })) : (serverState.wishes || []),
     demoWish: (action, wish) => { if (mode !== 'demo') return; if (action === 'add') state.wishes.push(wish); else if (action === 'remove') state.wishes = state.wishes.filter(w => w.id !== wish.id); else { const w = state.wishes.find(w => w.id === wish.id); if (w) w.favorite = !w.favorite; } persist(); }
@@ -104,15 +109,16 @@
     document.getElementById('profile-name').innerHTML = account.portal && account.authenticated ? `${esc(account.username)}<small>Tu rincón en la Casa Celestial</small>` : 'El rincón de Patita<small>Hecho con muchísimo cariño</small>';
   }
   function readInvitationFragment() {
-    if (!location.hash.startsWith('#invite/')) return;
-    try { account.code = decodeURIComponent(location.hash.slice(8)).slice(0, 512); } catch (_) { account.code = ''; }
+    account.ownerInvite = location.hash.startsWith('#owner-invite/');
+    if (!account.ownerInvite && !location.hash.startsWith('#invite/')) return;
+    try { account.code = decodeURIComponent(location.hash.slice(account.ownerInvite ? 14 : 8)).slice(0, 512); } catch (_) { account.code = ''; }
     account.screen = 'register';
     history.replaceState(null, '', (location.pathname || '/castori/') + (location.search || ''));
   }
   function renderAccountGate() {
     accountChrome();
     const checking = !account.checked, registering = account.screen === 'register';
-    const body = checking ? `<div class="account-wait" role="status">${icon('key')}<h2>${account.error ? 'La puerta necesita un momento.' : 'Estamos preparando tu llegada.'}</h2><p>${esc(account.error || 'Comprobando tu llave a la Casa Celestial…')}</p>${account.error ? '<button class="button" data-account-retry>Volver a intentarlo</button>' : ''}</div>` : `<div class="account-tabs" aria-label="Cómo quieres entrar"><button data-account-screen="login" aria-pressed="${!registering}" class="${registering ? '' : 'active'}">Ya tengo mi llave</button><button data-account-screen="register" aria-pressed="${registering}" class="${registering ? 'active' : ''}">Tengo una invitación</button></div><form id="account-form" class="account-form">${registering ? `<label>Código de invitación<input name="code" id="account-code" value="${esc(account.code)}" maxlength="512" autocomplete="off" spellcheck="false" autocapitalize="none" required placeholder="La llave que Castori ha preparado para ti"></label>` : ''}<label>${registering ? 'Tu nombre de usuario' : 'Nombre de usuario'}<input id="account-username" name="username" value="${esc(account.username)}" autocomplete="username" autocapitalize="none" spellcheck="false" minlength="3" maxlength="32" required placeholder="Entre 3 y 32 letras, números, puntos o guiones"></label><label>${registering ? 'Elige tu contraseña' : 'Contraseña'}<span class="account-password"><input id="account-password" name="password" type="password" autocomplete="${registering ? 'new-password' : 'current-password'}" ${registering ? 'minlength="12"' : ''} maxlength="128" required placeholder="${registering ? 'Al menos 12 caracteres' : 'Tu llave secreta'}"><button type="button" data-account-show-password aria-label="Mostrar contraseña">Mostrar</button></span></label>${registering ? '<p class="account-field-note">No necesitas correo. Elige una contraseña de al menos 12 caracteres; también puede ser una frase que recuerdes.</p>' : ''}<div id="account-error" class="account-error" role="alert">${esc(account.error)}</div><button class="button account-submit" type="submit" ${account.loading ? 'disabled' : ''}>${account.loading ? 'Abriendo la puerta…' : registering ? 'Crear mi llave y entrar' : 'Entrar en mi rincón'} ${icon('arrow')}</button></form><button class="text-button account-help-button" data-account-help>¿Necesitas una nueva llave?</button>${account.help ? '<p class="account-help">Pídele a Castori una nueva invitación. Si ya tienes cuenta, utiliza el mismo nombre de usuario y elige una contraseña nueva.</p>' : ''}`;
+    const body = checking ? `<div class="account-wait" role="status">${icon('key')}<h2>${account.error ? 'La puerta necesita un momento.' : 'Estamos preparando tu llegada.'}</h2><p>${esc(account.error || 'Comprobando tu llave a la Casa Celestial…')}</p>${account.error ? '<button class="button" data-account-retry>Volver a intentarlo</button>' : ''}</div>` : `<div class="account-tabs" aria-label="Cómo quieres entrar"><button data-account-screen="login" aria-pressed="${!registering}" class="${registering ? '' : 'active'}">Ya tengo mi llave</button><button data-account-screen="register" aria-pressed="${registering}" class="${registering ? 'active' : ''}">Tengo una invitación</button></div><form id="account-form" class="account-form">${registering ? `<label>Código de invitación<input name="code" id="account-code" value="${esc(account.code)}" maxlength="512" autocomplete="off" spellcheck="false" autocapitalize="none" required placeholder="La llave que Castori ha preparado para ti"></label>` : ''}<label>${registering ? 'Tu nombre de usuario' : 'Nombre de usuario'}<input id="account-username" name="username" value="${esc(account.username)}" autocomplete="username" autocapitalize="none" spellcheck="false" minlength="3" maxlength="32" required placeholder="Entre 3 y 32 letras, números, puntos o guiones"></label><label>${registering ? 'Elige tu contraseña' : 'Contraseña'}<span class="account-password"><input id="account-password" name="password" type="password" autocomplete="${registering ? 'new-password' : 'current-password'}" ${registering && !account.ownerInvite ? 'minlength="12"' : ''} maxlength="128" required placeholder="${registering && !account.ownerInvite ? 'Al menos 12 caracteres' : 'Tu llave secreta'}"><button type="button" data-account-show-password aria-label="Mostrar contraseña">Mostrar</button></span></label>${registering && !account.ownerInvite ? '<p class="account-field-note">No necesitas correo. Elige una contraseña de al menos 12 caracteres; también puede ser una frase que recuerdes.</p>' : ''}<div id="account-error" class="account-error" role="alert">${esc(account.error)}</div><button class="button account-submit" type="submit" ${account.loading ? 'disabled' : ''}>${account.loading ? 'Abriendo la puerta…' : registering ? 'Crear mi llave y entrar' : 'Entrar en mi rincón'} ${icon('arrow')}</button></form><button class="text-button account-help-button" data-account-help>¿Necesitas una nueva llave?</button>${account.help ? '<p class="account-help">Pídele a Castori una nueva invitación. Si ya tienes cuenta, utiliza el mismo nombre de usuario y elige una contraseña nueva.</p>' : ''}`;
     document.getElementById('account-gate').innerHTML = `<div class="account-layout"><aside class="account-illustration"><img src="assets/casa-celestial-v2.png" alt="Los amigos de la Casa Celestial esperan junto a su cálida oficina en el árbol"><div class="account-art-copy"><span class="eyebrow">SIEMPRE HAY UNA SILLA PARA TI</span><h2>Las cosas bonitas<br>empiezan por <em>entrar.</em></h2><p>Un cuento, un abrazo y todos tus amigos,<br>al otro lado de esta pequeña puerta.</p></div><div class="account-art-footer">${icon('heart')} Pasa. Estás en casa.</div></aside><div class="account-card"><a class="account-brand" href="#" aria-label="Casa Celestial"><span class="brand-seal">c<span>✦</span></span><span>la casa celestial<small>UN RINCÓN HECHO DE CARIÑO</small></span></a><div class="account-key" aria-hidden="true">${icon('key')}</div><h1>Tu llave a la<br><em>Casa Celestial.</em></h1><p class="account-intro">Tu pequeño universo tiene una puerta<br>que se abre solo para ti.</p>${body}<div class="account-footnote">${icon('star')} Historias, magia y mucho cariño.</div></div></div>`;
     if (!checking) document.getElementById('account-form').addEventListener('submit', event => { event.preventDefault(); submitAccount(); });
   }
@@ -121,7 +127,7 @@
     try {
       const session = await bridge.accountSession(); if (version !== accountVersion) return;
       if (!session || typeof session.portal !== 'boolean' || session.portal && typeof session.authenticated !== 'boolean') throw new Error('No se pudo comprobar tu acceso.');
-      account.checked = true; account.portal = session.portal; account.authenticated = session.portal && session.authenticated; account.username = typeof session.username === 'string' ? session.username : ''; account.loading = false;
+      account.checked = true; account.actor = session.actor || null; account.portal = session.portal; account.authenticated = session.portal && session.authenticated; account.username = typeof session.username === 'string' ? session.username : ''; account.loading = false;
       if (account.portal) readInvitationFragment();
       accountChrome();
       if (accountLocked()) renderAccountGate(); else { document.getElementById('account-gate').innerHTML = ''; account.code = ''; fromHash(); connect(); }
@@ -143,7 +149,7 @@
     try {
       const result = await (registering ? bridge.accountRegister(body) : bridge.accountLogin(body));
       if (version !== accountVersion) return; if (result?.authenticated !== true || typeof result.username !== 'string') throw new Error('No se pudo confirmar el acceso.');
-      account.authenticated = true; account.username = result.username; account.code = ''; account.loading = false; account.error = ''; account.help = false; clearAccountContent(); accountChrome(); document.getElementById('account-gate').innerHTML = ''; view = 'home'; navigate('home'); connect();
+      account.authenticated = true; account.actor = result.actor || null; account.ownerInvite = false; account.username = result.username; account.code = ''; account.loading = false; account.error = ''; account.help = false; clearAccountContent(); accountChrome(); document.getElementById('account-gate').innerHTML = ''; view = 'home'; navigate('home'); connect();
     } catch (error) { if (version !== accountVersion) return; account.loading = false; account.error = error.uncertain && registering ? 'No pudimos confirmar la creación de tu llave. Prueba a entrar con el usuario y la contraseña que elegiste antes de activar otra invitación.' : error.message || 'No hemos podido abrir tu rincón. Vuelve a intentarlo.'; renderAccountGate(); }
     finally { body.password = ''; if ('code' in body) body.code = ''; }
   }
@@ -163,7 +169,7 @@
     banner.className = 'connection-banner ' + mode;
     banner.innerHTML = `<span class="connection-mark" aria-hidden="true">${mode === 'live' ? '✦' : '✧'}</span><div><strong>${esc(heading)}</strong><p>${esc(copy)}</p></div><div class="connection-actions">${buttons}</div>`;
     document.getElementById('about-demo').textContent = mode === 'demo' ? 'Boceto interactivo' : 'Sobre este rincón'; document.body.dataset.mode = mode;
-    const controlNav = document.getElementById('control-nav'); controlNav.hidden = !canOpenControl(); controlNav.querySelector('span').textContent = mode === 'demo' ? 'Vista de Miguel' : 'Mi Centralita';
+    const controlNav = document.getElementById('control-nav'); controlNav.hidden = !canOpenControl(); controlNav.querySelector('span').textContent = mode === 'demo' ? 'Vista de Miguel' : 'Despacho del Castor';
   }
   function renderFriends() {
     document.getElementById('friend-nav').innerHTML = ids.map(id => `<button class="friend-link ${['chat', 'clinic', 'consultation', 'vaca'].includes(view) && activeId === id ? 'active' : ''}" data-chat="${id}">${portrait(id, true)}<span class="friend-name">${esc(characters[id].name)}<small>${esc(status(id))}</small></span><span class="online-dot ${ready(id) && mode === 'live' ? '' : 'offline'}" aria-hidden="true"></span></button>`).join('');
@@ -200,12 +206,12 @@
   }
   function messageButtons(message) {
     if (mode !== 'live' || !Array.isArray(message.buttons)) return '';
-    return `<div class="message-buttons">${message.buttons.filter(Array.isArray).map(row => `<div>${row.filter(b => b && typeof b.text === 'string' && typeof b.data === 'string').map(b => `<button class="message-choice" data-callback-event="${esc(message.id)}" data-callback="${esc(b.data)}" ${callbackBusy.has(message.id + ':' + b.data) || !ready(activeId) ? 'disabled' : ''}>${esc(b.text)}</button>`).join('')}</div>`).join('')}</div>`;
+    return `<div class="message-buttons">${message.buttons.filter(Array.isArray).map(row => `<div>${row.filter(b => b && typeof b.text === 'string' && typeof b.data === 'string').map(b => `<button class="message-choice" data-callback-event="${esc(message.id)}" data-callback="${esc(b.data)}" ${readOnly() || deskChatVisible() || callbackBusy.has(message.id + ':' + b.data) || !ready(activeId) ? 'disabled' : ''}>${esc(b.text)}</button>`).join('')}</div>`).join('')}</div>`;
   }
   function formatTime(value) { if (value == null || value === '') return ''; const date = new Date(value); return Number.isNaN(date.getTime()) ? '' : new Intl.DateTimeFormat('es-ES', { hour: '2-digit', minute: '2-digit' }).format(date); }
   function formatDate(value) { if (value == null || value === '') return ''; const date = new Date(value); return Number.isNaN(date.getTime()) ? '' : new Intl.DateTimeFormat('es-ES', { day: 'numeric', month: 'long', year: 'numeric' }).format(date); }
   function historyControl(id) {
-    if (mode !== 'live' || !ready(id)) return '';
+    if (mode !== 'live' || !ready(id) || id === 'salchicher') return '';
     const page = archives[id]; const session = id === 'salchicher' ? '<small>Solo la consulta activa, hasta 48 horas · Sin archivo permanente</small>' : '';
     let content;
     if (!page || page.loading && !page.items.length) content = '<span role="status">Abriendo los mensajes anteriores…</span>';
@@ -216,29 +222,30 @@
     return `<div class="history-control">${content}${session}</div>`;
   }
   function renderMessages(id) {
-    const messages = chatHistory(id); const label = mode === 'demo' ? 'CONVERSACIÓN DE DEMOSTRACIÓN' : 'TU CONVERSACIÓN CON ' + characters[id].name.toUpperCase(); let empty = '';
+    const messages = chatHistory(id); const label = mode === 'demo' ? 'CONVERSACIÓN DE DEMOSTRACIÓN' : (readOnly() ? 'CONVERSACIÓN DE SANDRA CON ' : 'TU CONVERSACIÓN CON ') + characters[id].name.toUpperCase(); let empty = '';
     let previousDate = '';
     if (!messages.length) {
-      const text = config(id)?.reason === 'owner_uses_centralita' && mode !== 'demo' ? 'Este personaje se atiende desde tu Centralita. La conversación de Patita permanece separada de tu sesión de administrador.' : !ready(id) ? (id === 'dulcimiel' ? 'Dulcimiel todavía está preparando su rincón. Su conversación estará disponible próximamente.' : mode === 'checking' ? 'Abriendo la puerta…' : 'Ahora no podemos abrir esta conversación. Vuelve a llamar en un ratito.') : id === 'salchicher' ? 'Abre una consulta para elegir si quieres mantenerla privada o compartirla con el Oso.' : id === 'castori' ? 'Deja tu mensaje en la oficina. Castori la leerá en cuanto llegue su turno.' : id === 'corte' ? 'Presenta una acusación de cuento. Los siguientes pasos aparecerán aquí.' : 'Escribe cuando quieras. Los mensajes de esta conversación aparecerán aquí.';
+      const text = config(id)?.reason === 'owner_uses_centralita' && mode !== 'demo' ? 'Este personaje se atiende desde tu Centralita. La conversación de Patita permanece separada de tu sesión de administrador.' : !ready(id) ? (id === 'dulcimiel' ? 'Dulcimiel todavía está preparando su rincón. Su conversación estará disponible próximamente.' : mode === 'checking' ? 'Abriendo la puerta…' : 'Ahora no podemos abrir esta conversación. Vuelve a llamar en un ratito.') : readOnly() ? 'Los mensajes de Sandra y de este amigo aparecerán aquí. Puedes escribir como el animal desde el Despacho del Castor.' : id === 'salchicher' ? 'Las consultas se comparten entre Sandra y Miguel.' : id === 'castori' ? 'Deja tu mensaje en la oficina. Castori la leerá en cuanto llegue su turno.' : id === 'corte' ? 'Presenta una acusación de cuento. Los siguientes pasos aparecerán aquí.' : 'Escribe cuando quieras. Los mensajes de esta conversación aparecerán aquí.';
       empty = `<div class="chat-empty">${icon(id === 'corte' ? 'star' : 'chat')}<p>${esc(text)}</p></div>`;
     }
     return historyControl(id) + `<div class="chat-date">UN RATITO PARA TI · ${esc(label)}</div>` + empty + messages.map(m => {
       const assistant = m.role !== 'user'; const saved = state.memories.some(x => x.messageId === m.id);
       const date = formatDate(m.time), separator = mode === 'live' && date && date !== previousDate ? `<div class="message-date">${esc(date)}</div>` : ''; previousDate = date;
-      return separator + `<div class="message-row ${assistant ? '' : 'user'}">${assistant ? portrait(id, true) : ''}<div class="message-content"><div class="message">${esc(m.text)}</div>${messageButtons(m)}<div class="message-meta">${assistant ? esc(characters[id].name) : 'Tú'}${formatTime(m.time) ? ' · ' + formatTime(m.time) : ''}${mode === 'demo' && assistant ? `<button class="${saved ? 'saved' : ''}" data-save-message="${esc(m.id)}" aria-label="${saved ? 'Quitar de' : 'Guardar en'} mis recuerdos del boceto" aria-pressed="${saved}">${icon('heart')}</button>` : ''}</div></div></div>`;
+      return separator + `<div class="message-row ${assistant ? '' : 'user'}">${assistant ? portrait(id, true) : ''}<div class="message-content"><div class="message">${esc(m.text)}</div>${messageButtons(m)}<div class="message-meta">${assistant ? esc(characters[id].name) : readOnly() ? 'Sandra' : 'Tú'}${formatTime(m.time) ? ' · ' + formatTime(m.time) : ''}${mode === 'demo' && assistant ? `<button class="${saved ? 'saved' : ''}" data-save-message="${esc(m.id)}" aria-label="${saved ? 'Quitar de' : 'Guardar en'} mis recuerdos del boceto" aria-pressed="${saved}">${icon('heart')}</button>` : ''}</div></div></div>`;
     }).join('') + (mode === 'demo' && pending.has(id) ? `<div class="message-row">${portrait(id, true)}<div class="message"><div class="typing" role="status" aria-label="Preparando una respuesta de ejemplo"><span></span><span></span><span></span></div></div></div>` : '');
   }
   function chatActions(id) {
+    if (readOnly()) return '';
     if (mode === 'demo') return characters[id].suggestions.map(s => `<button class="suggestion" data-suggestion="${esc(s)}">${esc(s)}</button>`).join('');
     const whispers = id === 'vaca' ? ['¿Me susurras una profecía?', '¿Qué dice tu campanilla?'].map(s => `<button class="suggestion" data-suggestion="${esc(s)}" ${ready(id) ? '' : 'disabled'}>${esc(s)}</button>`).join('') : '';
     return whispers + actions[id].map(a => `<button class="suggestion" data-command="${a.command}" ${a.compose ? 'data-compose="true"' : ''} ${canCommand(id, a.command) ? '' : 'disabled'}>${esc(a.label)}</button>`).join('');
   }
   function deliveryNote(id) { const note = deliveryNotes[id]; return note && mode === 'live' ? `<span>${esc(note.text)}</span>${note.requestId && note.check ? `<button class="text-button" data-check-request="${esc(note.requestId)}">Comprobar envío</button>` : ''}` : ''; }
   function chat(id) {
-    const c = characters[id], disabled = !ready(id);
+    const c = characters[id], disabled = !ready(id) || readOnly();
     const intro = id === 'vaca' ? `<section class="vaca-chat-intro"><span class="vaca-chat-spark" aria-hidden="true">✧</span><div><div class="eyebrow">EL RINCÓN DE LOS SECRETOS A MEDIAS</div><h2>Un muuu, una pista.<br><em>Y tú, intentando adivinar.</em></h2><p>Aquí llegan sus cartas, sus profecías y esos susurros que hacen cosquillas de ilusión. Puedes contestarle, preguntar y seguirle el juego.</p></div><button class="button secondary" data-view="wishes">${icon('star')} Mi cuaderno de deseos</button></section>` : '';
-    const note = mode === 'demo' ? 'Respuestas de ejemplo · Esta conversación se guarda solo en este navegador.' : id === 'salchicher' ? 'Tu consulta tiene su propio cuaderno privado.' : id === 'castori' ? 'Tu carta espera su turno en la mesa de Castori.' : 'Un ratito para hablar, sin ninguna prisa.';
-    return intro + `<div class="chat-layout"><section class="chat-panel" aria-label="Conversación con ${esc(c.name)}"><header class="chat-header">${portrait(id, true)}<div><h1>${esc(c.name)}</h1><p>${esc(status(id))}</p></div><button class="icon-button" id="chat-info" aria-label="Acerca de esta conversación">${icon('star')}</button></header><div class="chat-messages" id="chat-messages" role="log" aria-label="Mensajes" aria-live="polite" aria-relevant="additions text">${renderMessages(id)}</div><div class="chat-suggestions">${chatActions(id)}</div><div class="delivery-status" id="delivery-status" role="status">${deliveryNote(id)}</div><div class="composer-wrap"><form class="composer" id="chat-form"><textarea id="chat-input" rows="1" maxlength="4000" aria-label="Escribe a ${esc(c.name)}" placeholder="${disabled ? esc(id === 'dulcimiel' ? 'Próximamente…' : 'Un momentito…') : 'Cuéntame, Patita…'}" ${disabled ? 'disabled' : ''} required></textarea><button class="send-button" aria-label="Enviar mensaje" ${disabled || pending.has(id) || sending.has(id) ? 'disabled' : ''}>${icon('send')}</button></form><p class="composer-note">${esc(note)}</p></div></section><aside class="companion-panel"><div class="companion-portrait">${portrait(id)}</div><div class="eyebrow" style="justify-content:center">TU COMPAÑÍA DE HOY</div><h2>${esc(c.name)}</h2><p>${esc(details[id].description)}</p><blockquote class="companion-quote">«${esc(details[id].quote)}»</blockquote><button class="button secondary" data-view="${id === 'vaca' ? 'wishes' : 'library'}">${icon(id === 'vaca' ? 'star' : 'book')}${id === 'vaca' ? 'Mi cuaderno de ilusiones' : 'Visitar la biblioteca'}</button><button class="text-button" data-view="conversations">Visitar a otro amigo</button></aside></div>`;
+    const note = readOnly() ? 'Estás viendo la misma conversación que Sandra. Escribe con la voz de un animal desde el Despacho del Castor.' : mode === 'demo' ? 'Respuestas de ejemplo · Esta conversación se guarda solo en este navegador.' : id === 'salchicher' ? 'Tu consulta se comparte entre Sandra y Miguel.' : id === 'castori' ? 'Tu carta espera su turno en la mesa de Castori.' : 'Un ratito para hablar, sin ninguna prisa.';
+    return intro + `<div class="chat-layout"><section class="chat-panel" aria-label="Conversación con ${esc(c.name)}"><header class="chat-header">${portrait(id, true)}<div><h1>${esc(c.name)}</h1><p>${esc(status(id))}</p></div><button class="icon-button" id="chat-info" aria-label="Acerca de esta conversación">${icon('star')}</button></header><div class="chat-messages" id="chat-messages" role="log" aria-label="Mensajes" aria-live="polite" aria-relevant="additions text">${renderMessages(id)}</div><div class="chat-suggestions">${chatActions(id)}</div><div class="delivery-status" id="delivery-status" role="status">${deliveryNote(id)}</div><div class="composer-wrap"><form class="composer" id="chat-form"><textarea id="chat-input" rows="1" maxlength="4000" aria-label="Escribe a ${esc(c.name)}" placeholder="${readOnly() ? 'Vista de Sandra · solo lectura' : disabled ? esc(id === 'dulcimiel' ? 'Próximamente…' : 'Un momentito…') : 'Cuéntame, Patita…'}" ${disabled ? 'disabled' : ''} required></textarea><button class="send-button" aria-label="Enviar mensaje" ${disabled || pending.has(id) || sending.has(id) ? 'disabled' : ''}>${icon('send')}</button></form><p class="composer-note">${esc(note)}</p>${readOnly() ? `<button class="text-button" data-desk-animal="${id}">Abrir en el Despacho del Castor →</button>` : ''}</div></section><aside class="companion-panel"><div class="companion-portrait">${portrait(id)}</div><div class="eyebrow" style="justify-content:center">TU COMPAÑÍA DE HOY</div><h2>${esc(c.name)}</h2><p>${esc(details[id].description)}</p><blockquote class="companion-quote">«${esc(details[id].quote)}»</blockquote><button class="button secondary" data-view="${id === 'vaca' ? 'wishes' : 'library'}">${icon(id === 'vaca' ? 'star' : 'book')}${id === 'vaca' ? 'Mi cuaderno de ilusiones' : 'Visitar la biblioteca'}</button><button class="text-button" data-view="conversations">Visitar a otro amigo</button></aside></div>`;
   }
   function library() {
     const samples = `<div class="library-grid">${stories.map((s, i) => `<button class="book-card" data-story="${s.id}"><div class="book-art"><span class="mini-book">${icon(i === 0 ? 'heart' : i === 1 ? 'star' : 'moon')}</span></div><div class="book-info"><span class="eyebrow">CUENTO DE BIENVENIDA</span><h2>${esc(s.title)}</h2><p>Un pequeño cuento · 2 minutos de calma</p><span class="text-button">Abrir el cuento →</span></div></button>`).join('')}</div>`;
@@ -269,10 +276,10 @@
     clearLiveState(); mode = 'offline'; connectionError = error.message; connectionStatus = error.status; navigate(view, activeId, false); return true;
   }
   async function loadHistory(id) {
-    if (mode !== 'live' || !ready(id)) return;
+    if (mode !== 'live' || !ready(id) || id === 'salchicher') return;
     const page = archives[id] ||= newPage(); if (page.loading || page.loaded && !page.hasMore && !page.error) return;
     const epoch = liveEpoch, version = ++page.version, first = !page.loaded;
-    page.controller = new AbortController(); page.loading = true; page.error = ''; if (view === 'chat' && activeId === id) refreshChat();
+    page.controller = new AbortController(); page.loading = true; page.error = ''; if (chatVisible(id)) refreshChat();
     try {
       const data = await bridge.history(id, first ? null : page.nextCursor, page.controller.signal);
       if (epoch !== liveEpoch || version !== page.version || mode !== 'live') return;
@@ -284,12 +291,12 @@
       page.items = added.concat(page.items); page.loaded = true; page.available = data.archive_available !== false;
       page.hasMore = Boolean(data.has_more && data.next_cursor != null); page.nextCursor = data.next_cursor ?? null;
       page.loading = false; page.controller = null;
-      if (view === 'chat' && activeId === id) refreshChat(first, !first);
+      if (chatVisible(id)) refreshChat(first, !first);
     } catch (error) {
       if (epoch !== liveEpoch || version !== page.version || error.cancelled) return;
       page.loading = false; page.controller = null; if (archiveAccessError(error)) return;
       page.error = error.message || 'No se pudieron recuperar los mensajes anteriores.';
-      if (view === 'chat' && activeId === id) refreshChat();
+      if (chatVisible(id)) refreshChat();
     }
   }
   async function loadStories(restart = false) {
@@ -337,11 +344,12 @@
     const command = String(text).trim().split(/\s/)[0].replace(/^\//, '').toLowerCase(), data = controlData();
     return Boolean(data?.available && Array.isArray(data.commands) && data.commands.includes(command) && !(command.startsWith('admin_') && (data.admin_identity_matches === false || data.editorial_admin?.available === false)));
   }
-  function adminButton(label, command, strong = false, confirmed = false) { return `<button class="${strong ? 'button' : 'admin-action-button'}" data-admin-command="${esc(command)}" ${confirmed ? 'data-admin-confirmed="true"' : ''} ${adminCommandAllowed(command) && !(mode === 'live' && admin.busy) ? '' : 'disabled'}>${esc(label)}</button>`; }
+  function adminButton(label, command, strong = false, confirmed = false) { return `<button class="${strong ? 'button' : 'admin-action-button'}" data-admin-command="${esc(command)}" ${confirmed ? 'data-admin-confirmed="true"' : ''} ${adminCommandAllowed(command) && !(mode === 'live' && (admin.busy || admin.check)) ? '' : 'disabled'}>${esc(label)}</button>`; }
   const adminEmpty = text => `<p class="admin-empty">${esc(text)}</p>`;
   function adminDate(value) { if (!value) return 'Sin fecha disponible'; const date = new Date(value); return Number.isNaN(date.getTime()) ? 'Sin fecha disponible' : new Intl.DateTimeFormat('es-ES', { timeZone: controlData()?.timezone || 'Europe/Madrid', dateStyle: 'long', timeStyle: 'short' }).format(date); }
   const adminStatus = value => ({ pending: 'Pendiente', approved: 'Aprobado', rejected: 'Descartado', canon: 'Canon', draft: 'Borrador', active: 'Activa', cancelled: 'Cancelada', sent: 'Enviado', done: 'Completado', open: 'Abierto', review: 'Con revisión', auto: 'Automático' }[value] || value || 'Sin estado');
   function renderAdminLock() {
+    if (account.portal && isOwner()) return `<section class="admin-card admin-wide"><div class="eyebrow">${icon('key')} DESPACHO DEL CASTOR</div><h1>Tu mesa te espera.</h1><p>${adminAuth.loading ? 'Comprobando el permiso de tu usuario…' : 'Tu usuario de Miguel abre este despacho.'}</p>${adminAuth.error ? `<p role="alert">${esc(adminAuth.error)}</p>` : ''}${adminAuth.loading ? '' : '<button class="button" data-admin-auth-refresh>Comprobar mi acceso</button>'}</section>`;
     const setup = adminAuth.checked && !adminAuth.configured;
     const form = !adminAuth.checked ? `<div class="admin-lock-wait" role="status"><p>${adminAuth.loading ? 'Comprobando la cerradura de tu escritorio…' : 'Comprueba tu acceso para abrir el escritorio.'}</p>${adminAuth.loading ? '' : '<button class="button" data-admin-auth-refresh>Comprobar acceso</button>'}</div>` : `<form id="admin-auth-form" class="admin-lock-form"><label>${setup ? 'Elige tu contraseña' : 'Contraseña de la Centralita'}<input id="admin-auth-password" name="password" type="password" autocomplete="${setup ? 'new-password' : 'current-password'}" maxlength="128" required placeholder="Tu llave secreta" ${adminAuth.loading ? 'disabled' : ''}></label>${setup ? '<label>Repite la contraseña<input id="admin-auth-confirm" name="confirmation" type="password" autocomplete="new-password" maxlength="128" required placeholder="La misma llave, una vez más"></label><p class="admin-lock-hint">Elige la contraseña que prefieras. Guárdala en tu gestor de contraseñas.</p>' : ''}<button class="button" type="submit" ${adminAuth.loading ? 'disabled' : ''}>${adminAuth.loading ? 'Comprobando tu llave…' : setup ? 'Guardar mi contraseña y entrar' : 'Abrir mi Centralita'} ${icon('arrow')}</button></form>`;
     return `<section class="admin-lock" aria-labelledby="admin-lock-title"><div class="admin-lock-art" aria-hidden="true"><span class="admin-lock-orbit">✧</span><div class="admin-lock-seal">${icon('key')}</div><span class="admin-lock-signature">centralita celestial</span></div><div class="admin-lock-content"><span class="eyebrow">EL ESCRITORIO PRIVADO DE MIGUEL</span><h1 id="admin-lock-title">La llave de<br><em>tu Centralita.</em></h1><p class="admin-lock-intro">${setup ? 'Elige una contraseña para cuidar las historias, los mensajes y las sorpresas que preparas para Sandra.' : 'Un pequeño secreto para entrar donde se preparan las cosas bonitas.'}</p>${adminAuth.error ? `<p class="account-error" role="alert">${esc(adminAuth.error)}</p>` : ''}${adminAuth.revocationPending ? `<button class="button secondary admin-lock-retry" data-admin-lock ${adminAuth.loading ? 'disabled' : ''}>${adminAuth.loading ? 'Cerrando la sesión…' : 'Reintentar cierre'}</button>` : ''}${form}<p class="admin-lock-footnote">${icon('key')} Tu acceso de ChatGPT y esta contraseña protegen el escritorio. Se cierra automáticamente a los 30 minutos.</p></div></section>`;
@@ -367,12 +375,13 @@
     if (typeof data?.configured !== 'boolean' || typeof data.unlocked !== 'boolean') throw new Error('No se pudo comprobar la llave de tu Centralita.');
     const expires = Date.parse(data.expires_at);
     if (data.unlocked && (!data.configured || !Number.isFinite(expires) || expires <= Date.now())) throw new Error('La sesión de tu Centralita ha caducado. Vuelve a introducir tu contraseña.');
-    const unlocked = data.unlocked && !adminAuth.requirePassword;
+    const permissionBased = account.portal && isOwner() && data.permission_based === true;
+    const unlocked = data.unlocked && (permissionBased || !adminAuth.requirePassword);
     Object.assign(adminAuth, { checked: true, configured: data.configured, unlocked, expiresAt: unlocked ? data.expires_at : null });
     clearTimeout(adminAuth.timer);
     if (unlocked) {
       const version = adminAuth.version;
-      adminAuth.timer = setTimeout(() => { if (version === adminAuth.version) closeAdminGate('Han pasado 30 minutos. Tu escritorio vuelve a estar cerrado.'); }, Math.min(expires - Date.now(), 2147483647));
+      adminAuth.timer = setTimeout(() => { if (version !== adminAuth.version) return; if (permissionBased) expireAccountSession(); else closeAdminGate('Han pasado 30 minutos. Tu escritorio vuelve a estar cerrado.'); }, Math.min(expires - Date.now(), 2147483647));
     } else clearAdminState();
   }
   function openAdminDesk() {
@@ -414,6 +423,7 @@
     } finally { if (epoch === liveEpoch && version === adminAuth.version) { adminAuth.loading = false; adminAuth.controller = null; openAdminDesk(); } }
   }
   async function lockAdmin() {
+    if (account.portal && isOwner()) { navigate('home'); return; }
     if (!canOpenControl() || mode !== 'live') return;
     closeAdminGate(); const epoch = liveEpoch, version = adminAuth.version;
     adminAuth.loading = true; adminAuth.revocationPending = true; refreshAdminGate();
@@ -431,12 +441,12 @@
   function control() {
     if (!canOpenControl()) return title('Un rincón privado', 'Esta mesa está reservada.', mode === 'checking' ? 'Castori está comprobando tu llave.' : 'Castori guarda aquí sus papeles de oficina.') + `<div class="empty-state">${icon('star')}<p>Las conversaciones de Patita siguen en su propio rincón.</p><button class="button" data-view="home">Volver a mi rincón</button></div>`;
     if (!canUseControl()) return renderAdminLock();
-    const tabs = [['overview', 'Un vistazo'], ['send', 'Mensajes y horarios'], ['stories', 'Cuentos y borradores'], ['vaca', 'La Vaca Mágica'], ['court', 'Corte y memoria'], ['access', 'La llave de Sandra']];
-    return `<section class="control-hero"><div><div class="eyebrow">${icon('star')}${mode === 'demo' ? 'VISTA DE MIGUEL · DATOS FICTICIOS' : 'EL ESCRITORIO PRIVADO DE MIGUEL'}</div><h1>Detrás de cada poquito<br>de magia, <em>estás tú.</em></h1><p>Cuida las historias, prepara las sorpresas y acompaña a cada animal desde un solo lugar.</p></div><div class="control-seal" aria-hidden="true"><span>✦</span><small>centralita<br>celestial</small></div></section><div class="control-topline"><span>${mode === 'demo' ? 'Demostración local · Ninguna acción se envía a Telegram ni a Sandra.' : 'Los mismos servicios de Telegram · Solo tú puedes abrir este escritorio.'}</span><div class="control-topline-actions"><button class="text-button" data-admin-refresh>Actualizar estado ${icon('arrow')}</button>${mode === 'live' ? '<button class="button secondary admin-lock-button" data-admin-lock>Cerrar Centralita</button>' : ''}</div></div><div id="admin-summary">${renderAdminSummary()}</div><nav class="control-tabs" aria-label="Secciones de la Centralita">${tabs.map(([id, label]) => `<button data-admin-tab="${id}" class="${adminTab === id ? 'active' : ''}" aria-pressed="${adminTab === id}">${label}</button>`).join('')}</nav><div id="admin-panel">${renderAdminPanel()}</div><section class="admin-console" aria-label="Consola completa de la Centralita"><div class="section-heading"><div><span class="eyebrow">EL CUADERNO DE MANDO</span><h2>La Centralita, con todas sus palabras.</h2><p>Las respuestas y sus botones aparecen aquí. También puedes usar cualquier comando disponible.</p></div>${adminButton('Ayuda de Telegram', '/start')}</div><div id="admin-feed" class="admin-feed" role="log" aria-live="polite">${renderAdminEvents()}</div><div id="admin-delivery" class="admin-delivery" role="status">${renderAdminDelivery()}</div><form id="admin-console-form" class="admin-console-form"><label class="sr-only" for="admin-command-input">Comando de la Centralita</label><input id="admin-command-input" name="command" placeholder="/status, /historial mimosuga 10…" maxlength="4000" autocomplete="off" required><button class="button" type="submit" ${mode === 'live' && admin.busy ? 'disabled' : ''}>Ejecutar ${icon('arrow')}</button></form><details class="admin-command-help"><summary>Ver todos los comandos disponibles</summary><div id="admin-command-list">${renderAdminHelp()}</div></details></section>`;
+    const tabs = [['overview', 'Un vistazo'], ['chats', 'Conversaciones'], ['send', 'Mensajes y horarios'], ['stories', 'Cuentos y borradores'], ['vaca', 'La Vaca Mágica'], ['court', 'Corte y memoria'], ['access', 'Las llaves de la Casa']];
+    return `<section class="control-hero"><div><div class="eyebrow">${icon('star')}${mode === 'demo' ? 'VISTA DE MIGUEL · DATOS FICTICIOS' : 'EL ESCRITORIO PRIVADO DE MIGUEL'}</div><h1>Detrás de cada poquito<br>de magia, <em>estás tú.</em></h1><p>Cuida las historias, prepara las sorpresas y acompaña a cada animal desde un solo lugar.</p></div><div class="control-seal" aria-hidden="true"><span>✦</span><small>despacho<br>del castor</small></div></section><div class="control-topline"><span>${mode === 'demo' ? 'Demostración local · Ninguna acción se envía a Telegram ni a Sandra.' : 'Los mismos servicios de Telegram · Solo tú puedes abrir este escritorio.'}</span><div class="control-topline-actions"><button class="text-button" data-admin-refresh>Actualizar estado ${icon('arrow')}</button>${mode === 'live' ? '<button class="button secondary admin-lock-button" data-admin-lock>Salir del Despacho</button>' : ''}</div></div><div id="admin-summary">${renderAdminSummary()}</div><nav class="control-tabs" aria-label="Secciones del Despacho del Castor">${tabs.map(([id, label]) => `<button data-admin-tab="${id}" class="${adminTab === id ? 'active' : ''}" aria-pressed="${adminTab === id}">${label}</button>`).join('')}</nav><div id="admin-panel">${renderAdminPanel()}</div><section class="admin-console" aria-label="Consola del Despacho del Castor"><div class="section-heading"><div><span class="eyebrow">EL CUADERNO DE MANDO</span><h2>El cuaderno de mando del Castor.</h2><p>Las respuestas y sus botones aparecen aquí. También puedes usar cualquier comando disponible.</p></div>${adminButton('Ayuda de Telegram', '/start')}</div><div id="admin-feed" class="admin-feed" role="log" aria-live="polite">${renderAdminEvents()}</div><div id="admin-delivery" class="admin-delivery" role="status">${renderAdminDelivery()}</div><form id="admin-console-form" class="admin-console-form"><label class="sr-only" for="admin-command-input">Comando del Despacho del Castor</label><input id="admin-command-input" name="command" placeholder="/status, /historial mimosuga 10…" maxlength="4000" autocomplete="off" required><button class="button" type="submit" ${mode === 'live' && admin.busy ? 'disabled' : ''}>Ejecutar ${icon('arrow')}</button></form><details class="admin-command-help"><summary>Ver todos los comandos disponibles</summary><div id="admin-command-list">${renderAdminHelp()}</div></details></section>`;
   }
   function renderAdminSummary() {
     const data = controlData();
-    if (mode === 'live' && admin.error) return `<div class="archive-notice error" role="status"><h3>No se pudo actualizar la Centralita.</h3><p>${esc(admin.error)}</p><button class="button secondary" data-admin-refresh>Reintentar</button></div>`;
+    if (mode === 'live' && admin.error) return `<div class="archive-notice error" role="status"><h3>No se pudo actualizar el Despacho.</h3><p>${esc(admin.error)}</p><button class="button secondary" data-admin-refresh>Reintentar</button></div>`;
     if (!data) return '<div class="archive-notice" role="status"><p>Abriendo el escritorio de Miguel…</p></div>';
     const counts = data.counts || {}, metrics = [['stories_pending', 'Cuentos por revisar', 'stories'], ['auto_reply_pending', 'Borradores de Mimosuga', 'stories'], ['schedules_active', 'Mensajes programados', 'send'], ['visits_active', 'Visitas preparadas', 'vaca']];
     return `<div class="control-metrics">${metrics.map(([key, label, tab]) => `<button data-admin-tab="${tab}"><strong>${Number.isFinite(counts[key]) ? counts[key] : '—'}</strong><span>${label}</span>${icon('arrow')}</button>`).join('')}</div>${data.admin_identity_matches === false || data.editorial_admin?.available === false ? '<p class="admin-notice">La revisión editorial corresponde a otro administrador de Telegram. Sus acciones permanecen desactivadas en esta sesión.</p>' : ''}${data.errors?.length ? '<p class="admin-notice">Algunos apartados no pudieron actualizarse. Puedes volver a comprobar el estado.</p>' : ''}`;
@@ -444,12 +454,67 @@
   function adminAnimalOptions(allowVaca = true) { return (controlData()?.animals || []).filter(animal => allowVaca || animal.id !== 'vaca').map(animal => `<option value="${esc(animal.id)}" ${!animal.available ? 'disabled' : ''}>${esc(animal.name || characters[animal.id]?.name || animal.id)}${animal.available ? '' : ' · no disponible'}</option>`).join(''); }
   function adminField(label, name, type = 'text', extra = '') { return `<label>${esc(label)}<input name="${name}" type="${type}" ${extra}></label>`; }
   function adminArea(label, name, placeholder = '') { return `<label class="admin-field-wide">${esc(label)}<textarea name="${name}" rows="3" maxlength="${name === 'gifts' ? 2000 : 3500}" placeholder="${esc(placeholder)}" required></textarea></label>`; }
-  function adminForm(kind, heading, body, button, command, note = '') { return `<section class="admin-card"><h2>${esc(heading)}</h2>${note ? `<p class="admin-card-note">${esc(note)}</p>` : ''}<form data-admin-form="${kind}" class="admin-form">${body}<div class="admin-form-footer"><button class="button" type="submit" ${adminCommandAllowed(command) && !(mode === 'live' && admin.busy) ? '' : 'disabled'}>${esc(button)}</button></div></form></section>`; }
+  function adminForm(kind, heading, body, button, command, note = '') { return `<section class="admin-card"><h2>${esc(heading)}</h2>${note ? `<p class="admin-card-note">${esc(note)}</p>` : ''}<form data-admin-form="${kind}" class="admin-form">${body}<div class="admin-form-footer"><button class="button" type="submit" ${adminCommandAllowed(command) && !(mode === 'live' && (admin.busy || admin.check)) ? '' : 'disabled'}>${esc(button)}</button></div></form></section>`; }
+  const deskConsultations = { items: [], selected: null, detail: null, loaded: false, loading: false, error: '', version: 0, controller: null };
+  function clearDeskConsultations() { deskConsultations.version++; deskConsultations.controller?.abort(); Object.assign(deskConsultations, { items: [], selected: null, detail: null, loaded: false, loading: false, error: '', controller: null }); }
+  function renderDeskConsultations() {
+    const box = deskConsultations, c = box.detail;
+    const choices = box.items.map(item => `<button class="desk-consultation ${item.id === box.selected ? 'active' : ''}" data-desk-consultation="${esc(item.id)}" aria-pressed="${item.id === box.selected}"><strong>${esc(item.title || 'Consulta con Salchicher')}</strong><small>${esc(formatDate(typeof item.created_at === 'number' && item.created_at < 1e12 ? item.created_at * 1000 : item.created_at))} · ${item.status === 'active' ? 'Abierta' : 'Cerrada'}</small></button>`).join('');
+    const messages = c && c.id === box.selected ? (c.messages || []).filter(m => ['user', 'assistant'].includes(m.role) && typeof m.content === 'string').map(m => `<article class="consultation-message ${m.role}"><div class="consultation-speaker">${m.role === 'user' ? 'Sandra' : 'Doctor Salchicher'}<time>${esc(formatTime(typeof m.created_at === 'number' && m.created_at < 1e12 ? m.created_at * 1000 : m.created_at))}</time></div><p>${esc(m.content)}</p></article>`).join('') : '';
+    return `<p class="desk-shared-note">Las consultas y sus preguntas y respuestas se comparten entre Sandra y Miguel.</p><div class="desk-consultation-list">${choices}</div>${box.error ? `<p role="status">${esc(box.error)}</p><button class="text-button" data-desk-consultations>Volver a comprobar</button>` : box.loading ? '<p role="status">Abriendo el cuaderno de cuidados…</p>' : !box.items.length ? '<p class="admin-empty">Todavía no hay consultas guardadas.</p>' : ''}${messages}${chatHistory('salchicher').length ? `<details class="desk-other-messages"><summary>Otros mensajes de Salchicher</summary>${renderMessages('salchicher')}</details>` : ''}`;
+  }
+  function renderDeskChat() {
+    const id = deskAnimal, name = characters[id].name, schedules = (controlData()?.schedules || []).filter(item => item.animal === id), scheduleAllowed = ['castori', 'mimosuga', 'salchicher', 'corte'].includes(id);
+    const switcher = ids.filter(key => key !== 'dulcimiel').map(key => `<button class="desk-animal ${key === id ? 'active' : ''}" data-desk-animal="${key}" aria-pressed="${key === id}">${portrait(key, true)}<span>${esc(characters[key].name)}</span></button>`).join('');
+    return `<div class="desk-animal-list" aria-label="Elegir conversación">${switcher}</div><div class="desk-workspace"><section class="chat-panel desk-chat"><header class="chat-header">${portrait(id, true)}<div><h2>${esc(name)}</h2><p>La conversación de Sandra · Tú escribes como ${esc(name)}</p></div></header><div id="desk-messages" class="chat-messages desk-messages" role="log" aria-label="Conversación compartida de ${esc(name)}" aria-live="polite">${id === 'salchicher' ? renderDeskConsultations() : renderMessages(id)}</div><div id="desk-delivery" class="admin-delivery" role="status">${renderAdminDelivery()}</div>${adminForm('desk-send-' + id, 'Escribir como ' + name, adminArea('Mensaje para Sandra', 'text', 'Escribe con la voz de ' + name + '…'), 'Revisar mensaje', '/' + id, 'Sandra recibirá el mensaje de este animal. Verás una confirmación antes de enviarlo.')}</section><aside class="desk-planner">${scheduleAllowed ? adminForm('desk-schedule-' + id, 'Preparar un mensaje para después', `<label>Día semanal<select name="day">${['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'].map(day => `<option>${day}</option>`).join('')}</select></label>${adminField('O fecha puntual', 'date', 'date')}${adminField('Hora de Madrid', 'time', 'time', 'required')}${adminArea('Mensaje de ' + name, 'text')}`, 'Programar mensaje', '/programar', 'Una fecha concreta se envía una vez. Sin fecha, se repite cada semana.') : '<section class="admin-card"><h2>Las visitas de la Vaca</h2><p>Prepara sus pistas y horarios en el apartado de la Vaca Mágica.</p><button class="button secondary" data-admin-tab="vaca">Abrir sus visitas</button></section>'}<section class="admin-card"><h2>Lo que espera su momento</h2>${schedules.length ? schedules.map(item => `<article class="admin-record"><div><p>${esc(item.text)}</p><small>${esc(item.time)} · ${esc(item.kind === 'weekly' ? ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'][item.day] || 'Cada semana' : item.date || 'Una vez')}</small></div>${adminButton('Cancelar', '/cancelar ' + item.id)}</article>`).join('') : adminEmpty('No hay mensajes programados para este animal.')}<button class="text-button" data-admin-tab="send">Ver todas las programaciones →</button>${id === 'mimosuga' ? '<button class="text-button" data-admin-tab="stories">Cuentos y lista de borradores de Mimosuga →</button>' : ''}</section></aside></div>`;
+  }
+  function openDeskChat(id) {
+    if (!canOpenControl() || !ids.includes(id) || id === 'dulcimiel') return;
+    rememberAdminForms(); stopPolling(); deskAnimal = id; adminTab = 'chats';
+    if (view !== 'control') navigate('control'); else { selectAdminTab('chats'); }
+  }
+  function startDeskChat() {
+    if (!deskChatVisible()) return;
+    refreshDeskChat(true);
+    if (mode !== 'live') return;
+    stopPolling(); startPolling(deskAnimal);
+    if (deskAnimal === 'salchicher') loadDeskConsultations(); else loadHistory(deskAnimal);
+  }
+  function refreshDeskChat(forceScroll = false, prepended = false) {
+    if (!deskChatVisible()) return;
+    const log = document.getElementById('desk-messages'); if (!log) return;
+    const bottom = log.scrollHeight - log.scrollTop - log.clientHeight < 100, top = log.scrollTop, height = log.scrollHeight;
+    log.innerHTML = deskAnimal === 'salchicher' ? renderDeskConsultations() : renderMessages(deskAnimal);
+    log.scrollTop = prepended ? top + log.scrollHeight - height : forceScroll || bottom ? log.scrollHeight : top;
+  }
+  async function loadDeskConsultations() {
+    if (!deskChatVisible() || deskAnimal !== 'salchicher' || mode !== 'live' || deskConsultations.loading) return;
+    const box = deskConsultations, epoch = liveEpoch, version = ++box.version;
+    box.loading = true; box.error = ''; box.controller = new AbortController(); refreshDeskChat();
+    try {
+      const data = await bridge.consultations(box.controller.signal);
+      if (epoch !== liveEpoch || version !== box.version || !canUseControl()) return;
+      if (!Array.isArray(data?.consultations)) throw new Error('No se pudo abrir el cuaderno de cuidados.');
+      box.items = data.consultations; box.loaded = true;
+      if (!box.items.some(c => c.id === box.selected)) { box.selected = data.active_id || box.items[0]?.id || null; box.detail = null; }
+      if (box.selected) { const result = await bridge.consultation(box.selected, box.controller.signal); if (epoch !== liveEpoch || version !== box.version || !canUseControl()) return; box.detail = result.consultation || result; }
+    } catch (error) { if (epoch !== liveEpoch || version !== box.version || error.cancelled) return; if (archiveAccessError(error)) return; box.error = error.message; }
+    finally { if (epoch === liveEpoch && version === box.version) { box.loading = false; box.controller = null; refreshDeskChat(); } }
+  }
+  async function loadDeskConsultation(id) {
+    if (!deskChatVisible() || deskAnimal !== 'salchicher' || !deskConsultations.items.some(c => c.id === id)) return;
+    deskConsultations.version++; deskConsultations.controller?.abort(); deskConsultations.loading = false; deskConsultations.selected = id; deskConsultations.detail = null; await loadDeskConsultations();
+  }
+  function clearSubmittedDeskDraft(text) {
+    const drafts = adminFormDrafts[mode]; if (!drafts) return;
+    for (const [kind, values] of Object.entries(drafts)) if (kind.startsWith('desk-') && buildAdminCommand(kind, values) === text) { const form = document.querySelector(`[data-admin-form="${kind}"]`); if (form && buildAdminCommand(kind, Object.fromEntries(new FormData(form))) !== text) { drafts[kind] = Object.fromEntries(new FormData(form)); continue; } delete drafts[kind]; form?.reset(); }
+  }
   function renderAdminPanel() {
-    if (adminTab === 'access') return renderInvitation();
+    if (adminTab === 'access') return renderInvitation() + renderOwnerInvitation();
+    if (adminTab === 'chats') return renderDeskChat();
     const data = controlData(); if (!data) return '';
     const auto = data.automation || {}, schedules = data.schedules || [], stories = data.stories || [], drafts = data.drafts || [], visits = data.visits || [];
-    if (adminTab === 'overview') return `<div class="admin-grid"><section class="admin-card"><div class="admin-card-heading"><h2>La casa está despierta</h2>${adminButton('Ver estado completo', '/status')}</div><div class="admin-bot-list">${(data.animals || []).map(animal => `<div>${characters[animal.id] ? portrait(animal.id, true) : icon('star')}<span><strong>${esc(animal.name || animal.id)}</strong><small>${animal.available ? animal.linked ? 'Bot disponible · chat vinculado' : 'Bot disponible · falta vincular chat' : 'Bot no disponible'}</small></span><i class="online-dot ${animal.available ? '' : 'offline'}" aria-hidden="true"></i></div>`).join('')}</div><p class="admin-card-note">${data.database_available ? 'Archivo disponible' : 'El archivo no está disponible'} · Horario ${esc(data.timezone || 'Europe/Madrid')}</p></section><section class="admin-card"><h2>El ritmo de cada día</h2><p class="admin-card-note">Estos controles usan los mismos ajustes que tu Centralita de Telegram.</p><div class="admin-setting"><div><strong>Mimosuga</strong><small>${auto.mimosuga_enabled ? 'Activa · ' + adminStatus(auto.mimosuga_mode) : 'En pausa'}</small></div><div>${adminButton('Con revisión', '/mimosuga_auto revision')}${adminButton('Automática', '/mimosuga_auto auto')}${adminButton(auto.mimosuga_enabled ? 'Pausar' : 'Activar', '/mimosuga_auto ' + (auto.mimosuga_enabled ? 'off' : 'on'))}</div></div><div class="admin-setting"><div><strong>Doctor Salchicher</strong><small>${auto.salchicher_enabled ? 'Activo' : 'En pausa'} · Sus consultas privadas no aparecen aquí</small></div>${adminButton(auto.salchicher_enabled ? 'Pausar' : 'Activar', '/salchicher_auto ' + (auto.salchicher_enabled ? 'off' : 'on'))}</div><div class="admin-setting"><div><strong>La Vaca Mágica</strong><small>Conversación ${auto.vaca_enabled ? 'activa' : 'en pausa'}</small></div>${adminButton(auto.vaca_enabled ? 'Pausar conversación' : 'Activar conversación', '/vaca_auto ' + (auto.vaca_enabled ? 'off' : 'on'))}</div><div class="admin-setting"><div><strong>Programaciones y visitas</strong><small>${auto.schedules_paused ? 'Pausadas' : 'En marcha'}</small></div>${adminButton(auto.schedules_paused ? 'Reanudar todo' : 'Pausar todo', auto.schedules_paused ? '/reanudar_programas' : '/pausar_programas')}</div></section></div>`;
+    if (adminTab === 'overview') return `<div class="admin-grid"><section class="admin-card"><div class="admin-card-heading"><h2>La casa está despierta</h2>${adminButton('Ver estado completo', '/status')}</div><div class="admin-bot-list">${(data.animals || []).map(animal => `<div>${characters[animal.id] ? portrait(animal.id, true) : icon('star')}<span><strong>${esc(animal.name || animal.id)}</strong><small>${animal.available ? animal.linked ? 'Bot disponible · chat vinculado' : 'Bot disponible · falta vincular chat' : 'Bot no disponible'}</small></span><i class="online-dot ${animal.available ? '' : 'offline'}" aria-hidden="true"></i></div>`).join('')}</div><p class="admin-card-note">${data.database_available ? 'Archivo disponible' : 'El archivo no está disponible'} · Horario ${esc(data.timezone || 'Europe/Madrid')}</p></section><section class="admin-card"><h2>El ritmo de cada día</h2><p class="admin-card-note">Estos controles usan los mismos ajustes que tu Centralita de Telegram.</p><div class="admin-setting"><div><strong>Mimosuga</strong><small>${auto.mimosuga_enabled ? 'Activa · ' + adminStatus(auto.mimosuga_mode) : 'En pausa'}</small></div><div>${adminButton('Con revisión', '/mimosuga_auto revision')}${adminButton('Automática', '/mimosuga_auto auto')}${adminButton(auto.mimosuga_enabled ? 'Pausar' : 'Activar', '/mimosuga_auto ' + (auto.mimosuga_enabled ? 'off' : 'on'))}</div></div><div class="admin-setting"><div><strong>Doctor Salchicher</strong><small>${auto.salchicher_enabled ? 'Activo' : 'En pausa'} · Consultas compartidas entre Sandra y Miguel</small></div>${adminButton(auto.salchicher_enabled ? 'Pausar' : 'Activar', '/salchicher_auto ' + (auto.salchicher_enabled ? 'off' : 'on'))}</div><div class="admin-setting"><div><strong>La Vaca Mágica</strong><small>Conversación ${auto.vaca_enabled ? 'activa' : 'en pausa'}</small></div>${adminButton(auto.vaca_enabled ? 'Pausar conversación' : 'Activar conversación', '/vaca_auto ' + (auto.vaca_enabled ? 'off' : 'on'))}</div><div class="admin-setting"><div><strong>Programaciones y visitas</strong><small>${auto.schedules_paused ? 'Pausadas' : 'En marcha'}</small></div>${adminButton(auto.schedules_paused ? 'Reanudar todo' : 'Pausar todo', auto.schedules_paused ? '/reanudar_programas' : '/pausar_programas')}</div></section></div>`;
     if (adminTab === 'send') return `<div class="admin-grid">${adminForm('send', 'Un mensaje con su voz', `<label>Enviar como<select name="animal">${adminAnimalOptions()}</select></label>${adminArea('Tu mensaje', 'text', 'Escribe lo que quieres que Sandra reciba…')}<div class="admin-send-preview admin-field-wide" data-send-preview>Vista previa: este mensaje llegará a Sandra como el animal seleccionado.</div>`, 'Enviar a Sandra', '/castori', 'Revisa el animal y el texto antes de enviarlo. Este envío llega a Sandra.')}${adminForm('schedule', 'Una pequeña alegría a su hora', `<label>Animal<select name="animal">${adminAnimalOptions(false)}</select></label><label>Día semanal<select name="day">${['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'].map(day => `<option>${day}</option>`).join('')}</select></label>${adminField('O fecha puntual (sustituye al día)', 'date', 'date')}${adminField('Hora de Madrid', 'time', 'time', 'required')}${adminArea('Mensaje programado', 'text')}`, 'Crear programación', '/programar', 'Sin fecha puntual, se repite cada semana. Las visitas de la Vaca tienen su propio apartado.')}</div><section class="admin-card admin-wide"><div class="admin-card-heading"><h2>Mensajes que esperan su momento</h2><div>${adminButton('Ver todos', '/programados')}${adminButton(auto.schedules_paused ? 'Reanudar' : 'Pausar', auto.schedules_paused ? '/reanudar_programas' : '/pausar_programas')}</div></div>${schedules.length ? schedules.map(item => `<article class="admin-record"><div><span class="eyebrow">${esc(characters[item.animal]?.name || item.animal)} · ${esc(item.id)}</span><p>${esc(item.text)}</p><small>${esc(item.kind === 'weekly' ? ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'][item.day] || 'Cada semana' : item.date || 'Una vez')} · ${esc(item.time)}${item.next_at ? ' · Próximo: ' + esc(adminDate(item.next_at)) : ''}${item.sent ? ' · Enviado' : item.sending ? ' · En proceso' : ''}</small></div>${adminButton('Cancelar', '/cancelar ' + item.id)}</article>`).join('') : adminEmpty('No hay programaciones en esta vista.')}${data.truncated?.schedules ? '<p class="admin-card-note">Esta vista muestra las primeras programaciones. «Ver todos» abre el listado completo en la consola.</p>' : ''}</section>`;
     if (adminTab === 'stories') return `<section class="admin-card admin-wide"><div class="admin-card-heading"><div><h2>Los cuentos, antes de echar a volar</h2><p class="admin-card-note">Lee, revisa y decide cuáles forman parte de vuestra historia.</p></div>${adminButton('Últimos cuentos', '/admin_ultimos')}</div>${stories.length ? stories.map(item => `<article class="admin-record"><div><span class="eyebrow">${esc(adminStatus(item.status))} · ${esc(item.id)}</span><h3>${esc(item.title || 'Cuento sin título')}</h3><small>${esc(item.narrator || 'Mimosuga')} · ${esc(adminDate(item.created_at))}</small></div><div class="admin-record-actions">${adminButton('Leer', '/admin_ver ' + item.id)}${adminButton('Aprobar', '/admin_aprobar ' + item.id)}${adminButton('Hacer canon', '/admin_canon ' + item.id)}${adminButton('Descartar', '/admin_descartar ' + item.id)}</div></article>`).join('') : adminEmpty('No hay cuentos para mostrar en esta vista.')}</section><section class="admin-card admin-wide"><div class="admin-card-heading"><div><h2>El lápiz de Mimosuga</h2><p class="admin-card-note">Abre una revisión para recibir los botones reales de enviar o descartar en la consola.</p></div>${adminButton('Revisar pendientes', '/mimosuga_pendientes')}</div>${drafts.length ? drafts.map(item => `<article class="admin-draft"><div><span class="eyebrow">BORRADOR · ${esc(item.id)}</span><small>${esc(adminDate(item.created_at))}</small></div><p><strong>Mensaje recibido</strong>${esc(item.incoming_text)}</p><blockquote>${esc(item.proposed_text)}</blockquote>${adminButton('Abrir revisión', '/mimosuga_pendientes ' + item.id)}</article>`).join('') : adminEmpty('Mimosuga no tiene borradores pendientes en esta vista.')}</section>`;
     if (adminTab === 'vaca') return `<div class="admin-grid"><section class="admin-card"><div class="admin-card-heading"><h2>El cuaderno secreto de ilusiones</h2>${adminButton('Ver todos', '/vaca_deseos')}</div>${(data.wishes || []).length ? data.wishes.map(wish => `<div class="admin-wish"><span>${wish.favorite ? '★' : '✧'}</span><div><strong>${esc(wish.name)}</strong><p>${esc(wish.details || '')}</p><small>${esc(wish.id)}</small></div></div>`).join('') : adminEmpty('No hay deseos para mostrar en esta vista.')}<p class="admin-card-note">Este cuaderno es privado. Apuntar una ilusión no promete un regalo.</p></section>${adminForm('visit', 'Preparar una visita de diciembre', `${adminField('Fecha de entrega', 'date', 'date', 'required')}${adminField('Hora de Madrid', 'time', 'time', 'required')}${adminArea('Regalos que prepararás', 'gifts', 'Los regalos físicos los preparas tú…')}`, 'Crear borrador privado', '/vaca_visita', 'Primero se prepara el borrador. Revisa sus pistas, textos y fechas antes de activarlo.')}</div><section class="admin-card admin-wide"><div class="admin-card-heading"><div><h2>Las visitas, con todo su cuidado</h2><p class="admin-card-note">Al activar una visita autorizas sus mensajes a Sandra. El saludo presupone que has colocado los regalos.</p></div><div>${adminButton('Ver todas', '/vaca_visitas')}${adminButton(auto.vaca_visits_paused ? 'Reanudar visitas' : 'Pausar visitas', '/vaca_pausa ' + (auto.vaca_visits_paused ? 'off' : 'on'))}</div></div>${visits.length ? visits.map(visit => `<article class="admin-visit"><div class="admin-card-heading"><div><span class="eyebrow">${esc(adminStatus(visit.status))} · ${esc(visit.id)}</span><h3>${esc(adminDate(visit.delivery_at))}</h3></div><div>${adminButton('Ver detalle', '/vaca_visitas ' + visit.id)}${adminButton('Cancelar visita', '/vaca_cancelar ' + visit.id)}</div></div><p>${esc(visit.gifts)}</p><div class="admin-visit-events">${(visit.events || []).map(event => `<div><strong>${esc({ pista1: 'Primera pista', pista2: 'Segunda pista', manana: 'Saludo de la mañana' }[event.id] || event.id)}</strong><small>${esc(adminDate(event.at))} · ${esc(adminStatus(event.status))}</small><p>${esc(event.text)}</p></div>`).join('')}</div>${adminButton('Activar esta visita para Sandra', '/vaca_activar ' + visit.id, true, true)}</article>`).join('') : adminEmpty('No hay visitas preparadas en esta vista.')}</section><details class="admin-edit-visits"><summary>Editar una visita, sus textos o sus horas</summary><p>Cualquier cambio devuelve la visita a borrador. Revisa y vuelve a activarla cuando esté lista.</p><div class="admin-grid">${adminForm('visit-text', 'Cambiar una pista', `${adminField('ID de visita', 'id', 'text', 'required')}<label>Momento<select name="event"><option value="pista1">Primera pista</option><option value="pista2">Segunda pista</option><option value="manana">Saludo de la mañana</option></select></label>${adminArea('Nuevo texto', 'text')}`, 'Guardar texto del borrador', '/vaca_texto')}${adminForm('visit-time', 'Cambiar la hora de una pista', `${adminField('ID de visita', 'id', 'text', 'required')}<label>Momento<select name="event"><option value="pista1">Primera pista</option><option value="pista2">Segunda pista</option><option value="manana">Saludo de la mañana</option></select></label>${adminField('Nueva fecha', 'date', 'date', 'required')}${adminField('Nueva hora de Madrid', 'time', 'time', 'required')}`, 'Guardar fecha de la pista', '/vaca_hora')}${adminForm('visit-date', 'Mover la fecha de entrega', `${adminField('ID de visita', 'id', 'text', 'required')}${adminField('Nueva fecha', 'date', 'date', 'required')}${adminField('Nueva hora de Madrid', 'time', 'time', 'required')}`, 'Cambiar entrega del borrador', '/vaca_fecha')}</div></details>`;
@@ -457,12 +522,13 @@
   }
   function renderAdminHelp() { const data = controlData(); return (data?.commands || []).map(command => { const [args, description] = adminHelp[command] || ['', 'Comando disponible en tu Centralita']; return `<button data-admin-compose="/${esc(command)}${args ? ' ' : ''}" ${adminCommandAllowed('/' + command) ? '' : 'disabled'}><code>/${esc(command)}${args ? ' ' + esc(args) : ''}</code><span>${esc(description)}</span></button>`; }).join(''); }
   function renderAdminEvents() {
-    const events = controlEvents(); if (!events.length) return '<div class="admin-feed-empty">✧<p>Aquí aparecerán las respuestas de tu Centralita y sus botones.</p></div>';
-    return events.map(event => `<article class="admin-event ${event.role === 'user' ? 'user' : ''}"><div class="admin-event-meta">${event.role === 'user' ? 'Miguel' : 'Centralita Celestial'}${event.time ? ' · ' + esc(formatTime(event.time)) : ''}${mode === 'demo' ? ' · Demostración' : ''}</div><div class="admin-event-text">${esc(event.text)}</div>${Array.isArray(event.buttons) ? `<div class="message-buttons">${event.buttons.filter(Array.isArray).map(row => `<div>${row.filter(button => typeof button?.text === 'string' && typeof button.data === 'string').map(button => `<button class="message-choice" data-admin-event="${esc(event.id)}" data-admin-callback="${esc(button.data)}" ${mode === 'live' && admin.busy || !canUseControl() || mode === 'live' && /^(adminstory|adminteststory):/.test(button.data) && (admin.data?.admin_identity_matches === false || admin.data?.editorial_admin?.available === false) ? 'disabled' : ''}>${esc(button.text)}</button>`).join('')}</div>`).join('')}</div>` : ''}</article>`).join('');
+    const events = controlEvents(); if (!events.length) return '<div class="admin-feed-empty">✧<p>Aquí aparecerán las respuestas del Despacho y sus botones.</p></div>';
+    return events.map(event => `<article class="admin-event ${event.role === 'user' ? 'user' : ''}"><div class="admin-event-meta">${event.role === 'user' ? 'Miguel' : 'Despacho del Castor'}${event.time ? ' · ' + esc(formatTime(event.time)) : ''}${mode === 'demo' ? ' · Demostración' : ''}</div><div class="admin-event-text">${esc(event.text)}</div>${Array.isArray(event.buttons) ? `<div class="message-buttons">${event.buttons.filter(Array.isArray).map(row => `<div>${row.filter(button => typeof button?.text === 'string' && typeof button.data === 'string').map(button => `<button class="message-choice" data-admin-event="${esc(event.id)}" data-admin-callback="${esc(button.data)}" ${mode === 'live' && admin.busy || !canUseControl() || mode === 'live' && /^(adminstory|adminteststory):/.test(button.data) && (admin.data?.admin_identity_matches === false || admin.data?.editorial_admin?.available === false) ? 'disabled' : ''}>${esc(button.text)}</button>`).join('')}</div>`).join('')}</div>` : ''}</article>`).join('');
   }
   function renderAdminDelivery() {
     if (mode === 'demo') return 'Vista de prueba · Ninguna acción sale de este navegador.';
-    if (admin.preview) return `<div class="admin-confirm-preview"><strong>Revisa esta acción antes de enviarla</strong><pre>${esc(admin.preview)}</pre><button class="button" data-admin-confirm>${/^\/vaca_activar\b/.test(admin.preview) ? 'Activar la visita para Sandra' : 'Enviar a Sandra'}</button><button class="text-button" data-admin-cancel-preview>Volver a editar</button></div>`;
+    const animalPreview = admin.preview?.match(/^\/(castori|mimosuga|salchicher|vaca|corte)\s+([\s\S]+)/);
+    if (admin.preview) return `<div class="admin-confirm-preview"><strong>${animalPreview ? 'Para Sandra · ' + esc(characters[animalPreview[1]].name) : 'Revisa esta acción antes de enviarla'}</strong><pre>${esc(animalPreview ? animalPreview[2] : admin.preview)}</pre><button class="button" data-admin-confirm>${/^\/vaca_activar\b/.test(admin.preview) ? 'Activar la visita para Sandra' : 'Enviar a Sandra'}</button><button class="text-button" data-admin-cancel-preview>Volver a editar</button></div>`;
     return `${esc(admin.note || '')}${admin.check && admin.requestId ? `<button class="text-button" data-admin-receipt="${esc(admin.requestId)}">Comprobar envío</button>` : ''}`;
   }
   function adminTruncation() {
@@ -481,20 +547,22 @@
   }
   function refreshControl() {
     if (view !== 'control' || !canUseControl()) return;
+    const previousLog = deskChatVisible() ? document.getElementById('desk-messages') : null, deskScroll = previousLog ? { top: previousLog.scrollTop, bottom: previousLog.scrollHeight - previousLog.scrollTop - previousLog.clientHeight < 100 } : null;
     rememberAdminForms(); const focused = document.activeElement, focusForm = focused?.closest?.('[data-admin-form]')?.dataset.adminForm, focusName = focused?.name, selection = focused?.selectionStart;
     document.getElementById('admin-summary').innerHTML = renderAdminSummary(); document.getElementById('admin-panel').innerHTML = renderAdminPanel() + adminTruncation(); document.getElementById('admin-command-list').innerHTML = renderAdminHelp(); restoreAdminForms(); bindAdminForms(); refreshAdminFeed();
+    if (deskScroll && deskChatVisible()) { const log = document.getElementById('desk-messages'); if (log) log.scrollTop = deskScroll.bottom ? log.scrollHeight : deskScroll.top; }
     if (focusForm && focusName) { const field = document.querySelector(`[data-admin-form="${focusForm}"]`)?.elements?.namedItem(focusName); if (field) { field.focus({ preventScroll: true }); if (typeof selection === 'number' && field.type !== 'date' && field.type !== 'time') { try { field.setSelectionRange(selection, selection); } catch (_) {} } } }
   }
   function refreshAdminFeed() {
     if (view !== 'control' || !canUseControl()) return;
     const feed = document.getElementById('admin-feed'), bottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 100, position = feed.scrollTop;
     feed.innerHTML = renderAdminEvents(); feed.scrollTop = bottom ? feed.scrollHeight : position;
-    document.getElementById('admin-delivery').innerHTML = renderAdminDelivery();
-    document.querySelectorAll('[data-admin-command], [data-admin-form] button[type="submit"], #admin-console-form button').forEach(button => { button.disabled = mode === 'live' && admin.busy || Boolean(button.dataset.adminCommand && !adminCommandAllowed(button.dataset.adminCommand)); });
+    document.getElementById('admin-delivery').innerHTML = renderAdminDelivery(); if (deskChatVisible()) document.getElementById('desk-delivery').innerHTML = renderAdminDelivery();
+    document.querySelectorAll('[data-admin-command], [data-admin-form] button[type="submit"], #admin-console-form button').forEach(button => { button.disabled = mode === 'live' && (admin.busy || admin.check) || Boolean(button.dataset.adminCommand && !adminCommandAllowed(button.dataset.adminCommand)); });
   }
-  function selectAdminTab(tab) { if (!canUseControl() || !['overview', 'send', 'stories', 'vaca', 'court', 'access'].includes(tab)) return; if (tab !== 'access') clearInvitationSecret(); adminTab = tab; document.querySelectorAll('[data-admin-tab]').forEach(button => { const selected = button.dataset.adminTab === tab; button.classList.toggle('active', selected); button.setAttribute('aria-pressed', String(selected)); }); refreshControl(); if (tab === 'access') loadInvitation(); }
+  function selectAdminTab(tab) { if (!canUseControl() || !['overview', 'chats', 'send', 'stories', 'vaca', 'court', 'access'].includes(tab)) return; if (tab !== 'access') clearInvitationSecret(); adminTab = tab; document.querySelectorAll('[data-admin-tab]').forEach(button => { const selected = button.dataset.adminTab === tab; button.classList.toggle('active', selected); button.setAttribute('aria-pressed', String(selected)); }); refreshControl(); stopPolling(); if (tab === 'chats') startDeskChat(); if (tab === 'access') { loadInvitation(); loadOwnerInvitation(); } }
   function stopAdminReads() { adminVersion++; clearTimeout(adminTimer); adminController?.abort(); adminPollController?.abort(); adminController = null; adminPollController = null; admin.loading = false; }
-  function clearAdminState() { stopAdminReads(); clearInvitationSecret(); invitation.data = null; invitation.error = ''; invitation.uncertain = false; adminRequests.clear(); adminFormDrafts.live = {}; Object.assign(admin, { data: null, events: [], cursor: '0', loading: false, error: '', busy: false, note: '', requestId: null, check: false, preview: null }); }
+  function clearAdminState() { stopAdminReads(); clearDeskConsultations(); ownerInvitation.data = null; ownerInvitation.error = ''; ownerInvitation.uncertain = false; clearInvitationSecret(); invitation.data = null; invitation.error = ''; invitation.uncertain = false; adminRequests.clear(); adminFormDrafts.live = {}; Object.assign(admin, { data: null, events: [], cursor: '0', loading: false, error: '', busy: false, note: '', requestId: null, check: false, preview: null }); }
   async function loadAdminState() {
     if (mode !== 'live' || !canUseControl() || admin.loading) return;
     const epoch = liveEpoch, version = adminVersion; admin.loading = true; admin.error = ''; adminController = new AbortController();
@@ -518,13 +586,15 @@
       if (version !== adminVersion || epoch !== liveEpoch || mode !== 'live' || !canUseControl()) return;
       adminPollController = new AbortController();
       try { const payload = await bridge.adminEvents(admin.cursor, adminPollController.signal); if (version !== adminVersion || epoch !== liveEpoch || mode !== 'live' || !canUseControl()) return; mergeAdminEvents(payload); }
-      catch (error) { if (version !== adminVersion || epoch !== liveEpoch || error.cancelled) return; if (adminAccessError(error)) return; if (error.status === 401 || error.status === 403) { clearLiveState(); mode = 'offline'; connectionError = error.message; connectionStatus = error.status; navigate('control', null, false); return; } admin.note = 'No se están recibiendo respuestas de la Centralita. Volveremos a comprobar la conexión.'; refreshAdminFeed(); }
+      catch (error) { if (version !== adminVersion || epoch !== liveEpoch || error.cancelled) return; if (adminAccessError(error)) return; if (error.status === 401 || error.status === 403) { clearLiveState(); mode = 'offline'; connectionError = error.message; connectionStatus = error.status; navigate('control', null, false); return; } admin.note = 'No se están recibiendo respuestas del Despacho. Volveremos a comprobar la conexión.'; refreshAdminFeed(); }
       finally { if (version === adminVersion && epoch === liveEpoch && mode === 'live' && canUseControl()) adminTimer = setTimeout(run, 3000); }
     }; run();
   }
   const toCommandDate = value => /^\d{4}-\d{2}-\d{2}$/.test(value || '') ? value.split('-').reverse().join('/') : String(value || '').trim();
   function buildAdminCommand(kind, values) {
     const text = String(values.text || '').trim(), date = toCommandDate(values.date), time = String(values.time || '').trim(), id = String(values.id || '').trim();
+    if (kind.startsWith('desk-send-')) return '/' + kind.slice(10) + ' ' + text;
+    if (kind.startsWith('desk-schedule-')) return `/programar ${kind.slice(14)} ${date || values.day} ${time} ${text}`;
     if (kind === 'send') return '/' + values.animal + ' ' + text;
     if (kind === 'schedule') return `/programar ${values.animal} ${date || values.day} ${time} ${text}`;
     if (kind === 'visit') return `/vaca_visita ${date} ${time} | ${String(values.gifts || '').trim()}`;
@@ -537,19 +607,19 @@
   }
   function bindAdminForms() {
     document.querySelectorAll('[data-admin-form]').forEach(form => {
-      form.addEventListener('submit', async event => { event.preventDefault(); const kind = form.dataset.adminForm, formMode = mode, text = buildAdminCommand(kind, Object.fromEntries(new FormData(form))); const accepted = await submitAdmin(text, null, kind === 'send'); if (accepted && mode === formMode) { delete adminFormDrafts[formMode]?.[kind]; const current = document.querySelector(`[data-admin-form="${kind}"]`); if (current) current.reset(); } });
+      form.addEventListener('submit', async event => { event.preventDefault(); rememberAdminForms(); const kind = form.dataset.adminForm, formMode = mode, text = buildAdminCommand(kind, Object.fromEntries(new FormData(form))); const accepted = await submitAdmin(text, null, kind === 'send'); if (accepted && mode === formMode) { delete adminFormDrafts[formMode]?.[kind]; const current = document.querySelector(`[data-admin-form="${kind}"]`); if (current && buildAdminCommand(kind, Object.fromEntries(new FormData(current))) === text) current.reset(); } });
       if (form.dataset.adminForm === 'send') { const updatePreview = () => { const values = Object.fromEntries(new FormData(form)); form.querySelector('[data-send-preview]').textContent = `Para Sandra · ${characters[values.animal]?.name || values.animal}\n\n${values.text || 'Aquí verás el mensaje antes de enviarlo.'}`; }; form.addEventListener('input', updatePreview); updatePreview(); }
     });
   }
-  function bindControl() { if (!canUseControl()) { document.getElementById('admin-auth-form')?.addEventListener('submit', event => { event.preventDefault(); submitAdminAuth(); }); return; } bindAdminForms(); if (adminTab === 'access') loadInvitation(); document.getElementById('admin-console-form').addEventListener('submit', async event => { event.preventDefault(); const input = document.getElementById('admin-command-input'), text = input.value.trim(); if (await submitAdmin(text)) input.value = ''; }); }
-  function clearInvitationSecret() { invitation.version++; invitation.controller?.abort(); invitation.controller = null; invitation.loading = false; invitation.secret = null; }
+  function bindControl() { if (!canUseControl()) { document.getElementById('admin-auth-form')?.addEventListener('submit', event => { event.preventDefault(); submitAdminAuth(); }); return; } bindAdminForms(); if (adminTab === 'chats') startDeskChat(); if (adminTab === 'access') { loadInvitation(); loadOwnerInvitation(); } document.getElementById('admin-console-form').addEventListener('submit', async event => { event.preventDefault(); const input = document.getElementById('admin-command-input'), text = input.value.trim(); if (await submitAdmin(text)) input.value = ''; }); }
+  function clearInvitationSecret() { clearOwnerInvitationSecret(); invitation.version++; invitation.controller?.abort(); invitation.controller = null; invitation.loading = false; invitation.secret = null; }
   function invitationData() { return mode === 'demo' ? { has_account: false, active: false, expires_at: null, reset: false, portal_url: 'https://ejemplo.invalid/castori/' } : invitation.data; }
   function renderInvitation() {
     const data = invitationData(), secret = invitation.secret;
     const disabled = invitation.loading ? 'disabled' : '';
     return `<section class="invitation-card"><div class="invitation-emblem" aria-hidden="true">${icon('key')}</div><div class="eyebrow">UNA PUERTA SOLO PARA ELLA</div><h2>La llave de Sandra.</h2><p class="invitation-intro">Prepara una invitación para que pueda elegir su usuario y su contraseña. Sin correo, con todos sus amigos al otro lado.</p>${mode === 'demo' ? '<p class="admin-notice">Vista de prueba · Las llaves de ejemplo no abren ninguna cuenta real.</p>' : ''}${invitation.error ? `<p class="account-error" role="alert">${esc(invitation.error)}</p>` : ''}${!data ? `<p class="admin-card-note" role="status">${invitation.loading ? 'Comprobando su llave…' : 'Consulta el estado de su acceso.'}</p><button class="button secondary" data-invitation-refresh ${disabled}>Comprobar acceso</button>` : `<div class="invitation-status"><span class="online-dot ${data.has_account ? '' : 'offline'}"></span><div><strong>${data.has_account ? 'Sandra ya tiene su cuenta' : 'Su rincón espera su primera llave'}</strong><p>${data.active ? `${data.reset ? 'Invitación para renovar su contraseña' : 'Invitación pendiente de activar'}${data.expires_at ? ' · hasta ' + esc(adminDate(data.expires_at)) : ''}` : data.has_account ? 'Puede entrar con el usuario y la contraseña que eligió.' : 'Crea una invitación y comparte el enlace con ella.'}</p></div></div>${secret ? `<div class="invitation-secret"><span class="eyebrow">${mode === 'demo' ? 'LLAVE FICTICIA DEL BOCETO' : 'GUARDA ESTA LLAVE AHORA'}</span><h3>Una invitación hecha para ella.</h3><p>El código se muestra ahora y no vuelve a aparecer al salir de este apartado. No se ha enviado automáticamente.</p><label>Enlace de invitación<input id="invitation-link" value="${esc(secret.invite_url || '')}" readonly></label><div class="invitation-copy"><button class="button secondary" data-invitation-copy="link">Copiar enlace ${icon('key')}</button></div><label>Código<input id="invitation-code" value="${esc(secret.code || '')}" readonly></label><button class="text-button" data-invitation-copy="code">Copiar código</button>${secret.expires_at ? `<small>Válida hasta ${esc(adminDate(secret.expires_at))}</small>` : ''}<button class="text-button invitation-dismiss" data-invitation-dismiss>Ya lo he guardado · Ocultar la llave</button></div>` : ''}<div class="invitation-actions">${!data.has_account ? `<button class="button" data-invitation-action="create" ${disabled}>${data.active ? 'Crear una nueva invitación' : 'Preparar su invitación'} ${icon('key')}</button>` : `<button class="button secondary" data-invitation-action="reset" ${disabled}>Preparar llave de recuperación</button>`}${data.active ? `<button class="text-button" data-invitation-action="revoke" ${disabled}>Revocar invitación pendiente</button>` : ''}<button class="text-button" data-invitation-refresh ${disabled}>Actualizar estado</button></div>${data.has_account ? '<p class="invitation-note">La llave de recuperación permite elegir una contraseña nueva con el mismo usuario. Al completar el cambio se cerrarán sus sesiones anteriores.</p>' : data.active ? '<p class="invitation-note">Crear otra invitación invalida la anterior.</p>' : ''}${data.portal_url ? `<div class="invitation-address"><span>Su puerta de entrada</span><p>${esc(data.portal_url)}</p></div>` : ''}`}</section>`;
   }
-  function refreshInvitation() { if (view === 'control' && adminTab === 'access' && canUseControl()) document.getElementById('admin-panel').innerHTML = renderInvitation(); }
+  function refreshInvitation() { if (view === 'control' && adminTab === 'access' && canUseControl()) document.getElementById('admin-panel').innerHTML = renderInvitation() + renderOwnerInvitation(); }
   async function loadInvitation() {
     if (!canUseControl() || invitation.loading) return;
     if (mode === 'demo') { refreshInvitation(); return; }
@@ -577,6 +647,41 @@
     try { if (!window.navigator?.clipboard?.writeText) throw new Error(); await window.navigator.clipboard.writeText(field.value); toast(kind === 'code' ? 'Código copiado.' : 'Enlace copiado.'); }
     catch (_) { field.focus(); field.select(); toast('Seleccionado para que puedas copiarlo.'); }
   }
+  function clearOwnerInvitationSecret() { ownerInvitation.version++; ownerInvitation.controller?.abort(); ownerInvitation.controller = null; ownerInvitation.loading = false; ownerInvitation.secret = null; }
+  function ownerInvitationData() { return mode === 'demo' ? { has_account: false, active: false, expires_at: null, reset: false, portal_url: 'https://ejemplo.invalid/castori/' } : ownerInvitation.data; }
+  function renderOwnerInvitation() {
+    const data = ownerInvitationData(), secret = ownerInvitation.secret;
+    const disabled = ownerInvitation.loading ? 'disabled' : '';
+    return `<section class="invitation-card"><div class="invitation-emblem" aria-hidden="true">${icon('key')}</div><div class="eyebrow">TU MISMA LLAVE, TAMBIÉN EN EL DESPACHO</div><h2>Mi acceso a la Casa.</h2><p class="invitation-intro">Prepara tu acceso de Miguel a oficinacastori.es. Entrarás en la misma casa que Sandra y tu usuario podrá abrir el Despacho del Castor.</p>${mode === 'demo' ? '<p class="admin-notice">Vista de prueba · Las llaves de ejemplo no abren ninguna cuenta real.</p>' : ''}${ownerInvitation.error ? `<p class="account-error" role="alert">${esc(ownerInvitation.error)}</p>` : ''}${!data ? `<p class="admin-card-note" role="status">${ownerInvitation.loading ? 'Comprobando su llave…' : 'Consulta el estado de su acceso.'}</p><button class="button secondary" data-owner-invitation-refresh ${disabled}>Comprobar acceso</button>` : `<div class="invitation-status"><span class="online-dot ${data.has_account ? '' : 'offline'}"></span><div><strong>${data.has_account ? 'Miguel ya tiene su cuenta' : 'Su rincón espera su primera llave'}</strong><p>${data.active ? `${data.reset ? 'Invitación para renovar su contraseña' : 'Invitación pendiente de activar'}${data.expires_at ? ' · hasta ' + esc(adminDate(data.expires_at)) : ''}` : data.has_account ? 'Puede entrar con el usuario y la contraseña que eligió.' : 'Crea una invitación y abre el enlace para elegir tu usuario.'}</p></div></div>${secret ? `<div class="invitation-secret"><span class="eyebrow">${mode === 'demo' ? 'LLAVE FICTICIA DEL BOCETO' : 'GUARDA ESTA LLAVE AHORA'}</span><h3>Una invitación para tu usuario de Miguel.</h3><p>El código se muestra ahora y no vuelve a aparecer al salir de este apartado. No se ha enviado automáticamente.</p><label>Enlace de invitación<input id="owner-invitation-link" value="${esc(secret.invite_url || '')}" readonly></label><div class="invitation-copy"><button class="button secondary" data-owner-invitation-copy="link">Copiar enlace ${icon('key')}</button></div><label>Código<input id="owner-invitation-code" value="${esc(secret.code || '')}" readonly></label><button class="text-button" data-owner-invitation-copy="code">Copiar código</button>${secret.expires_at ? `<small>Válida hasta ${esc(adminDate(secret.expires_at))}</small>` : ''}<button class="text-button invitation-dismiss" data-owner-invitation-dismiss>Ya lo he guardado · Ocultar la llave</button></div>` : ''}<div class="invitation-actions">${!data.has_account ? `<button class="button" data-owner-invitation-action="create" ${disabled}>${data.active ? 'Crear una nueva invitación' : 'Preparar su invitación'} ${icon('key')}</button>` : `<button class="button secondary" data-owner-invitation-action="reset" ${disabled}>Preparar llave de recuperación</button>`}${data.active ? `<button class="text-button" data-owner-invitation-action="revoke" ${disabled}>Revocar invitación pendiente</button>` : ''}<button class="text-button" data-owner-invitation-refresh ${disabled}>Actualizar estado</button></div>${data.has_account ? '<p class="invitation-note">La llave de recuperación permite elegir una contraseña nueva con el mismo usuario. Al completar el cambio se cerrarán sus sesiones anteriores.</p>' : data.active ? '<p class="invitation-note">Crear otra invitación invalida la anterior.</p>' : ''}${data.portal_url ? `<div class="invitation-address"><span>Su puerta de entrada</span><p>${esc(data.portal_url)}</p></div>` : ''}`}</section>`;
+  }
+  function refreshOwnerInvitation() { refreshInvitation(); }
+  async function loadOwnerInvitation() {
+    if (!canUseControl() || ownerInvitation.loading) return;
+    if (mode === 'demo') { refreshOwnerInvitation(); return; }
+    const epoch = liveEpoch, version = ++ownerInvitation.version; ownerInvitation.loading = true; ownerInvitation.error = ''; ownerInvitation.controller = new AbortController(); refreshOwnerInvitation();
+    try { const data = await bridge.ownerInvitation(ownerInvitation.controller.signal); if (epoch !== liveEpoch || version !== ownerInvitation.version || !canUseControl() || mode !== 'live') return; if (typeof data?.has_account !== 'boolean' || typeof data.active !== 'boolean') throw new Error('No se pudo comprobar la invitación.'); ownerInvitation.data = data; ownerInvitation.uncertain = false; }
+    catch (error) { if (epoch !== liveEpoch || version !== ownerInvitation.version || error.cancelled) return; if (adminAccessError(error) || archiveAccessError(error)) return; ownerInvitation.error = error.message; }
+    finally { if (epoch === liveEpoch && version === ownerInvitation.version) { ownerInvitation.loading = false; ownerInvitation.controller = null; refreshOwnerInvitation(); } }
+  }
+  async function changeOwnerInvitation(action) {
+    if (!canUseControl() || ownerInvitation.loading || ownerInvitation.uncertain || !['create', 'reset', 'revoke'].includes(action)) return;
+    const data = ownerInvitationData(); if (!data || action === 'create' && data.has_account || action === 'reset' && !data.has_account) return;
+    if (mode === 'demo') { ownerInvitation.secret = action === 'revoke' ? null : { code: 'EJEMPLO-LLAVE-CELESTIAL', invite_url: 'https://ejemplo.invalid/castori/#owner-invite/EJEMPLO-LLAVE-CELESTIAL', expires_at: '2026-12-31T22:59:00Z' }; refreshOwnerInvitation(); return; }
+    const epoch = liveEpoch, version = ++ownerInvitation.version; ownerInvitation.secret = null; ownerInvitation.loading = true; ownerInvitation.error = ''; refreshOwnerInvitation();
+    try {
+      const result = await bridge.ownerInvitationAction(action); if (epoch !== liveEpoch || version !== ownerInvitation.version || mode !== 'live' || !canUseControl()) return;
+      if (action !== 'revoke') { if (typeof result?.code !== 'string' || typeof result.invite_url !== 'string') throw new Error('No se pudo recuperar la nueva llave. Comprueba el estado antes de crear otra.'); ownerInvitation.secret = { code: result.code, invite_url: result.invite_url, expires_at: result.expires_at, reset: result.reset }; ownerInvitation.data = { ...data, active: true, expires_at: result.expires_at, reset: result.reset }; }
+      else { ownerInvitation.data = typeof result?.has_account === 'boolean' ? result : { ...data, active: false, expires_at: null }; }
+      ownerInvitation.uncertain = false;
+    } catch (error) { if (epoch !== liveEpoch || version !== ownerInvitation.version) return; if (adminAccessError(error) || archiveAccessError(error)) return; ownerInvitation.uncertain = Boolean(error.uncertain); ownerInvitation.error = error.uncertain ? 'No pudimos confirmar el cambio. Actualiza el estado antes de crear otra invitación; no repetiremos la acción automáticamente.' : error.message; }
+    finally { if (epoch === liveEpoch && version === ownerInvitation.version) { ownerInvitation.loading = false; refreshOwnerInvitation(); } }
+  }
+  async function copyOwnerInvitation(kind) {
+    if (!canUseControl() || !ownerInvitation.secret) return;
+    const field = document.getElementById(kind === 'code' ? 'owner-invitation-code' : 'owner-invitation-link');
+    try { if (!window.navigator?.clipboard?.writeText) throw new Error(); await window.navigator.clipboard.writeText(field.value); toast(kind === 'code' ? 'Código copiado.' : 'Enlace copiado.'); }
+    catch (_) { field.focus(); field.select(); toast('Seleccionado para que puedas copiarlo.'); }
+  }
   function demoAdminAction(text, callback) {
     const time = new Date().toISOString(); demoAdminEvents.push({ id: ++demoAdminSequence, role: 'user', text: callback ? 'Opción ficticia: ' + callback.data : text, time });
     const review = /^\/mimosuga_pendientes\b/.test(text);
@@ -586,11 +691,11 @@
   async function submitAdmin(text, callback, confirmed = false) {
     text = String(text || '').trim(); if (!canUseControl() || !callback && (!text || !adminCommandAllowed(text))) { toast('Este comando no está disponible para esta sesión.'); return false; }
     if (mode === 'demo') { demoAdminAction(text, callback); return true; }
-    if (admin.busy) return false;
+    if (admin.busy || admin.check) return false;
     if (!callback && !confirmed && /^\/(castori|mimosuga|salchicher|vaca|corte|vaca_activar)\s/.test(text)) { admin.preview = text; refreshAdminFeed(); document.getElementById('admin-delivery').scrollIntoView({ behavior: 'smooth', block: 'nearest' }); return false; }
     if (callback) { if (/^(adminstory|adminteststory):/.test(callback.data) && (admin.data?.admin_identity_matches === false || admin.data?.editorial_admin?.available === false)) return false; const event = admin.events.find(item => Number(item.id) === Number(callback.eventId)); if (!event?.buttons?.some(row => Array.isArray(row) && row.some(button => button.data === callback.data))) return false; }
-    const requestId = uid(), record = { id: requestId, epoch: liveEpoch, authVersion: adminAuth.version }; adminRequests.set(requestId, record);
-    Object.assign(admin, { busy: true, note: 'Enviando a tu Centralita…', requestId, check: false, preview: null }); refreshAdminFeed();
+    const requestId = uid(), record = { id: requestId, text, epoch: liveEpoch, authVersion: adminAuth.version }; adminRequests.set(requestId, record);
+    Object.assign(admin, { busy: true, note: 'Enviando al Despacho…', requestId, check: false, preview: null }); refreshAdminFeed();
     try {
       const result = callback ? await bridge.adminCallback({ event_id: callback.eventId, data: callback.data, request_id: requestId }) : await bridge.adminAction({ text, request_id: requestId });
       if (record.epoch !== liveEpoch || record.authVersion !== adminAuth.version || mode !== 'live' || !canUseControl()) return false;
@@ -598,6 +703,7 @@
     } catch (error) { if (record.epoch !== liveEpoch || record.authVersion !== adminAuth.version || mode !== 'live' || !canUseControl()) return false; if (adminAccessError(error)) return false; if (error.status === 401 || error.status === 403) { clearLiveState(); mode = 'offline'; connectionError = error.message; connectionStatus = error.status; navigate('control', null, false); return false; } admin.busy = false; admin.note = error.message; admin.check = Boolean(error.uncertain); refreshAdminFeed(); return false; }
   }
   function applyAdminReceipt(record, status) {
+    if (status === 'processed' || status === 'pending') clearSubmittedDeskDraft(record.text);
     admin.busy = status === 'pending'; admin.requestId = record.id; admin.check = status === 'uncertain' || status === 'pending';
     admin.note = status === 'pending' ? 'Acción recibida. Esperando confirmación…' : status === 'uncertain' ? 'No se pudo confirmar esta acción. No se enviará otra vez automáticamente. Comprueba su estado antes de repetirla.' : status === 'rejected' ? 'Este botón ya no está disponible. Abre de nuevo la revisión para usar sus opciones actuales.' : 'Acción procesada. La respuesta aparecerá en el cuaderno de mando.';
     refreshAdminFeed(); if (status === 'processed') loadAdminState();
@@ -631,7 +737,7 @@
     stopPolling(); stopAdminReads(); cancelArchiveReads(); if (modal.open) modal.close(); if (next === 'chat' && !ids.includes(id)) next = 'home'; view = next; if (id && ids.includes(id)) activeId = id;
     if (next === 'clinic' || next === 'consultation') activeId = 'salchicher'; else if (next === 'vaca') activeId = 'vaca';
     const views = { home, conversations, library, memories, wishes, control }; main.innerHTML = experiences && ['clinic', 'consultation', 'vaca'].includes(next) ? experiences.render(next, experienceId) : next === 'chat' ? chat(activeId) : (views[next] || home)();
-    const labels = { home: 'Mi rincón', conversations: 'Conversaciones', library: 'La biblioteca', memories: 'Mis recuerdos', wishes: 'Cuaderno de ilusiones', control: 'Mi Centralita', clinic: 'El consultorio de Salchicher', consultation: 'Mi consulta', vaca: 'El establo de las ilusiones' };
+    const labels = { home: 'Mi rincón', conversations: 'Conversaciones', library: 'La biblioteca', memories: 'Mis recuerdos', wishes: 'Cuaderno de ilusiones', control: 'Despacho del Castor', clinic: 'El consultorio de Salchicher', consultation: 'Mi consulta', vaca: 'El establo de las ilusiones' };
     document.getElementById('breadcrumb-current').textContent = next === 'chat' ? characters[activeId].name : labels[next] || 'Mi rincón';
     document.querySelectorAll('.nav-item').forEach(b => { const active = b.dataset.view === next || (next === 'chat' && b.dataset.view === 'conversations'); b.classList.toggle('active', active); if (active) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); b.querySelector('.nav-dot')?.remove(); if (active) b.insertAdjacentHTML('beforeend', '<span class="nav-dot"></span>'); });
     renderFriends(); renderConnection(); closeMenu();
@@ -647,9 +753,10 @@
   }
   function scrollChat() { const log = document.getElementById('chat-messages'); if (log) log.scrollTop = log.scrollHeight; }
   function refreshChat(forceScroll = false, prepended = false) {
+    if (deskChatVisible()) { refreshDeskChat(forceScroll, prepended); return; }
     if (view !== 'chat') return;
     const log = document.getElementById('chat-messages'), nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 100, oldScroll = log.scrollTop, oldHeight = log.scrollHeight;
-    log.innerHTML = renderMessages(activeId); document.querySelector('.send-button').disabled = !ready(activeId) || (mode === 'demo' ? pending.has(activeId) : sending.has(activeId));
+    log.innerHTML = renderMessages(activeId); document.querySelector('.send-button').disabled = readOnly() || !ready(activeId) || (mode === 'demo' ? pending.has(activeId) : sending.has(activeId));
     document.getElementById('delivery-status').innerHTML = deliveryNote(activeId); if (prepended) log.scrollTop = oldScroll + log.scrollHeight - oldHeight; else if (forceScroll || nearBottom) scrollChat(); else log.scrollTop = oldScroll;
   }
   function mergeEvents(id, payload) {
@@ -666,8 +773,8 @@
     }
     liveChats[id] = Array.from(byId.values()).sort((a, b) => Number(a.id) - Number(b.id));
     if (Number.isFinite(Number(payload.cursor))) cursors[id] = Number(payload.cursor);
-    if (changed && view === 'chat' && activeId === id && mode === 'live') refreshChat();
-    if (payload.reset && view === 'chat' && activeId === id && mode === 'live') loadHistory(id);
+    if (changed && chatVisible(id) && mode === 'live') refreshChat();
+    if (payload.reset && chatVisible(id) && mode === 'live') loadHistory(id);
   }
   async function refreshServerState(signal) {
     const data = await bridge.state(signal); if (!data || !Array.isArray(data.characters)) throw new Error('La puerta necesita un momentito. Vuelve a intentarlo en un ratito.');
@@ -682,7 +789,7 @@
       if (view === 'vaca') experiences?.refreshWishes();
       if (view === 'chat') {
         document.querySelectorAll('[data-command]').forEach(b => { b.disabled = !canCommand(activeId, b.dataset.command); });
-        document.getElementById('chat-input').disabled = !ready(activeId); refreshChat();
+        document.getElementById('chat-input').disabled = readOnly() || !ready(activeId); refreshChat();
       }
     }
     return data;
@@ -702,13 +809,14 @@
       try {
         const payload = await bridge.events(id, cursors[id] || 0, pollController.signal);
         if (version !== pollVersion || mode !== 'live') return; mergeEvents(id, payload);
+        if (deskChatVisible() && id === 'salchicher') await loadDeskConsultations();
         if (view === 'wishes') await refreshServerState(pollController.signal);
         if (connectionError) { connectionError = ''; renderConnection(); }
       } catch (error) {
         if (!error.cancelled && version === pollVersion && mode === 'live') {
           if (error.status === 401 || error.status === 403) { clearLiveState(); mode = 'offline'; connectionError = error.message; connectionStatus = error.status; navigate(view, activeId, false); return; }
           deliveryNotes[id] = { text: 'Ahora no llegan las cartas. Volveremos a mirar el buzón en un momento.' }; connectionError = error.message;
-          if (view === 'chat' && activeId === id) refreshChat();
+          if (chatVisible(id)) refreshChat();
           const banner = document.getElementById('connection-banner'); banner.classList.add('degraded'); banner.querySelector('p').textContent = 'El camino se ha quedado en silencio. Tus cartas nuevas aparecerán cuando podamos abrir el buzón.';
         }
       } finally { if (version === pollVersion && mode === 'live') pollTimer = setTimeout(run, 3000); }
@@ -752,6 +860,7 @@
     } catch (error) { deliveryNotes[record.animal] = { text: error.message, requestId, check: true }; if (mode === 'live' && view === 'chat' && activeId === record.animal) refreshChat(); }
   }
   async function submitLive(animal, text, callback) {
+    if (readOnly()) return false;
     if (mode !== 'live' || !ready(animal) || sending.has(animal)) return false;
     const requestId = uid(), record = { id: requestId, animal, forget: text === '/olvidar', callback, epoch: liveEpoch }; requests.set(requestId, record); sending.add(animal);
     deliveryNotes[animal] = { text: 'Enviando…' }; if (view === 'chat' && activeId === animal) refreshChat();
@@ -767,11 +876,12 @@
     finally { sending.delete(animal); if (mode === 'live' && view === 'chat' && activeId === animal) refreshChat(); }
   }
   async function sendMessage(text) {
+    if (readOnly()) return;
     text = text.trim(); const id = activeId; if (!text || !ready(id)) return; const input = document.getElementById('chat-input');
     if (mode === 'live') { const accepted = await submitLive(id, text.slice(0, 4000)); if (accepted && input?.isConnected && input.value.trim() === text) { input.value = ''; input.style.height = 'auto'; } return; }
     if (mode !== 'demo' || pending.has(id)) return; if (input) { input.value = ''; input.style.height = 'auto'; }
     const history = demoHistory(id); history.push({ id: uid(), role: 'user', text: text.slice(0, 1500), time: Date.now() }); pending.add(id); persist(); refreshChat(true);
-    setTimeout(() => { let response; try { response = reply(id, text, history.slice(0, -1)); } catch (_) { response = 'Patita, se me ha enredado una frase. ¿Probamos otra vez?'; } history.push({ id: uid(), role: 'assistant', text: response, time: Date.now() }); pending.delete(id); persist(); if (mode === 'demo' && view === 'chat' && activeId === id) refreshChat(true); }, 700 + Math.random() * 550);
+    setTimeout(() => { let response; try { response = reply(id, text, history.slice(0, -1)); } catch (_) { response = 'Patita, se me ha enredado una frase. ¿Probamos otra vez?'; } history.push({ id: uid(), role: 'assistant', text: response, time: Date.now() }); pending.delete(id); persist(); if (mode === 'demo' && chatVisible(id)) refreshChat(true); }, 700 + Math.random() * 550);
   }
   function bindComposer() {
     document.getElementById('chat-form').addEventListener('submit', e => { e.preventDefault(); sendMessage(document.getElementById('chat-input').value); });
@@ -845,6 +955,13 @@
     else if (experiences && await experiences.handle(b)) return;
     else if (b.hasAttribute('data-admin-auth-refresh')) loadAdminAuth();
     else if (b.hasAttribute('data-admin-lock')) lockAdmin();
+    else if (b.dataset.deskAnimal) openDeskChat(b.dataset.deskAnimal);
+    else if (b.dataset.deskConsultation) loadDeskConsultation(b.dataset.deskConsultation);
+    else if (b.hasAttribute('data-desk-consultations')) loadDeskConsultations();
+    else if (b.hasAttribute('data-owner-invitation-refresh')) loadOwnerInvitation();
+    else if (b.dataset.ownerInvitationAction) changeOwnerInvitation(b.dataset.ownerInvitationAction);
+    else if (b.dataset.ownerInvitationCopy) copyOwnerInvitation(b.dataset.ownerInvitationCopy);
+    else if (b.hasAttribute('data-owner-invitation-dismiss')) { clearOwnerInvitationSecret(); refreshInvitation(); }
     else if (b.hasAttribute('data-invitation-refresh')) loadInvitation();
     else if (b.dataset.invitationAction) changeInvitation(b.dataset.invitationAction);
     else if (b.dataset.invitationCopy) copyInvitation(b.dataset.invitationCopy);
@@ -866,7 +983,7 @@
     else if (b.dataset.story) openStory(b.dataset.story);
     else if (b.dataset.suggestion) sendMessage(b.dataset.suggestion);
     else if (b.dataset.command) { if (!canCommand(activeId, b.dataset.command)) return; if (b.dataset.compose) { const input = document.getElementById('chat-input'); input.value = b.dataset.command + ' '; input.focus(); } else sendMessage(b.dataset.command); }
-    else if (b.dataset.callbackEvent) { const eventId = Number(b.dataset.callbackEvent), key = eventId + ':' + b.dataset.callback; if (callbackBusy.has(key) || mode !== 'live' || sending.has(activeId)) return; callbackBusy.add(key); refreshChat(); await submitLive(activeId, '', { eventId, data: b.dataset.callback }); }
+    else if (b.dataset.callbackEvent) { const eventId = Number(b.dataset.callbackEvent), key = eventId + ':' + b.dataset.callback; if (readOnly() || callbackBusy.has(key) || mode !== 'live' || sending.has(activeId)) return; callbackBusy.add(key); refreshChat(); await submitLive(activeId, '', { eventId, data: b.dataset.callback }); }
     else if (b.dataset.checkRequest) checkReceipt(b.dataset.checkRequest);
     else if (b.dataset.wishCommand) await submitLive('vaca', b.dataset.wishCommand + ' ' + b.dataset.wishId);
     else if (b.hasAttribute('data-open-wishlist')) { navigate('chat', 'vaca'); sendMessage('/lista'); }
