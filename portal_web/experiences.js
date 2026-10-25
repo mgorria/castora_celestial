@@ -10,6 +10,7 @@
     let demoConsultations = [], letters = [], lettersCursor = null, lettersMore = false, lettersLoading = false, lettersError = '';
     let careNotes = [], careCursor = 0, careLoaded = false, careLoading = false, careError = '', activeUpdateId = null;
     let wishFilter = 'all', wishSearch = '', urgentNoticeId = null, lettersVersion = 0;
+    let readCursor = 0;
     const isDemo = () => ctx.mode() === 'demo';
     const readOnly = () => Boolean(ctx.readOnly?.());
     const canWrite = animal => !readOnly() && enabled(animal);
@@ -88,6 +89,7 @@
       if (!['clinic', 'consultation'].includes(route)) return;
       const feed = document.getElementById('salchicher-notes'); if (feed) { const html = careNoteRows(); if (feed.innerHTML !== html) feed.innerHTML = html; }
       const update = document.getElementById('salchicher-active-update'); if (update) update.innerHTML = careUpdate();
+      acknowledgeVisible();
     }
     async function loadCareNotes() {
       if (isDemo() || !enabled('salchicher') || careLoading) return;
@@ -122,7 +124,7 @@
       if (route !== 'consultation') return;
       const c = detail;
       const log = document.getElementById('consultation-transcript');
-      if (!log || force) { document.getElementById('main').innerHTML = careView(consultation()); bindDetail(); return; }
+      if (!log || force) { document.getElementById('main').innerHTML = careView(consultation()); bindDetail(); acknowledgeVisible(); return; }
       if (!c || c.id !== selectedId) return;
       const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 100;
       const html = transcript(c); if (log.innerHTML !== html) log.innerHTML = html;
@@ -131,6 +133,28 @@
       const notice = document.getElementById('consultation-note'); if (notice) notice.textContent = note;
       const sendButton = document.querySelector('#consultation-form button'); if (sendButton) sendButton.disabled = readOnly() || busy || pendingSend();
       const closeButton = document.querySelector('[data-consultation-close]'); if (closeButton) closeButton.disabled = readOnly() || busy;
+      acknowledgeVisible();
+    }
+    function acknowledgeVisible() {
+      if (ctx.mode() !== 'live' || readOnly() || ctx.modalOpen?.()) return;
+      if (['clinic', 'consultation'].includes(route) && document.visibilityState === 'visible') {
+        const notes = document.getElementById('salchicher-notes');
+        const bounds = notes?.getBoundingClientRect?.();
+        const viewportHeight = window.innerHeight || document.documentElement?.clientHeight || 0;
+        // These notes sit below the consultation. Loading that page alone is not
+        // reading them: the latest note must have reached the visible viewport.
+        if (bounds && bounds.width > 0 && bounds.height > 0 && bounds.bottom > 0
+            && bounds.bottom <= viewportHeight && bounds.top < viewportHeight
+            && notes.scrollHeight - notes.scrollTop - notes.clientHeight <= 24) {
+          const latest = careNotes.map(m => m.event_id ?? m.id)
+            .filter(id => Number.isSafeInteger(id) && id > 0).sort((a, b) => b - a)[0];
+          if (latest) ctx.acknowledgeRead?.('salchicher', latest, null);
+        }
+      }
+      if (route !== 'consultation' || detail?.id !== selectedId) return;
+      const log = document.getElementById('consultation-transcript');
+      if (!log || log.scrollHeight - log.scrollTop - log.clientHeight > 24) return;
+      ctx.acknowledgeRead?.('salchicher', readCursor, selectedId);
     }
     function refreshWishes() {
       if (route !== 'vaca') return;
@@ -156,7 +180,7 @@
         if (version !== generation || epoch !== ctx.epoch() || id !== selectedId) return;
         if (!data.consultation || data.consultation.id !== id) throw new Error('No se encuentra esta consulta.');
         const changedStatus = detail?.status !== data.consultation.status;
-        detail = data.consultation; mergeConsultation(detail); error = ''; refreshDetail(changedStatus);
+        detail = data.consultation; readCursor = data.read_cursor || 0; mergeConsultation(detail); error = ''; refreshDetail(changedStatus);
       } catch (err) { if (version !== generation || epoch !== ctx.epoch() || err.cancelled) return; error = err.message; if (err.status === 404) { detail = null; refreshDetail(true); } else { note = err.message; refreshDetail(); } }
     }
     async function loadLetters(more = false) {
@@ -268,6 +292,7 @@
       const m = isDemo() ? { text: 'Patita, he abierto mi cuaderno por tu página favorita: la que todavía está por escribir. ¿Qué cosa pequeña te haría muuucha ilusión?' } : letters.find(x => String(x.id) === id);
       if (!m) return;
       ctx.showModal(`<div class="eyebrow">${icon('star')} ${isDemo() ? 'CARTA DE EJEMPLO' : 'DEL BUZÓN DE LA VACA'}</div><h2 id="modal-title">Para Patita,<br>con muuuucho cariño.</h2><p class="story-delivered-date">${esc(formatDate(m.created_at || m.time))}</p><div class="story-text">${esc(m.text)}</div><div class="story-signature">La Vaca Mágica.</div><button class="button secondary" data-vaca-chat>Contestar a la Vaca ${icon('arrow')}</button>`);
+      if (ctx.mode() === 'live') ctx.acknowledgeRead?.('vaca', m.event_id ?? m.id);
     }
     async function handle(button) {
       const b = button.dataset;
@@ -293,7 +318,7 @@
     }
     function clearLetters() { lettersVersion++; lettersLoading = false; letters = []; lettersCursor = null; lettersMore = false; lettersError = ''; if (route === 'vaca') { const list = document.getElementById('vaca-letter-list'); if (list) list.innerHTML = letterCards(); } }
     function leave() { generation++; clearTimeout(timer); controller?.abort(); controller = null; if (route === 'vaca') clearLetters(); route = ''; lettersLoading = false; careLoading = false; }
-    function clear() { leave(); careNotes = []; careCursor = 0; careLoaded = false; careError = ''; activeUpdateId = null; consultations = []; demoConsultations = []; activeId = null; detail = null; loaded = false; error = ''; note = ''; receipt = null; urgentNoticeId = null; clearLetters(); busy = false; selectedId = ''; }
+    function clear() { leave(); careNotes = []; careCursor = 0; careLoaded = false; careError = ''; activeUpdateId = null; consultations = []; demoConsultations = []; activeId = null; detail = null; readCursor = 0; loaded = false; error = ''; note = ''; receipt = null; urgentNoticeId = null; clearLetters(); busy = false; selectedId = ''; }
     function render(next, id) { route = next; if (next === 'consultation') selectedId = id || selectedId; return next === 'clinic' ? careView(clinic()) : next === 'consultation' ? careView(consultation()) : vaca(); }
     function enter(next) {
       route = next; controller = new AbortController(); const version = generation;
@@ -325,6 +350,6 @@
         (async () => { await loadConsultations(); if (version !== generation) return; if (next === 'consultation') await loadDetail(); if (version !== generation) return; await loadCareNotes(); if (version === generation) timer = setTimeout(poll, 3000); })();
       } else timer = setTimeout(poll, 3000);
     }
-    return { render, enter, leave, clear, clearLetters, handle, refreshWishes, selectedId: () => selectedId };
+    return { render, enter, leave, clear, clearLetters, handle, refreshWishes, acknowledgeVisible, selectedId: () => selectedId };
   } };
 }());

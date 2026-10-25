@@ -9,7 +9,7 @@ from account_service import AccountError
 
 COOKIE = "__Host-castori_session"
 PUBLIC_GET = ("state", "events", "request", "history", "stories", "story", "consultations", "consultation")
-PUBLIC_POST = ("message", "callback", "consultation-action", "consultation-message")
+PUBLIC_POST = ("message", "callback", "consultation-action", "consultation-message", "read")
 ADMIN_GET = ("admin-state", "admin-events", "admin-invitation", "admin-owner-invitation", "admin-auth")
 ADMIN_POST = ("admin-action", "admin-callback", "admin-invitation", "admin-owner-invitation", "admin-auth")
 ASSET_EXTENSIONS = {".html", ".css", ".js", ".png", ".jpg", ".jpeg", ".webp", ".svg", ".woff", ".woff2", ".ico"}
@@ -190,7 +190,8 @@ class Portal:
             handler = self.bridge._request_status if name == "request" else getattr(self.bridge, "_" + name.replace("-", "_"))
             app.router.add_get("/api/bridge/" + name, handler)
         for name in PUBLIC_POST:
-            app.router.add_post("/api/bridge/" + name, getattr(self.bridge, "_" + name.replace("-", "_")))
+            handler = self.bridge._mark_read if name == "read" else getattr(self.bridge, "_" + name.replace("-", "_"))
+            app.router.add_post("/api/bridge/" + name, handler)
         for name in ADMIN_GET:
             app.router.add_get("/api/bridge/" + name, getattr(self.bridge, "_" + name.replace("-", "_")))
         for name in ADMIN_POST:

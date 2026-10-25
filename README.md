@@ -546,3 +546,29 @@ La Vaca conserva sus deseos propios en `state.wishes` y sus mensajes ya recibido
 El bot de Centralita refleja mensajes, teclados y resultados en un registro separado en RAM (200 eventos, 48 horas). No se archiva en PostgreSQL ni en el historial de Sandra. El cursor incluye una identidad de arranque para que el navegador descarte datos tras un reinicio. Los recibos persistentes evitan repetir acciones y permiten consultar resultados inciertos sin reenviar. `/mimosuga_pendientes [ID]` vuelve a mostrar propuestas pendientes y sus controles originales; consultar el estado del panel nunca envía mensajes.
 
 Pruebas offline: `python -m unittest discover -s tests -q`. Los tests de web utilizan HTTP local y Telegram/OpenAI simulados. Pasar estas pruebas no acredita un despliegue en producción; su versión y funcionamiento deben comprobarse por separado.
+
+## Avisos de mensajes sin leer
+
+Con el portal configurado, las conversaciones de Sandra se entregan en la web.
+El bot de Oficina Castori queda como canal de avisos: cada día a las **07:00 y
+19:00 de Europe/Madrid** comprueba si hay mensajes nuevos sin leer y, solo en ese
+caso, envía un aviso genérico con el botón «Abrir Oficina Castori». El enlace usa
+el origen HTTPS configurado del portal y nunca incluye una invitación o sesión.
+
+La lectura se confirma desde la sesión de Sandra cuando abre el chat visible y
+llega a los mensajes nuevos; las lecturas de Miguel no cambian sus pendientes.
+Salchicher distingue cada consulta y la Vaca confirma las cartas al abrirlas.
+Los cursores y reservas de aviso se guardan en el volumen persistente, sin copiar
+el contenido a Telegram. El aviso no crea un nuevo mensaje pendiente.
+
+La primera activación considera visto el historial anterior, porque no existía
+registro de lectura. A partir de entonces se controlan los mensajes nuevos.
+Cada franja se revisa una sola vez, incluso sin pendientes; hay hasta 15 minutos
+de margen tras una caída, y los envíos inciertos no se repiten. La pausa global
+de programaciones también pausa estos avisos.
+
+`CASTORI_UNREAD_REMINDERS_ENABLED=false` desactiva los avisos. Para volver al canal
+anterior de entrega, `CASTORI_WEB_ONLY_DELIVERY=false` conserva el espejo web y
+habilita también el envío de las conversaciones a Telegram. Ambas opciones son
+`true` de forma predeterminada cuando el portal está configurado. Centralita y
+los chats de prueba del propietario mantienen su funcionamiento.

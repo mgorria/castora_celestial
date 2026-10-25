@@ -33,6 +33,7 @@ from salchicher import Salchicher
 from vaca import Vaca
 from vaca_campaigns import VacaCampaigns
 from web_bridge import RecordingExtBot, WebBridge
+from unread_notifications import UnreadNotifier, initialize as initialize_unread
 from history_service import HistoryService
 from admin_service import AdminService
 from lore_utils import (
@@ -149,6 +150,7 @@ salchicher: Salchicher | None = None
 vaca: Vaca | None = None
 vaca_campaigns: VacaCampaigns | None = None
 web_bridge: WebBridge | None = None
+unread_notifier: UnreadNotifier | None = None
 
 COURT_DEFENSE_STYLES = {
     "deny": "niega solemnemente los hechos",
@@ -2043,6 +2045,13 @@ async def scheduler_loop() -> None:
         except Exception:
             logger.exception("Error revisando mensajes programados")
 
+        # A malformed schedule must not stop the independent unread-mail check.
+        try:
+            if unread_notifier and not schedules_paused():
+                await unread_notifier.tick()
+        except Exception:
+            logger.exception("Error revisando avisos de mensajes sin leer")
+
         await asyncio.sleep(SCHEDULER_POLL_SECONDS)
 
 
@@ -2826,7 +2835,7 @@ async def stop_app(app: Application) -> None:
 
 
 async def main() -> None:
-    global centralita_app, salchicher, vaca, vaca_campaigns, web_bridge
+    global centralita_app, salchicher, vaca, vaca_campaigns, web_bridge, unread_notifier
 
     acquire_single_instance_lock()
     _ = owner_chat_id()
@@ -2870,6 +2879,16 @@ async def main() -> None:
             admin_state_provider=admin_provider, admin_actor_id=admin_chat_id,
             account_service=accounts, portal_origin=portal_origin, get_consultorio=lambda: salchicher,
             admin_access=admin_access)
+        if web_bridge.portal:
+            data = load_data()
+            if initialize_unread(data):
+                save_data(data)
+            if os.getenv("CASTORI_UNREAD_REMINDERS_ENABLED", "true").lower() == "true":
+                unread_notifier = UnreadNotifier(load_data, save_data, resolve_web_actor,
+                    lambda: animal_apps["castori"].bot if "castori" in animal_apps else None,
+                    web_bridge.portal.origin + "/castori/")
+                logger.info("Avisos de lectura preparados: 07:00 y 19:00 Europe/Madrid; pausa=%s; destinatario=%s",
+                            schedules_paused(), bool(resolve_web_actor("sandra")))
 
     if os.getenv("TOKEN_SALCHICHER"):
         salchicher = Salchicher(

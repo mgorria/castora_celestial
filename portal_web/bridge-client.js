@@ -30,6 +30,7 @@
   window.CastoriBridge = Object.freeze({
     state: signal => request('/state', { signal }),
     events: (animal, after, signal) => request('/events?animal=' + encodeURIComponent(animal) + '&after=' + encodeURIComponent(after || 0), { signal }),
+    read: body => request('/read', { body }),
     history: (animal, before, signal) => request('/history?animal=' + encodeURIComponent(animal) + '&limit=30' + (before == null ? '' : '&before=' + encodeURIComponent(before)), { signal }),
     stories: (before, signal) => request('/stories?limit=12' + (before == null ? '' : '&before=' + encodeURIComponent(before)), { signal }),
     story: (id, signal) => request('/story?id=' + encodeURIComponent(id), { signal }),

@@ -53,6 +53,7 @@
   let serverState = { characters: [], wishes: [] }, connectionError = '', connectionStatus = 0, connectVersion = 0, actorKey, liveEpoch = 0;
   let pollTimer, pollController, pollVersion = 0;
   const liveChats = {}, cursors = {}, deliveryNotes = {}, requests = new Map();
+  const readReceipts = new Map(), readRequests = new Map();
   // Connected text stays in memory only, scoped to the signed-in actor.
   const archives = {};
   const newPage = () => ({ items: [], loaded: false, loading: false, error: '', nextCursor: null, hasMore: false, available: true, version: 0, controller: null });
@@ -74,6 +75,31 @@
   const canOpenControl = () => mode === 'demo' || mode === 'live' && isOwner();
   const deskChatVisible = () => view === 'control' && adminTab === 'chats' && canUseControl();
   const chatVisible = id => view === 'chat' && activeId === id || deskChatVisible() && deskAnimal === id;
+  const isSandra = () => serverState.actor === 'sandra' || serverState.actor?.role === 'sandra';
+  async function acknowledgeRead(animal, eventId, consultationId = null) {
+    if (mode !== 'live' || !isSandra() || document.visibilityState !== 'visible' || !bridge.read
+        || !Number.isSafeInteger(eventId) || eventId <= 0) return;
+    const key = animal + ':' + (consultationId || ''), epoch = liveEpoch;
+    if ((readReceipts.get(key) || 0) >= eventId || readRequests.has(key)) return;
+    const record = { epoch, eventId }; readRequests.set(key, record);
+    try {
+      await bridge.read({ animal, event_id: eventId, consultation_id: consultationId });
+      if (epoch === liveEpoch) readReceipts.set(key, Math.max(eventId, readReceipts.get(key) || 0));
+    } catch (_) { /* A later visible render/poll retries this idempotent acknowledgement. */ }
+    finally { if (readRequests.get(key) === record) readRequests.delete(key); }
+  }
+  function acknowledgeChatRead() {
+    if (view !== 'chat' || mode !== 'live' || modal.open) return;
+    const log = document.getElementById('chat-messages');
+    if (!log || log.scrollHeight - log.scrollTop - log.clientHeight > 24) return;
+    // A global polling cursor can include other animals or messages not shown.
+    // Only the latest actual assistant message rendered in this chat is read.
+    const latest = chatHistory(activeId).filter(m => m.role === 'assistant')
+      .map(m => ({ id: m.event_id ?? m.id, consultationId: m.consultation_id || null }))
+      .filter(m => Number.isSafeInteger(m.id) && m.id > 0).sort((a, b) => b.id - a.id)[0];
+    if (latest) acknowledgeRead(activeId, latest.id, latest.consultationId);
+  }
+  function acknowledgeVisibleRead() { acknowledgeChatRead(); experiences?.acknowledgeVisible(); }
   const canUseControl = () => canOpenControl() && (mode === 'demo' || adminAuth.unlocked && Date.parse(adminAuth.expiresAt) > Date.now());
   // Preview tools are available only on a local development host, never in Sandra's portal.
   const canExploreDemo = () => !account.portal && ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
@@ -98,7 +124,7 @@
   }
   const experiences = window.CastoriExperiences?.create({ bridge, esc, icon, portrait, formatDate, formatTime, uid,
     mode: () => mode, epoch: () => liveEpoch, ready, readOnly, navigate, toast, showModal, closeModal: () => modal.close(), submitLive,
-    refreshState: refreshServerState,
+    refreshState: refreshServerState, acknowledgeRead, modalOpen: () => modal.open,
     wishes: () => mode === 'demo' ? state.wishes.map(w => ({ ...w, name: w.text })) : (serverState.wishes || []),
     demoWish: (action, wish) => { if (mode !== 'demo') return; if (action === 'add') state.wishes.push(wish); else if (action === 'remove') state.wishes = state.wishes.filter(w => w.id !== wish.id); else { const w = state.wishes.find(w => w.id === wish.id); if (w) w.favorite = !w.favorite; } persist(); }
   });
@@ -750,6 +776,7 @@
     if (mode === 'live' && next === 'library') loadStories(true);
     if (next === 'control' && canOpenControl()) { bindControl(); if (mode === 'live') { if (canUseControl()) { loadAdminState(); startAdminPolling(); } else loadAdminAuth(); } }
     if (['clinic', 'consultation', 'vaca'].includes(next)) experiences?.enter(next);
+    acknowledgeChatRead();
   }
   function scrollChat() { const log = document.getElementById('chat-messages'); if (log) log.scrollTop = log.scrollHeight; }
   function refreshChat(forceScroll = false, prepended = false) {
@@ -758,6 +785,7 @@
     const log = document.getElementById('chat-messages'), nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 100, oldScroll = log.scrollTop, oldHeight = log.scrollHeight;
     log.innerHTML = renderMessages(activeId); document.querySelector('.send-button').disabled = readOnly() || !ready(activeId) || (mode === 'demo' ? pending.has(activeId) : sending.has(activeId));
     document.getElementById('delivery-status').innerHTML = deliveryNote(activeId); if (prepended) log.scrollTop = oldScroll + log.scrollHeight - oldHeight; else if (forceScroll || nearBottom) scrollChat(); else log.scrollTop = oldScroll;
+    acknowledgeChatRead();
   }
   function mergeEvents(id, payload) {
     // Concurrent post-send and regular polls must never restore an older revision.
@@ -775,6 +803,7 @@
     if (Number.isFinite(Number(payload.cursor))) cursors[id] = Number(payload.cursor);
     if (changed && chatVisible(id) && mode === 'live') refreshChat();
     if (payload.reset && chatVisible(id) && mode === 'live') loadHistory(id);
+    if (view === 'chat' && activeId === id) acknowledgeChatRead();
   }
   async function refreshServerState(signal) {
     const data = await bridge.state(signal); if (!data || !Array.isArray(data.characters)) throw new Error('La puerta necesita un momentito. Vuelve a intentarlo en un ratito.');
@@ -795,6 +824,7 @@
     return data;
   }
   function clearLiveState() {
+    readReceipts.clear(); readRequests.clear();
     experiences?.clear();
     liveEpoch++; cancelArchiveReads(); if (modal.open) modal.close(); document.getElementById('modal-content').innerHTML = '';
     clearAdminAuth(); clearAdminState();
@@ -998,6 +1028,9 @@
   document.getElementById('theme-toggle').addEventListener('click', () => { appearance.light = appearance.light === 'moon' ? 'day' : 'moon'; applyTheme(); saveAppearance(); });
   document.getElementById('modal-close').addEventListener('click', () => modal.close());
   modal.addEventListener('close', cancelStory);
+  modal.addEventListener('close', acknowledgeVisibleRead);
+  document.addEventListener('visibilitychange', acknowledgeVisibleRead);
+  document.addEventListener('scroll', acknowledgeVisibleRead, true);
   modal.addEventListener('click', e => { if (e.target === modal) { const r = modal.getBoundingClientRect(); if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) modal.close(); } });
   document.getElementById('mobile-menu').setAttribute('aria-expanded', 'false');
   document.getElementById('mobile-menu').addEventListener('click', () => { const open = document.getElementById('sidebar').classList.toggle('open'); document.getElementById('mobile-shade').classList.toggle('open', open); document.getElementById('mobile-menu').setAttribute('aria-expanded', String(open)); });

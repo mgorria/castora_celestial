@@ -31,8 +31,9 @@ from urllib.parse import quote
 from uuid import uuid4
 
 from aiohttp import web
-from telegram import Update
+from telegram import Message, Update
 from telegram.ext import ExtBot
+import unread_notifications as unread
 
 
 logger = logging.getLogger("control-castora.web")
@@ -192,9 +193,11 @@ class WebBridge:
         if self._clean(state, data):
             self.save(data)
 
-    def forget(self, animal: str, chat_id: int) -> None:
+    def forget(self, animal: str, chat_id: int, *, forget_unread=True) -> None:
         """Erase only this actor's mirrored conversation, never another session."""
         data, state = self._read()
+        if forget_unread:
+            unread.forget(data, chat_id, animal)
         state["inboxes"].pop(self._scope(chat_id, animal), None)
         state["sequence"] += 1
         state["resets"][self._scope(chat_id, animal)] = state["sequence"]
@@ -325,6 +328,7 @@ class WebBridge:
         if message_id is not None:
             event["message_id"] = int(message_id)
         events.append(event)
+        unread.record(data, chat_id, animal, event)
         self._queue_history(data, animal, chat_id, event)
         state["inboxes"][scope] = events[-MAX_EVENTS:]
         self.save(data)
@@ -748,6 +752,7 @@ class WebBridge:
         app.router.add_get("/castori-web/health", self._health)
         app.router.add_get("/castori-web/state", self._state)
         app.router.add_get("/castori-web/events", self._events)
+        app.router.add_post("/castori-web/read", self._mark_read)
         app.router.add_get("/castori-web/request", self._request_status)
         app.router.add_post("/castori-web/message", self._message)
         app.router.add_post("/castori-web/callback", self._callback)
@@ -776,6 +781,7 @@ class WebBridge:
         if not self.token or len(self.token) < 32:
             raise ValueError("CASTORI_WEB_TOKEN must contain at least 32 characters")
         data, state = self._read()
+        unread.initialize(data)
         self._clean(state, data)
         for receipt in state["requests"].values():
             if receipt["status"] == "pending":
@@ -887,7 +893,8 @@ class WebBridge:
             return _failure("consultorio_unavailable", 503)
         _, chat_id = self._view_identity(request)
         item = doctor.get_consultation(chat_id, request.query["id"])
-        return web.json_response({"consultation": item}) if item else _failure("consultation_not_found", 404)
+        cursor = unread.latest(self.load(), chat_id, "salchicher", request.query["id"])
+        return web.json_response({"consultation": item, "read_cursor": cursor}) if item else _failure("consultation_not_found", 404)
 
     async def _consultation_action(self, request):
         if request.query:
@@ -1077,6 +1084,31 @@ class WebBridge:
         visible = [{key: value for key, value in event.items() if key not in {"timestamp", "requires_consultation"}}
                    for event in events if reset or event.get("revision", event["id"]) > after]
         return web.json_response({"events": visible, "cursor": state["sequence"], "reset": reset})
+
+    async def _mark_read(self, request):
+        # Reading the shared house as Miguel must never consume Sandra's mail.
+        if request["actor"] != "sandra":
+            return _failure("read_only", 403)
+        if request.query:
+            return _failure("invalid_read")
+        try:
+            body = await request.json()
+        except (ValueError, UnicodeError):
+            return _failure("invalid_read")
+        if (not isinstance(body, dict)
+                or set(body) != {"animal", "event_id", "consultation_id"}
+                or body.get("animal") not in ANIMALS
+                or type(body.get("event_id")) is not int
+                or body["event_id"] <= 0
+                or (body["consultation_id"] is not None
+                    and not self._consultation_id(body["consultation_id"]))):
+            return _failure("invalid_read")
+        data, _ = self._read()
+        if not unread.acknowledge(data, request["chat_id"], body["animal"],
+                                  body["event_id"], body["consultation_id"]):
+            return _failure("invalid_read")
+        self.save(data)
+        return web.json_response({"ok": True})
 
     async def _request_status(self, request):
         request_id = request.query.get("request_id", "")
@@ -1290,7 +1322,7 @@ class WebBridge:
 
 
 class RecordingExtBot(ExtBot):
-    """Telegram bot that mirrors successful animal sends; real delivery is unchanged."""
+    """Animal delivery to the portal, with a separate Telegram notification lane."""
     __slots__ = ("_web_bridge", "_web_animal")
 
     def __init__(self, *, token: str, bridge: WebBridge, animal_key: str, **kwargs):
@@ -1298,11 +1330,49 @@ class RecordingExtBot(ExtBot):
         object.__setattr__(self, "_web_bridge", bridge)
         object.__setattr__(self, "_web_animal", animal_key)
 
+    def _portal_delivery(self, chat_id):
+        return (self._web_animal in ANIMALS and self._web_bridge.portal is not None
+                and os.getenv("CASTORI_WEB_ONLY_DELIVERY", "true").lower() == "true"
+                and type(chat_id) is int and chat_id > 0
+                and chat_id == self._web_bridge.resolve_actor("sandra")
+                and chat_id != self._web_bridge.resolve_actor("owner"))
+
+    def _portal_message(self, chat_id, event, reply_markup=None):
+        # Negative IDs can never be mistaken for an actual Telegram delivery.
+        return Message.de_json({"message_id": event["message_id"],
+            "date": int(event["timestamp"]), "chat": {"id": chat_id, "type": "private"},
+            "from": {"id": self.id, "is_bot": True, "first_name": self.first_name,
+                     "username": self.username}, "text": event["text"],
+            "reply_markup": reply_markup.to_dict() if hasattr(reply_markup, "to_dict") else reply_markup}, self)
+
+    async def send_notification(self, chat_id, text, **kwargs):
+        """Send one generic reminder without creating another unread event."""
+        if (self._web_animal != "castori" or chat_id != self._web_bridge.resolve_actor("sandra")
+                or chat_id == self._web_bridge.resolve_actor("owner")):
+            raise ValueError("notification_recipient_unavailable")
+        return await super().send_message(chat_id, text, **kwargs)
+
+    async def send_chat_action(self, chat_id, action, *args, **kwargs):
+        if self._portal_delivery(chat_id):
+            return True
+        return await super().send_chat_action(chat_id, action, *args, **kwargs)
+
     async def send_message(self, chat_id, text, *args, **kwargs):
         consultation_id = session_id = _UNSPECIFIED_CONSULTATION
         if self._web_animal == "salchicher":
             session = self._web_bridge.load().get("salchicher", {}).get("sessions", {}).get(str(chat_id), {})
             consultation_id, session_id = session.get("consultation_id"), session.get("session_id")
+        if self._portal_delivery(chat_id):
+            # record() durably writes before reporting success to existing handlers.
+            # Never fall back to Telegram on a failed portal write.
+            _, state = self._web_bridge._read()
+            markup = kwargs.get("reply_markup")
+            event = self._web_bridge.record(self._web_animal, chat_id, text, source="web",
+                message_id=-(state["sequence"] + 1), reply_markup=markup,
+                expected_consultation_id=consultation_id, expected_session_id=session_id)
+            if event is None:
+                raise RuntimeError("portal_delivery_unavailable")
+            return self._portal_message(chat_id, event, markup)
         result = await super().send_message(chat_id, text, *args, **kwargs)
         try:
             if self._web_animal == "centralita":
@@ -1329,6 +1399,19 @@ class RecordingExtBot(ExtBot):
         return result
 
     async def edit_message_reply_markup(self, *args, **kwargs):
+        chat_id = kwargs.get("chat_id", args[0] if args else None)
+        message_id = kwargs.get("message_id", args[1] if len(args) > 1 else None)
+        if type(message_id) is int and message_id < 0:
+            if not self._portal_delivery(chat_id):
+                raise ValueError("invalid_portal_message")
+            markup = kwargs.get("reply_markup")
+            self._web_bridge.edit_keyboard(self._web_animal, chat_id, message_id, markup)
+            _, state = self._web_bridge._read()
+            event = next((e for e in state["inboxes"].get(f"{chat_id}:{self._web_animal}", [])
+                          if e.get("message_id") == message_id and e["role"] == "assistant"), None)
+            if event is None:
+                raise ValueError("portal_message_not_found")
+            return self._portal_message(chat_id, event, markup)
         result = await super().edit_message_reply_markup(*args, **kwargs)
         try:
             if hasattr(result, "chat_id"):
