@@ -8,6 +8,7 @@
     let route = '', selectedId = '', generation = 0, controller, timer, busy = false;
     let consultations = [], activeId = null, detail = null, loaded = false, error = '', note = '', receipt = null;
     let demoConsultations = [], letters = [], lettersCursor = null, lettersMore = false, lettersLoading = false, lettersError = '';
+    let careNotes = [], careCursor = 0, careLoaded = false, careLoading = false, careError = '', activeUpdateId = null;
     let wishFilter = 'all', wishSearch = '', urgentNoticeId = null, lettersVersion = 0;
     const isDemo = () => ctx.mode() === 'demo';
     const readOnly = () => Boolean(ctx.readOnly?.());
@@ -70,15 +71,58 @@
     function vaca() {
       return `<section class="experience-hero vaca-hero"><div class="experience-hero-copy"><div class="eyebrow">${icon('star')} EL ESTABLO DE LAS ILUSIONES</div><h1>Las cosas bonitas<br>empiezan con un<br><em>«me haría ilusión».</em></h1><p>Deseos en el cuaderno. Profecías en el chat.<br>Y una campanilla que nunca lo cuenta todo.</p><div class="experience-hero-actions"><button class="button" data-vaca-chat>${icon('chat')} Charlar con la Vaca</button><button class="text-button" data-vaca-new ${canWrite('vaca') ? '' : 'disabled'}>Apuntar una ilusión ${icon('plus')}</button></div></div><div class="experience-hero-art">${portrait('vaca')}<span class="vaca-art-label">se aceptan deseos<br><em>de todos los tamaños</em></span><span class="hero-spark first">✧</span></div></section>${isDemo() ? '<p class="experience-demo">✧ Estás recorriendo el cuaderno de ejemplo. Nada se envía a Sandra.</p>' : ''}${unavailable('vaca')}<section class="vaca-notebook"><div class="experience-section-heading"><div><div class="eyebrow">AQUÍ LAS ILUSIONES TIENEN SITIO</div><h2>Mi cuaderno de deseos.</h2></div><span id="wish-count">${ctx.wishes().length} ${ctx.wishes().length === 1 ? 'ilusión' : 'ilusiones'}</span></div><div class="wish-toolbar"><div class="experience-tabs" aria-label="Filtrar deseos"><button data-vaca-filter="all" aria-pressed="${wishFilter === 'all'}" class="${wishFilter === 'all' ? 'active' : ''}">Todos mis deseos</button><button data-vaca-filter="favorites" aria-pressed="${wishFilter === 'favorites'}" class="${wishFilter === 'favorites' ? 'active' : ''}">★ Mis favoritas</button></div><label class="wish-search"><span class="sr-only">Buscar en mis deseos</span><input id="vaca-search" type="search" value="${esc(wishSearch)}" placeholder="Buscar una ilusión…"></label></div><div class="wish-card-grid" id="vaca-wishes">${wishCards()}</div><p class="vaca-promise">✧ Apuntar un deseo no promete un regalo. Aquí también se viene a imaginar.</p></section><section class="vaca-mailbox"><div class="experience-section-heading"><div><div class="eyebrow">SOBRES QUE YA HAN LLEGADO</div><h2>Cartas, pistas y profecías.</h2></div><button class="text-button" data-vaca-letters ${enabled('vaca') ? '' : 'disabled'}>Abrir el buzón ${icon('arrow')}</button></div><div id="vaca-letter-list">${letterCards()}</div></section>`;
     }
+    function careUpdate() {
+      if (route !== 'consultation' || !activeId || activeId === selectedId) return '';
+      return `<p class="experience-notice">${activeUpdateId === activeId ? 'Hay novedades en la consulta que sigue abierta.' : 'Tienes otra consulta abierta con Salchicher.'} <button class="text-button" data-consultation-open="${esc(activeId)}">Ver la consulta en curso →</button></p>`;
+    }
+    function careNoteRows() {
+      const messages = careNotes.map(m => `<article class="consultation-message assistant"><div class="consultation-speaker">Doctor Salchicher<time>${esc(formatDate(m.time))}${m.time ? ' · ' + esc(formatTime(m.time)) : ''}</time></div><p>${esc(m.text)}</p></article>`).join('');
+      const status = careError ? `<p class="experience-notice" role="status">${esc(careError)} <button class="text-button" data-salchicher-notes>Volver a mirar</button></p>` : !careLoaded ? '<p class="experience-empty" role="status">Mirando si Salchicher ha dejado alguna nota…</p>' : !careNotes.length ? '<p class="experience-empty">Las notas recientes que Salchicher te deje fuera de una consulta aparecerán aquí.</p>' : '';
+      return messages + status;
+    }
+    function careView(html) {
+      if (isDemo()) return html;
+      return `<div id="salchicher-active-update" aria-live="polite">${careUpdate()}</div>${html}<section class="vaca-mailbox" aria-label="Notas de Salchicher fuera de consulta"><div class="experience-section-heading"><div><div class="eyebrow">UN CARIÑO ENTRE CONSULTAS</div><h2>Las notas de Salchicher.</h2><p>Sus mensajes fuera de consulta llegan aquí. Las preguntas y respuestas de cada consulta están en su propio cuaderno.</p></div></div><div id="salchicher-notes" role="log" aria-live="polite" aria-relevant="additions text">${careNoteRows()}</div></section>`;
+    }
+    function refreshCareNotes() {
+      if (!['clinic', 'consultation'].includes(route)) return;
+      const feed = document.getElementById('salchicher-notes'); if (feed) { const html = careNoteRows(); if (feed.innerHTML !== html) feed.innerHTML = html; }
+      const update = document.getElementById('salchicher-active-update'); if (update) update.innerHTML = careUpdate();
+    }
+    async function loadCareNotes() {
+      if (isDemo() || !enabled('salchicher') || careLoading) return;
+      const version = generation, epoch = ctx.epoch(); careLoading = true;
+      try {
+        const data = await bridge.events('salchicher', careCursor, controller?.signal);
+        if (version !== generation || epoch !== ctx.epoch()) return;
+        if (!Array.isArray(data?.events)) throw new Error('No hemos podido mirar las notas de Salchicher.');
+        if (!data.reset && Number.isFinite(Number(data.cursor)) && Number(data.cursor) < Number(careCursor)) return;
+        if (data.reset) { careNotes = []; activeUpdateId = null; }
+        const byId = new Map(careNotes.map(m => [String(m.id), m]));
+        for (const event of data.events) {
+          if (!event || event.animal !== 'salchicher' || event.id == null || typeof event.text !== 'string') continue;
+          if (event.consultation_id) { byId.delete(String(event.id)); if (event.consultation_id === activeId && activeId !== selectedId) activeUpdateId = activeId; continue; }
+          // Episode messages stay in their own transcript; this feed is only the doctor's incoming notes.
+          if (event.role !== 'assistant') continue;
+          const previous = byId.get(String(event.id));
+          if (previous && Number.isFinite(Number(previous.revision)) && Number(event.revision) < Number(previous.revision)) continue;
+          byId.set(String(event.id), event);
+        }
+        careNotes = [...byId.values()].sort((a, b) => Number(a.id) - Number(b.id)).slice(-200);
+        if (typeof data.cursor === 'string' || Number.isFinite(data.cursor)) careCursor = data.cursor;
+        careLoaded = true; careError = '';
+      } catch (err) { if (version !== generation || epoch !== ctx.epoch() || err.cancelled) return; careError = 'Ahora no llegan las notas de Salchicher. Volveremos a mirar en un momento.'; }
+      finally { if (version === generation && epoch === ctx.epoch()) { careLoading = false; refreshCareNotes(); } }
+    }
     function refreshClinic() {
       if (route !== 'clinic') return;
-      document.getElementById('main').innerHTML = clinic();
+      document.getElementById('main').innerHTML = careView(clinic());
     }
     function refreshDetail(force = false) {
       if (route !== 'consultation') return;
       const c = detail;
       const log = document.getElementById('consultation-transcript');
-      if (!log || force) { document.getElementById('main').innerHTML = consultation(); bindDetail(); return; }
+      if (!log || force) { document.getElementById('main').innerHTML = careView(consultation()); bindDetail(); return; }
       if (!c || c.id !== selectedId) return;
       const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 100;
       const html = transcript(c); if (log.innerHTML !== html) log.innerHTML = html;
@@ -100,7 +144,7 @@
         const data = await bridge.consultations(controller?.signal);
         if (version !== generation || epoch !== ctx.epoch()) return;
         if (!Array.isArray(data.consultations)) throw new Error('No hemos podido abrir tu cuaderno de cuidados.');
-        consultations = data.consultations; activeId = data.active_id; loaded = true; error = ''; refreshClinic();
+        consultations = data.consultations; activeId = data.active_id; loaded = true; error = ''; refreshClinic(); refreshCareNotes();
       } catch (err) { if (version !== generation || epoch !== ctx.epoch() || err.cancelled) return; error = err.status === 404 ? 'Salchicher todavía está colocando los cojines de su consultorio. Vuelve a llamar en un ratito.' : err.message; refreshClinic(); }
     }
     async function loadDetail() {
@@ -233,6 +277,7 @@
       else if (b.consultationClose) confirmAction('close', b.consultationClose);
       else if (b.consultationDelete) confirmAction('delete', b.consultationDelete);
       else if (b.consultationConfirm) await act(b.consultationConfirm, b.consultationId);
+      else if (button.hasAttribute('data-salchicher-notes')) await loadCareNotes();
       else if (button.hasAttribute('data-clinic-refresh')) { if (route === 'consultation') await loadDetail(); else await loadConsultations(); }
       else if (button.hasAttribute('data-clinic-history')) document.getElementById('clinic-history')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       else if (button.hasAttribute('data-vaca-new')) wishForm();
@@ -247,18 +292,18 @@
       return true;
     }
     function clearLetters() { lettersVersion++; lettersLoading = false; letters = []; lettersCursor = null; lettersMore = false; lettersError = ''; if (route === 'vaca') { const list = document.getElementById('vaca-letter-list'); if (list) list.innerHTML = letterCards(); } }
-    function leave() { generation++; clearTimeout(timer); controller?.abort(); controller = null; if (route === 'vaca') clearLetters(); route = ''; lettersLoading = false; }
-    function clear() { leave(); consultations = []; demoConsultations = []; activeId = null; detail = null; loaded = false; error = ''; note = ''; receipt = null; urgentNoticeId = null; clearLetters(); busy = false; selectedId = ''; }
-    function render(next, id) { route = next; if (next === 'consultation') selectedId = id || selectedId; return next === 'clinic' ? clinic() : next === 'consultation' ? consultation() : vaca(); }
+    function leave() { generation++; clearTimeout(timer); controller?.abort(); controller = null; if (route === 'vaca') clearLetters(); route = ''; lettersLoading = false; careLoading = false; }
+    function clear() { leave(); careNotes = []; careCursor = 0; careLoaded = false; careError = ''; activeUpdateId = null; consultations = []; demoConsultations = []; activeId = null; detail = null; loaded = false; error = ''; note = ''; receipt = null; urgentNoticeId = null; clearLetters(); busy = false; selectedId = ''; }
+    function render(next, id) { route = next; if (next === 'consultation') selectedId = id || selectedId; return next === 'clinic' ? careView(clinic()) : next === 'consultation' ? careView(consultation()) : vaca(); }
     function enter(next) {
       route = next; controller = new AbortController(); const version = generation;
-      if (next === 'clinic') loadConsultations();
-      if (next === 'consultation') { bindDetail(); loadDetail(); }
+      if (next === 'consultation') bindDetail();
       if (next === 'vaca') { document.getElementById('vaca-search').addEventListener('input', event => { wishSearch = event.target.value.slice(0, 160); refreshWishes(); }); loadLetters(); }
-      if (ctx.mode() !== 'live') return;
+      if (ctx.mode() !== 'live') { if (next === 'consultation') loadDetail(); return; }
       const poll = async () => {
         if (version !== generation) return;
         try {
+          if (route === 'clinic' || route === 'consultation') { await loadConsultations(); if (version !== generation) return; }
           if (route === 'consultation') {
             if (receipt?.pending && receipt.consultation === selectedId) {
               try {
@@ -272,10 +317,13 @@
             }
             await loadDetail();
           } else if (route === 'vaca') await ctx.refreshState(controller.signal);
+          if (version === generation && (route === 'clinic' || route === 'consultation')) await loadCareNotes();
         } catch (_) { /* Each view retains its last confirmed data; no fake fallback. */ }
-        if (version === generation) timer = setTimeout(poll, route === 'consultation' ? 3000 : 7000);
+        if (version === generation) timer = setTimeout(poll, route === 'vaca' ? 7000 : 3000);
       };
-      if (next !== 'clinic') timer = setTimeout(poll, 3000);
+      if (next === 'clinic' || next === 'consultation') {
+        (async () => { await loadConsultations(); if (version !== generation) return; if (next === 'consultation') await loadDetail(); if (version !== generation) return; await loadCareNotes(); if (version === generation) timer = setTimeout(poll, 3000); })();
+      } else timer = setTimeout(poll, 3000);
     }
     return { render, enter, leave, clear, clearLetters, handle, refreshWishes, selectedId: () => selectedId };
   } };

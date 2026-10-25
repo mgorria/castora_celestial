@@ -206,6 +206,43 @@ class WebIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.events("owner"))["events"], actual)
         self.assertNotIn("22:salchicher", self.data["web_bridge"]["inboxes"])
 
+    async def test_new_consultation_preserves_general_letters_but_not_legacy_episode_content(self):
+        note = "Te he dejado una mantita en el sillón, patita."
+        await self.apps["salchicher"].bot.send_message(chat_id=11, text=note)
+        self.assertEqual(self.doctor.list_consultations(11), [])
+        general = (await self.events())["events"][0]
+        self.assertNotIn("consultation_id", general)
+        self.seed_consultation()
+        self.bridge.record("salchicher", 11, "LEGACY_QUESTION", role="user")
+        self.bridge.record("salchicher", 11, "LEGACY_ANSWER")
+        before = await self.events()
+
+        start = await self.client.post("/castori-web/consultation-action", headers=HEADERS,
+            json={"action": "start", "retain_history": True})
+        self.assertEqual(start.status, 200)
+        item = (await start.json())["consultation"]
+        feed = await self.events(after=before["cursor"])
+        self.assertTrue(feed["reset"])
+        self.assertEqual([event["text"] for event in feed["events"] if not event.get("consultation_id")], [note])
+        self.assertEqual(feed["events"][0]["id"], general["id"])
+        self.assertNotIn("LEGACY_", json.dumps(feed))
+        self.assertNotIn(note, str(item["messages"]), "General letters must not become medical episode history")
+        self.assertEqual((await self.events("owner"))["events"], feed["events"])
+
+        close = await self.client.post("/castori-web/consultation-action", headers=HEADERS,
+            json={"action": "close", "consultation_id": item["id"]})
+        self.assertEqual(close.status, 200)
+        self.assertEqual((await self.events())["events"], [general])
+        again = await self.client.post("/castori-web/consultation-action", headers=HEADERS,
+            json={"action": "start", "retain_history": False})
+        self.assertEqual(again.status, 200)
+        self.assertEqual([event["text"] for event in (await self.events())["events"]
+                          if not event.get("consultation_id")], [note])
+        forgotten = await self.post("/olvidar", request_id="forget_general")
+        self.assertEqual(forgotten.status, 202)
+        self.assertNotIn(note, str((await self.events())["events"]))
+        self.assertEqual(self.doctor.list_consultations(11), [])
+
     async def test_active_input_not_duplicated_and_forget_from_telegram_or_web_purges(self):
         for origin in ("telegram", "web"):
             self.doctor.start_consultation(11, retain_history=True)

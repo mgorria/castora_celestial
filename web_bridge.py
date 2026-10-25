@@ -923,9 +923,19 @@ class WebBridge:
                     if str(exc) == "consultation_active":
                         return _failure("consultation_active", 409)
                     raise
-                # A new episode starts with a clean transient feed. Its consented
-                # archive belongs exclusively to the consultation service.
-                self.forget("salchicher", chat_id)
+                # Reset episode content, including legacy consent prompts, while
+                # keeping general letters delivered outside any consultation.
+                data, state = self._read()
+                scope = self._scope(chat_id, "salchicher")
+                events = state["inboxes"].get(scope, [])
+                general = [event for event in events if event.get("role") == "assistant"
+                           and not event.get("consultation_id") and not event.get("requires_consultation")
+                           and not event.get("buttons")]
+                if len(general) != len(events):
+                    state["inboxes"][scope] = general
+                    state["sequence"] += 1
+                    state["resets"][scope] = state["sequence"]
+                    self.save(data)
                 for message in item.get("messages", []):
                     if message.get("role") == "assistant":
                         self.record("salchicher", chat_id, message["content"], source="web")
