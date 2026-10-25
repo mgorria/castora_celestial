@@ -3,14 +3,15 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f8f6ef">
+  <meta name="theme-color" content="#fff7fa">
   <meta name="description" content="Un rincón de la Castora Celestial para charlar, guardar ilusiones y quedarse un ratito. Una experiencia de cuento para Patita.">
   <title>Oficina Castori · Tu rincón celestial</title>
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="experiences.css">
+  <link rel="stylesheet" href="palettes.css">
 </head>
-<body data-access="checking">
+<body data-access="checking" data-palette="patita">
   <svg class="icon-defs" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><defs>
     <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z"/><path d="M9 21v-8h6v8"/></symbol>
     <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5H4l-1 2V11.5a9 9 0 0 1 18 0Z"/><path d="M7 11h10m-10 4h6"/></symbol>
@@ -46,7 +47,7 @@
     <div class="sidebar-bottom"><div class="little-note">Aquí, las cosas bonitas<br>no tienen ninguna prisa.<span>ꕤ</span></div><button class="profile" id="profile"><span class="profile-avatar">P</span><span id="profile-name">El rincón de Patita<small>Hecho con muchísimo cariño</small></span><svg><use href="#i-heart"/></svg></button><button class="account-logout text-button" id="account-logout" hidden>Cerrar mi sesión</button></div>
   </aside>
   <div class="workspace">
-    <header class="topbar"><div class="breadcrumb"><button class="icon-button mobile-menu" id="mobile-menu" aria-label="Abrir menú"><svg><use href="#i-menu"/></svg></button><span class="tiny-spark">✧</span><span>La Castora Celestial</span><span class="breadcrumb-slash">/</span><span id="breadcrumb-current">Mi rincón</span></div><div class="top-actions"><button class="demo-tag" id="about-demo">Sobre este rincón</button><button id="theme-toggle" class="icon-button" aria-label="Activar luz de luna" title="Luz de luna" aria-pressed="false"><svg><use href="#i-moon"/></svg></button><span class="top-avatar">P</span></div></header>
+    <header class="topbar"><div class="breadcrumb"><button class="icon-button mobile-menu" id="mobile-menu" aria-label="Abrir menú"><svg><use href="#i-menu"/></svg></button><span class="tiny-spark">✧</span><span>La Castora Celestial</span><span class="breadcrumb-slash">/</span><span id="breadcrumb-current">Mi rincón</span></div><div class="top-actions"><button class="demo-tag" id="about-demo">Sobre este rincón</button><button id="palette-toggle" class="palette-toggle" aria-label="Elegir los colores de mi rincón" aria-haspopup="dialog" aria-controls="modal" title="Colores"><span class="palette-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="palette-toggle-label">Colores</span></button><button id="theme-toggle" class="icon-button" aria-label="Activar luz de luna" title="Luz de luna" aria-pressed="false"><svg><use href="#i-moon"/></svg></button><span class="top-avatar">P</span></div></header>
     <div id="connection-banner" class="connection-banner checking" role="status"></div>
     <main id="main" tabindex="-1"></main>
     <footer class="page-footer"><span>Un pedacito de la Castora Celestial</span><span>Hecho de historias, magia y cariño <svg><use href="#i-heart"/></svg></span></footer>

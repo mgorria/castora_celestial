@@ -28,7 +28,21 @@
       state.wishes = Array.isArray(saved.wishes) ? saved.wishes.filter(w => w && typeof w.text === 'string') : [];
       state.theme = saved.theme === 'moon' ? 'moon' : 'day';
     }
-  } catch (_) { /* Only the explicit demo uses browser storage. */ }
+  } catch (_) { /* Old local memories and the previous light preference. */ }
+  const appearanceKey = 'oficina-castori-appearance-v1';
+  const palettes = {
+    patita: { name: 'Rosa Patita', description: 'Blanco de nube y rosa de mejillas.', day: '#fff7fa', moon: '#2d2029' },
+    castor: { name: 'Castor', description: 'Marrón cacao y naranja de merienda.', day: '#fbf5ed', moon: '#2d241e' },
+    celestial: { name: 'Casa Celestial', description: 'El verde suave de nuestro bosque.', day: '#f8f7f2', moon: '#202b25' }
+  };
+  let appearance = { palette: 'patita', light: state.theme };
+  try {
+    const saved = JSON.parse(localStorage.getItem(appearanceKey));
+    if (saved && typeof saved === 'object') {
+      if (typeof saved.palette === 'string' && Object.hasOwn(palettes, saved.palette)) appearance.palette = saved.palette;
+      if (saved.light === 'day' || saved.light === 'moon') appearance.light = saved.light;
+    }
+  } catch (_) { /* Colours still work when device storage is unavailable. */ }
   const main = document.getElementById('main'), modal = document.getElementById('modal');
   const account = { checked: false, portal: false, authenticated: false, username: '', screen: 'login', code: '', loading: false, error: '', help: false };
   let accountVersion = 0;
@@ -793,10 +807,36 @@
     persist(); refreshChat(); toast(existing >= 0 ? 'Recuerdo quitado.' : 'Guardado como recuerdo del boceto.');
   }
   function closeMenu() { document.getElementById('sidebar').classList.remove('open'); document.getElementById('mobile-shade').classList.remove('open'); document.getElementById('mobile-menu').setAttribute('aria-expanded', 'false'); }
-  function applyTheme() { const moon = state.theme === 'moon'; document.body.classList.toggle('moon', moon); const b = document.getElementById('theme-toggle'); b.setAttribute('aria-pressed', String(moon)); b.setAttribute('aria-label', moon ? 'Activar luz de día' : 'Activar luz de luna'); b.title = moon ? 'Luz de día' : 'Luz de luna'; }
+  function applyTheme() {
+    const moon = appearance.light === 'moon';
+    document.body.classList.toggle('moon', moon);
+    document.body.dataset.palette = appearance.palette;
+    const b = document.getElementById('theme-toggle');
+    b.setAttribute('aria-pressed', String(moon)); b.setAttribute('aria-label', moon ? 'Activar luz de día' : 'Activar luz de luna'); b.title = moon ? 'Luz de día' : 'Luz de luna';
+    const palette = palettes[appearance.palette], toggle = document.getElementById('palette-toggle');
+    toggle?.setAttribute('aria-label', 'Elegir los colores de mi rincón. Ahora: ' + palette.name);
+    if (toggle) toggle.title = 'Colores · ' + palette.name;
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', palette[appearance.light]);
+  }
+  function saveAppearance() {
+    try { localStorage.setItem(appearanceKey, JSON.stringify(appearance)); }
+    catch (_) { toast('Tus colores están puestos, pero este dispositivo no ha podido recordarlos.'); }
+  }
+  function openAppearance() {
+    cancelStory();
+    showModal(`<div class="appearance-picker"><div class="eyebrow">${icon('star')} A TU GUSTO, PATITA</div><h2 id="modal-title">¿De qué color es<br>tu rincón?</h2><p>Un poquito de rosa, una tarde de cacao o un paseo por el bosque. Elige lo que te haga sonreír.</p><div class="palette-options" role="group" aria-label="Colores de tu rincón">${Object.entries(palettes).map(([id, palette]) => `<button type="button" id="palette-option-${id}" class="palette-option" data-palette-choice="${id}" aria-pressed="${appearance.palette === id}"><span class="palette-preview" data-preview="${id}" aria-hidden="true"><span></span><span></span><span></span></span><span class="palette-name">${palette.name}</span><span class="palette-description">${palette.description}</span><span class="palette-selected">${appearance.palette === id ? 'Tu elección' : 'Elegir estos colores'}</span></button>`).join('')}</div><p class="appearance-note">Los colores cambian al elegirlos y se guardan en este dispositivo. También puedes combinarlos con la luz de luna.</p><button type="button" class="button" id="close-appearance">Así me gusta ${icon('heart')}</button></div>`);
+  }
+  function choosePalette(id) {
+    if (typeof id !== 'string' || !Object.hasOwn(palettes, id)) return;
+    appearance.palette = id; applyTheme(); saveAppearance(); openAppearance();
+    document.getElementById('palette-option-' + id)?.focus();
+  }
   document.addEventListener('click', async e => {
     const b = e.target.closest('button, a'); if (!b || b.disabled) return;
-    if (b.hasAttribute('data-account-retry')) bootstrapAccount();
+    if (b.id === 'palette-toggle') openAppearance();
+    else if (b.dataset.paletteChoice) choosePalette(b.dataset.paletteChoice);
+    else if (b.id === 'close-appearance') modal.close();
+    else if (b.hasAttribute('data-account-retry')) bootstrapAccount();
     else if (b.dataset.accountScreen) { if (account.loading) return; account.screen = b.dataset.accountScreen === 'register' ? 'register' : 'login'; account.error = ''; renderAccountGate(); }
     else if (b.hasAttribute('data-account-help')) { account.help = !account.help; renderAccountGate(); }
     else if (b.hasAttribute('data-account-show-password')) { const input = document.getElementById('account-password'), visible = input.type === 'password'; input.type = visible ? 'text' : 'password'; b.textContent = visible ? 'Ocultar' : 'Mostrar'; b.setAttribute('aria-label', visible ? 'Ocultar contraseña' : 'Mostrar contraseña'); }
@@ -838,7 +878,7 @@
     else if (['about-demo', 'profile', 'chat-info'].includes(b.id)) about();
     else if (b.id === 'close-about') modal.close();
   });
-  document.getElementById('theme-toggle').addEventListener('click', () => { state.theme = state.theme === 'moon' ? 'day' : 'moon'; applyTheme(); persist(); });
+  document.getElementById('theme-toggle').addEventListener('click', () => { appearance.light = appearance.light === 'moon' ? 'day' : 'moon'; applyTheme(); saveAppearance(); });
   document.getElementById('modal-close').addEventListener('click', () => modal.close());
   modal.addEventListener('close', cancelStory);
   modal.addEventListener('click', e => { if (e.target === modal) { const r = modal.getBoundingClientRect(); if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) modal.close(); } });
