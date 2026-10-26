@@ -233,6 +233,7 @@
   });
   function accountChrome() {
     document.body.dataset.access = accountLocked() ? 'locked' : 'open';
+    window.CastoriChristmas?.refresh();
     document.getElementById('account-gate').hidden = !accountLocked();
     const logout = document.getElementById('account-logout'); logout.hidden = !(account.portal && account.authenticated); logout.disabled = account.loading;
     document.getElementById('profile-name').innerHTML = account.portal && account.authenticated ? `${esc(account.username)}<small>Tu rincón en la Casa Celestial</small>` : 'El rincón de Patita<small>Hecho con muchísimo cariño</small>';
@@ -906,6 +907,7 @@
     if (next === 'chat') { initialChatScroll = activeId; unreadBoundary(activeId); }
     const views = { home, conversations, library, memories, wishes, control }; main.innerHTML = experiences && ['clinic', 'consultation', 'vaca'].includes(next) ? experiences.render(next, experienceId) : next === 'chat' ? chat(activeId) : (views[next] || home)();
     window.CastoriCascabeleo?.mount(main.querySelector('[data-cascabeleo]'));
+    window.CastoriChristmas?.refresh();
     const labels = { home: 'Mi rincón', conversations: 'Conversaciones', library: 'La biblioteca', memories: 'Mis recuerdos', wishes: 'Cuaderno de ilusiones', control: 'Despacho del Castor', clinic: 'El consultorio de Salchicher', consultation: 'Mi consulta', vaca: 'El establo de las ilusiones' };
     document.getElementById('breadcrumb-current').textContent = next === 'chat' ? characters[activeId].name : labels[next] || 'Mi rincón';
     document.querySelectorAll('.nav-item').forEach(b => { const active = b.dataset.view === next || (next === 'chat' && b.dataset.view === 'conversations'); b.classList.toggle('active', active); if (active) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); b.querySelector('.nav-dot')?.remove(); if (active) b.insertAdjacentHTML('beforeend', '<span class="nav-dot"></span>'); });
@@ -1121,6 +1123,7 @@
     toggle?.setAttribute('aria-label', 'Elegir los colores de mi rincón. Ahora: ' + palette.name);
     if (toggle) toggle.title = 'Colores · ' + palette.name;
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', palette[appearance.light]);
+    window.CastoriChristmas?.refresh();
   }
   function saveAppearance() {
     try { localStorage.setItem(appearanceKey, JSON.stringify(appearance)); }
@@ -1128,7 +1131,7 @@
   }
   function openAppearance() {
     cancelStory();
-    showModal(`<div class="appearance-picker"><div class="eyebrow">${icon('star')} A TU GUSTO, PATITA</div><h2 id="modal-title">¿De qué color es<br>tu rincón?</h2><p>Un poquito de rosa, una tarde de cacao o un paseo por el bosque. Elige lo que te haga sonreír.</p><div class="palette-options" role="group" aria-label="Colores de tu rincón">${Object.entries(palettes).map(([id, palette]) => `<button type="button" id="palette-option-${id}" class="palette-option" data-palette-choice="${id}" aria-pressed="${appearance.palette === id}"><span class="palette-preview" data-preview="${id}" aria-hidden="true"><span></span><span></span><span></span></span><span class="palette-name">${palette.name}</span><span class="palette-description">${palette.description}</span><span class="palette-selected">${appearance.palette === id ? 'Tu elección' : 'Elegir estos colores'}</span></button>`).join('')}</div><p class="appearance-note">Los colores cambian al elegirlos y se guardan en este dispositivo. También puedes combinarlos con la luz de luna.</p><button type="button" class="button" id="close-appearance">Así me gusta ${icon('heart')}</button></div>`);
+    showModal(`<div class="appearance-picker"><div class="eyebrow">${icon('star')} A TU GUSTO, PATITA</div><h2 id="modal-title">¿De qué color es<br>tu rincón?</h2><p>Un poquito de rosa, una tarde de cacao o un paseo por el bosque. Elige lo que te haga sonreír.</p><div class="palette-options" role="group" aria-label="Colores de tu rincón">${Object.entries(palettes).map(([id, palette]) => `<button type="button" id="palette-option-${id}" class="palette-option" data-palette-choice="${id}" aria-pressed="${appearance.palette === id}"><span class="palette-preview" data-preview="${id}" aria-hidden="true"><span></span><span></span><span></span></span><span class="palette-name">${palette.name}</span><span class="palette-description">${palette.description}</span><span class="palette-selected">${appearance.palette === id ? 'Tu elección' : 'Elegir estos colores'}</span></button>`).join('')}</div><p class="appearance-note">${window.CastoriChristmas?.isActive() ? 'Ahora la casa viste de Navidad. Tu elección se guarda para cuando termine el cascabeleo. Puedes seguir usando la luz de luna.' : 'Los colores cambian al elegirlos y se guardan en este dispositivo. También puedes combinarlos con la luz de luna.'}</p><button type="button" class="button" id="close-appearance">Así me gusta ${icon('heart')}</button></div>`);
   }
   function choosePalette(id) {
     if (typeof id !== 'string' || !Object.hasOwn(palettes, id)) return;
@@ -1205,5 +1208,5 @@
   document.getElementById('mobile-shade').addEventListener('click', closeMenu);
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMenu(); });
   function fromHash() { if (accountLocked()) return; const path = location.hash.slice(1).split('/'); if (path[0] === 'consultation' && path[1]) { let id; try { id = decodeURIComponent(path[1]); } catch (_) { navigate('clinic', null, false); return; } navigate('consultation', id, false); } else if (path[0] === 'carta' && path[1] === 'vaca') navigate('chat', 'vaca', false, true); else if (path[0] === 'chat' && ids.includes(path[1])) navigate('chat', path[1], false); else navigate(['conversations', 'library', 'memories', 'wishes', 'control', 'clinic', 'vaca'].includes(path[0]) ? path[0] : 'home', null, false); }
-  window.addEventListener('hashchange', fromHash); window.addEventListener('pageshow', event => { if (mode === 'live') { startUnreadPolling(); acknowledgeVisibleRead(); } if (event.persisted && account.portal && isOwner() && view === 'control') { adminAuth.portalPrepared = false; loadAdminAuth(); } }); window.addEventListener('pagehide', () => { if (account.portal && isOwner() && view === 'control') lockPortalDesk(); stopUnreadPolling(); stopPolling(); stopAdminReads(); cancelArchiveReads(); clearInvitationSecret(); }); bridge.onUnauthorized?.(expireAccountSession); applyTheme(); bootstrapAccount();
+  window.addEventListener('hashchange', fromHash); window.addEventListener('pageshow', event => { if (mode === 'live') { startUnreadPolling(); acknowledgeVisibleRead(); } if (event.persisted && account.portal && isOwner() && view === 'control') { adminAuth.portalPrepared = false; loadAdminAuth(); } }); window.addEventListener('pagehide', () => { if (account.portal && isOwner() && view === 'control') lockPortalDesk(); stopUnreadPolling(); stopPolling(); stopAdminReads(); cancelArchiveReads(); clearInvitationSecret(); }); bridge.onUnauthorized?.(expireAccountSession); applyTheme(); window.CastoriChristmas?.init(); bootstrapAccount();
 }());

@@ -3,11 +3,14 @@
 
   // Casa Tosico opens Christmas on 1 November 2026, at midnight in Madrid.
   // An explicit offset keeps every visitor counting down to the same instant.
-  const TARGET = Date.parse('2026-11-01T00:00:00+01:00');
+  const calendar = root.CastoriChristmas;
+  const TARGET = calendar?.START ?? Date.parse('2026-11-01T00:00:00+01:00');
+  const END = calendar?.END ?? Date.parse('2027-01-11T00:00:00+01:00');
+  const currentTime = () => calendar?.now() ?? Date.now();
   const units = [['days', 'días'], ['hours', 'horas'], ['minutes', 'minutos'], ['seconds', 'segundos']];
   let section = null, timer = null;
 
-  function remaining(now = Date.now()) {
+  function remaining(now = currentTime()) {
     const total = Math.max(0, Math.ceil((TARGET - now) / 1000));
     return { arrived: now >= TARGET, days: Math.floor(total / 86400), hours: Math.floor(total / 3600) % 24, minutes: Math.floor(total / 60) % 60, seconds: total % 60 };
   }
@@ -17,7 +20,8 @@
     ? 'El espíritu navideño ya está en Casa Tosico. Es hora de sacar los adornos y llenar la casa de Navidad.'
     : 'Nuestro espíritu navideño está despertando. El 1 de noviembre sacamos los adornos y llenamos la casa de Navidad.';
 
-  function render(now = Date.now()) {
+  function render(now = currentTime()) {
+    if (now >= END) return '';
     const value = remaining(now);
     return `<section class="cascabeleo${value.arrived ? ' cascabeleo-arrived' : ''}" data-cascabeleo aria-labelledby="cascabeleo-title">
       <svg class="cascabeleo-sprig" viewBox="0 0 180 130" fill="none" aria-hidden="true"><g stroke="currentColor" stroke-linecap="round"><path d="M180 8C131 23 89 56 22 113" stroke-width="2"/><path d="m145 21-32-9m30 10-11 32m-12-18-34-8m33 9-9 33m-15-20-34-6m33 8-7 34m-15-19-32-5m30 7-4 32m-15-18-26-2m25 4-3 25"/><path d="M173 14c-10 35-3 68 7 94m-11-68-16-13m17 15 10-10m-11 23-17-11m18 14 10-10m-7 26-15-10m17 15 5-6"/></g><g fill="#c56b68"><circle cx="96" cy="46" r="4"/><circle cx="105" cy="48" r="3"/><circle cx="99" cy="55" r="3.5"/></g></svg>
@@ -32,12 +36,16 @@
   function pause() { if (timer !== null) clearTimeout(timer); timer = null; }
   function unmount() {
     pause();
-    if (section) section.ownerDocument.removeEventListener('visibilitychange', refresh);
+    if (section) {
+      section.ownerDocument.removeEventListener('visibilitychange', refresh);
+      section.ownerDocument.removeEventListener('castori:seasonchange', refresh);
+    }
     section = null;
   }
   function refresh() {
     pause();
     if (!section?.isConnected) { unmount(); return; }
+    if (currentTime() >= END) { section.hidden = true; unmount(); return; }
     const value = remaining();
     const wasArrived = section.classList.contains('cascabeleo-arrived');
     section.classList.toggle('cascabeleo-arrived', value.arrived);
@@ -60,6 +68,7 @@
     section = node;
     if (!section) return;
     section.ownerDocument.addEventListener('visibilitychange', refresh);
+    section.ownerDocument.addEventListener('castori:seasonchange', refresh);
     refresh();
   }
   root.CastoriCascabeleo = { render, mount, unmount, remaining };

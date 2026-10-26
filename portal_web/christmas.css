@@ -1,0 +1,174 @@
+/* Christmas belongs to one seasonal class; the saved personal palette stays intact. */
+body.christmas-season,
+body.christmas-season[data-palette] {
+  --paper: #f7f2e6;
+  --panel: #fffaf0;
+  --sidebar: #173e32;
+  --ink: #243e31;
+  --text: #405145;
+  --muted: #6a6d59;
+  --line: #ded2b7;
+  --green: #883849;
+  --pale: #eee5d2;
+  --gold: #97702e;
+  --shadow: 0 12px 35px #31402b0d;
+  --palette-on-accent: #fff9eb;
+  --palette-soft: #f1eadb;
+  --palette-warm: #f4e9d4;
+  --palette-third: #e8eddf;
+  --palette-deep: #743040;
+  --palette-line-strong: #bba06b;
+  --palette-bubble: #7f3545;
+  --palette-bubble-ink: #fff8ed;
+  --palette-hero: 250, 241, 219;
+  --palette-shadow-color: #43371b18;
+  --palette-notice: #f7edd9;
+  --palette-notice-line: #d7bd87;
+  --palette-notice-ink: #765925;
+  --palette-danger: #963d42;
+  --palette-backdrop: #142e277d;
+  --christmas-fir: #173e32;
+  --christmas-gold: #e2c17c;
+  color: var(--text);
+  background: radial-gradient(ellipse at 80% 0, #e4cc9230, transparent 46%), var(--paper);
+  accent-color: var(--green);
+}
+body.christmas-season.moon,
+body.christmas-season.moon[data-palette] {
+  --paper: #162b25;
+  --panel: #20382e;
+  --sidebar: #102b23;
+  --ink: #fff0d6;
+  --text: #e4e5d4;
+  --muted: #c0c7b2;
+  --line: #4d614d;
+  --green: #f0b6ad;
+  --pale: #344a38;
+  --gold: #e4c483;
+  --shadow: 0 12px 35px #06191030;
+  --palette-on-accent: #fff9eb;
+  --palette-soft: #2b4134;
+  --palette-warm: #394333;
+  --palette-third: #2b403b;
+  --palette-deep: #743b49;
+  --palette-line-strong: #a28e60;
+  --palette-bubble: #843e4e;
+  --palette-bubble-ink: #fff8ed;
+  --palette-hero: 26, 48, 36;
+  --palette-shadow-color: #06171030;
+  --palette-notice: #414332;
+  --palette-notice-line: #8b7951;
+  --palette-notice-ink: #f1d7a4;
+  --palette-danger: #ffc1b3;
+  --palette-backdrop: #061910bb;
+  --christmas-fir: #102b23;
+}
+body.christmas-season .sidebar {
+  --ink: #fff1d4;
+  --text: #e8eadb;
+  --muted: #becfba;
+  --green: #ebcf8d;
+  --pale: #2b5140;
+  --line: #68826855;
+  --sidebar: var(--christmas-fir);
+  --palette-soft: #2b5140;
+  --palette-line-strong: #b69b60;
+  --unread-paper: #f8e8ce;
+  --unread-ink: #743347;
+  --unread-line: #d0ab65;
+  background: radial-gradient(ellipse at 10% 0, #46604490, transparent 55%), var(--christmas-fir);
+  border-right: 1px solid #bda268;
+  box-shadow: 5px 0 30px #15392e10;
+}
+body.christmas-season[data-palette] .sidebar :is(.brand > span:last-child, .nav-item, .friend-name, .profile) { color: var(--text); }
+body.christmas-season[data-palette] .sidebar :is(.brand-seal, .brand small, .nav-label, .wish-star, .little-note span, .profile svg) { color: #e5c78b; }
+body.christmas-season[data-palette] .sidebar :is(.friend-link small, .profile small, .wish-entry small, .little-note, .friends-heading > span, .account-logout) { color: #c6d3be; }
+body.christmas-season[data-palette] .sidebar :is(.nav-item.active, .nav-item:hover, .friend-link.active, .friend-link:hover, .wish-entry, .control-nav) { background: #325440; color: #fff2d5; border-color: #bba16c80; }
+body.christmas-season[data-palette] .sidebar .nav-item.active { box-shadow: inset 3px 0 #e0bf75; }
+body.christmas-season[data-palette] .sidebar .friend-link.has-unread { background: var(--unread-paper); }
+body.christmas-season[data-palette] .sidebar .friend-link.has-unread :is(.friend-name, .friend-name small) { color: var(--unread-ink); }
+body.christmas-season[data-palette] .sidebar .brand-seal { border-color: #d5b778; }
+body.christmas-season .sidebar-line { background: linear-gradient(90deg, transparent, #d6b97680, transparent); }
+body.christmas-season .topbar { background: var(--panel); border-bottom-color: #bd9c5d70; box-shadow: 0 3px 18px #6e542207; }
+body.christmas-season[data-palette] :is(.top-avatar, .profile-avatar) { background: #7f3545; color: #fff1d4; border-color: #d6bd83; }
+body.christmas-season[data-palette] :is(.button:not(.secondary), .send-button) { background: #823747; color: #fff8e9; box-shadow: 0 4px 12px #612a3525; }
+body.christmas-season[data-palette] :is(.button:not(.secondary), .send-button):hover { background: #6f2c3c; }
+body.christmas-season[data-palette] .button.secondary { background: var(--panel); color: var(--ink); border-color: var(--palette-line-strong); }
+body.christmas-season[data-palette] :is(button, a, input, textarea):focus-visible { outline: 3px solid var(--gold); outline-offset: 4px; }
+body.christmas-season .sidebar :is(button, a):focus-visible { outline-color: #f4d997; }
+body.christmas-season :is(.character-card, .list-card, .book-card, .memory-card, .consultation-room, .vaca-letter, .chat-shell, .admin-card) { border-color: var(--line); box-shadow: var(--shadow); }
+body.christmas-season .character-card { position: relative; background: var(--panel); border-top: 3px solid #b5904f; }
+body.christmas-season[data-palette] .character-card:hover { border-color: #b5904f; box-shadow: 0 13px 30px #57442419; }
+body.christmas-season .character-card:nth-child(2n) { border-top-color: #8b3e4c; }
+body.christmas-season .character-card:nth-child(3n) { border-top-color: #42674b; }
+body.christmas-season[data-palette] .hero {
+  border: 1px solid #bd9e63;
+  box-shadow: 0 15px 45px #3a3b2115, inset 0 0 0 5px #f5e2b84d;
+  background: rgb(var(--palette-hero));
+}
+body.christmas-season[data-palette] .hero::after { background: linear-gradient(90deg, rgba(var(--palette-hero), .98), rgba(var(--palette-hero), .94) 27%, rgba(var(--palette-hero), .66) 46%, rgba(var(--palette-hero), .08) 72%); }
+body.christmas-season .hero::before { content: ''; position: absolute; inset: 10px; border: 1px solid #ccaa636b; border-radius: 10px; pointer-events: none; z-index: 2; }
+body.christmas-season[data-palette] .hero h1 { color: var(--ink); }
+body.christmas-season[data-palette] .hero h1 em { color: var(--green); }
+body.christmas-season[data-palette] .hero :is(p, .text-button) { color: var(--text); }
+body.christmas-season[data-palette] .hero .eyebrow { color: var(--green); }
+body.christmas-season[data-palette] .hero-caption { background: rgba(var(--palette-hero), .94); color: var(--ink); border: 1px solid var(--palette-line-strong); }
+body.christmas-season .hero-art { object-position: center 55%; }
+body.christmas-season[data-palette] :is(.story-feature, .daily-note, .wish-aside) { border-color: var(--line); background: var(--palette-warm); }
+body.christmas-season[data-palette] .daily-note { background: var(--palette-third); }
+body.christmas-season .page-footer { border-top: 1px solid var(--line); margin-top: 18px; }
+body.christmas-season .page-footer svg { color: var(--green); }
+
+/* A useful, quiet control strip: no audio or movement is required to read. */
+body.christmas-season #christmas-controls {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 10px 14px;
+  margin: 20px 42px 0; padding: 15px 20px; border-radius: 12px;
+  color: #fff3d5; background: linear-gradient(110deg, #1a4335, #2c4d37);
+  border: 1px solid #b39a61; box-shadow: inset 0 0 0 3px #dbc1800c;
+}
+body.christmas-season #christmas-controls[hidden] { display: none; }
+body.christmas-season #christmas-controls .christmas-controls-title { display: flex; align-items: center; gap: 12px; flex: 1 1 220px; min-width: 0; margin: 0; color: #fff3d5; font: 500 19px/1.4 var(--serif); }
+body.christmas-season #christmas-controls .christmas-controls-title > span { font-size: 31px; color: #e8c77f; }
+body.christmas-season #christmas-controls .christmas-controls-title strong { font-weight: 500; }
+body.christmas-season #christmas-controls .christmas-controls-title small { display: block; margin-top: 3px; color: #e1e7ce; font: 400 11px/1.6 var(--sans); }
+body.christmas-season .christmas-control-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+body.christmas-season #christmas-controls button { min-height: 40px; max-width: 100%; padding: 9px 13px; border: 1px solid #a18b59; border-radius: 25px; color: #f8eac9; background: #ffffff08; font: 550 12px/1.4 var(--sans); }
+body.christmas-season #christmas-controls button:hover { background: #ffffff12; }
+body.christmas-season #christmas-controls button[aria-pressed="true"] { background: #f3e1ad; border-color: #f3e1ad; color: #274232; }
+body.christmas-season #christmas-controls button:focus-visible { outline-color: #fff1bd; }
+body.christmas-season #christmas-controls button:disabled { opacity: .65; cursor: default; }
+body.christmas-season #christmas-controls [role="status"] { flex-basis: 100%; margin: 0; color: #e3dec4; font-size: 12px; line-height: 1.6; }
+body.christmas-season #christmas-controls [role="status"]:empty { display: none; }
+body.christmas-season #christmas-preview-note { flex-basis: 100%; padding: 7px 10px; background: var(--palette-notice); border: 1px dashed var(--palette-notice-line); border-radius: 8px; color: var(--palette-notice-ink); font-size: 11px; line-height: 1.5; }
+
+/* The lights fade slowly over several seconds; snow never catches a pointer. */
+body.christmas-season #christmas-decorations { position: fixed; inset: 0; z-index: 45; overflow: hidden; pointer-events: none; user-select: none; }
+body.christmas-season #christmas-decorations * { pointer-events: none; }
+body.christmas-season .christmas-lights { position: absolute; inset: 0 0 auto; display: flex; justify-content: space-around; align-items: flex-start; height: 33px; border-top: 2px solid #426043; }
+body.christmas-season .christmas-bulb { position: relative; flex: 0 0 9px; width: 9px; height: 13px; margin-top: 7px; border-radius: 45% 45% 48% 48%; color: var(--bulb-color, #f4ce77); background: currentColor; box-shadow: 0 0 7px 2px currentColor; animation: christmas-glow 5.6s ease-in-out var(--bulb-delay, 0s) infinite; transform: rotate(-12deg); opacity: .9; }
+body.christmas-season .christmas-bulb::before { content: ''; position: absolute; width: 5px; height: 7px; left: 2px; top: -6px; border-radius: 2px 2px 0 0; background: #49664a; }
+body.christmas-season .christmas-bulb:nth-child(2n) { margin-top: 12px; transform: rotate(13deg); }
+body.christmas-season .christmas-bulb:nth-child(3n) { animation-duration: 6.8s; }
+body.christmas-season .christmas-snow { position: absolute; inset: 0; overflow: hidden; }
+body.christmas-season .christmas-flake { position: absolute; top: -28px; left: var(--flake-x, 50%); color: #fffdf3; font: var(--flake-size, 12px)/1 Georgia, serif; text-shadow: 0 1px 3px #38675b80; opacity: 0; animation: christmas-snowfall var(--flake-duration, 13s) linear var(--flake-delay, 0s) both; }
+body.christmas-season.christmas-paused .christmas-bulb { animation-play-state: paused; opacity: .8; }
+body.christmas-season.christmas-paused .christmas-snow { display: none; }
+@keyframes christmas-glow { 0%, 100% { opacity: .42; box-shadow: 0 0 3px currentColor; } 45%, 60% { opacity: .95; box-shadow: 0 0 9px 2px currentColor; } }
+@keyframes christmas-snowfall { 0% { transform: translate3d(0, -20px, 0); opacity: 0; } 10% { opacity: .7; } 85% { opacity: .6; } 100% { transform: translate3d(var(--flake-drift, 60px), calc(100vh + 40px), 0); opacity: 0; } }
+@media (min-width: 1900px) { body.christmas-season #christmas-controls { max-width: 1476px; margin-inline: auto; } }
+@media (max-width: 1000px) { body.christmas-season #christmas-controls { margin-inline: 28px; } }
+@media (max-width: 700px) {
+  body.christmas-season #christmas-controls { margin: 14px 18px 0; padding: 14px 15px; gap: 10px; }
+  body.christmas-season #christmas-controls .christmas-controls-title { flex-basis: 100%; font-size: 19px; }
+  body.christmas-season #christmas-controls button { flex: 1 1 110px; min-height: 42px; padding-inline: 10px; font-size: 11px; }
+  body.christmas-season .christmas-control-buttons { width: 100%; }
+  body.christmas-season .christmas-bulb { flex-basis: 6px; width: 6px; height: 10px; box-shadow: 0 0 5px currentColor; }
+  body.christmas-season .christmas-bulb::before { width: 4px; left: 1px; }
+  body.christmas-season .christmas-bulb:nth-child(2n) { display: none; }
+  body.christmas-season[data-palette] .hero::after { background: linear-gradient(180deg, rgba(var(--palette-hero), .98) 0%, rgba(var(--palette-hero), .96) 40%, rgba(var(--palette-hero), .72) 55%, rgba(var(--palette-hero), .12) 72%, rgba(var(--palette-hero), 0) 84%); }
+  body.christmas-season .hero::before { inset: 7px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  body.christmas-season .christmas-bulb { animation: none; opacity: .8; box-shadow: 0 0 4px currentColor; }
+  body.christmas-season .christmas-snow { display: none; }
+}

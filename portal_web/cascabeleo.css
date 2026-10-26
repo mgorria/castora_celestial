@@ -16,6 +16,7 @@
   box-shadow: inset 0 0 0 5px #24483c, inset 0 0 0 6px #d9bd7d40;
 }
 .cascabeleo [hidden] { display: none; }
+.cascabeleo[hidden] { display: none; }
 .cascabeleo-emblem { width: 76px; transform: rotate(-7deg); }
 .cascabeleo-emblem svg { display: block; width: 100%; height: auto; stroke: none; }
 .cascabeleo-sprig { position: absolute; top: 0; right: 0; width: 180px; height: 130px; color: #9dbb9170; z-index: -1; pointer-events: none; }
