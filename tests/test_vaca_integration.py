@@ -1,5 +1,6 @@
 """Offline checks of identity binding, private admin routing and durable storage."""
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -88,14 +89,73 @@ class IdentityTests(unittest.IsolatedAsyncioTestCase):
         append.assert_not_called()
 
     def test_recipient_requires_this_bot_start(self):
-        with patch.object(main, "vaca_partner_id", return_value=2), \
+        with patch.object(main, "web_bridge", None), \
+             patch.object(main, "vaca_partner_id", return_value=2), \
              patch.object(main, "get_partner_chat_id", return_value=2), \
              patch.object(main, "has_seen_start", return_value=False):
             self.assertIsNone(main.vaca_recipient())
-        with patch.object(main, "vaca_partner_id", return_value=2), \
+        with patch.object(main, "web_bridge", None), \
+             patch.object(main, "vaca_partner_id", return_value=2), \
              patch.object(main, "get_partner_chat_id", return_value=2), \
              patch.object(main, "has_seen_start", return_value=True):
             self.assertEqual(main.vaca_recipient(), 2)
+
+
+class PortalIdentityTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch.dict(os.environ, {"CASTORI_WEB_ONLY_DELIVERY": "true"}))
+        self.enterContext(patch.object(main, "web_bridge", SimpleNamespace(portal=object())))
+        self.enterContext(patch.object(main, "owner_chat_id", return_value=1))
+        self.enterContext(patch.object(main, "SANDRA_TELEGRAM_ID", ""))
+
+    def test_portal_recipient_does_not_require_animal_binding_or_start(self):
+        with patch.object(main, "resolve_web_actor", return_value=2), \
+             patch.object(main, "get_partner_chat_id", return_value=None) as legacy, \
+             patch.object(main, "has_seen_start", return_value=False) as started:
+            self.assertEqual(main.vaca_partner_id(), 2)
+            self.assertEqual(main.vaca_recipient(), 2)
+            self.assertEqual(main.vaca_authorized_users(), {1, 2})
+        legacy.assert_not_called()
+        started.assert_not_called()
+
+    def test_portal_identity_wins_over_different_legacy_vaca_binding(self):
+        with patch.object(main, "resolve_web_actor", return_value=2), \
+             patch.object(main, "get_partner_chat_id", return_value=99), \
+             patch.object(main, "has_seen_start", return_value=True):
+            self.assertEqual(main.vaca_partner_id(), 2)
+            self.assertEqual(main.vaca_recipient(), 2)
+            self.assertEqual(main.vaca_authorized_users(), {1, 2})
+
+    def test_portal_identity_can_be_resolved_from_only_the_court_binding(self):
+        with patch.object(main, "get_partner_chat_id", side_effect=lambda key: 2 if key == "corte" else None), \
+             patch.object(main, "has_seen_start", return_value=False):
+            self.assertEqual(main.resolve_web_actor("sandra"), 2)
+            self.assertEqual(main.vaca_partner_id(), 2)
+            self.assertEqual(main.vaca_recipient(), 2)
+            self.assertEqual(main.vaca_authorized_users(), {1, 2})
+
+    def test_invalid_portal_identity_never_falls_back_to_legacy_recipient(self):
+        for invalid in (None, 0, -2, True, "2", 1):
+            with self.subTest(identity=invalid), \
+                 patch.object(main, "resolve_web_actor", return_value=invalid), \
+                 patch.object(main, "get_partner_chat_id", return_value=99), \
+                 patch.object(main, "has_seen_start", return_value=True):
+                self.assertIsNone(main.vaca_partner_id())
+                self.assertIsNone(main.vaca_recipient())
+                self.assertEqual(main.vaca_authorized_users(), {1})
+
+    def test_disabled_portal_delivery_keeps_telegram_start_requirement(self):
+        with patch.dict(os.environ, {"CASTORI_WEB_ONLY_DELIVERY": "false"}), \
+             patch.object(main, "resolve_web_actor", return_value=2), \
+             patch.object(main, "get_partner_chat_id", return_value=99), \
+             patch.object(main, "has_seen_start", return_value=False):
+            self.assertEqual(main.vaca_partner_id(), 99)
+            self.assertIsNone(main.vaca_recipient())
+            self.assertEqual(main.vaca_authorized_users(), {1, 99})
+        with patch.dict(os.environ, {"CASTORI_WEB_ONLY_DELIVERY": "false"}), \
+             patch.object(main, "get_partner_chat_id", return_value=99), \
+             patch.object(main, "has_seen_start", return_value=True):
+            self.assertEqual(main.vaca_recipient(), 99)
 
 
 class StorageTests(unittest.TestCase):

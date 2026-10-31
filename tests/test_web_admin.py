@@ -15,6 +15,8 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CallbackQueryHandler, CommandHandler
 
 import main
+import unread_notifications as unread
+from portal import Portal
 from test_web_integration import OfflineTelegramRequest
 from web_bridge import MAX_EVENTS, RETENTION_SECONDS, WebBridge
 
@@ -187,6 +189,46 @@ class AdminBridgeTests(unittest.IsolatedAsyncioTestCase):
         duplicate = await self.action("/castori Mensaje de prueba privado", "send0001")
         self.assertTrue((await duplicate.json())["duplicate"])
         self.assertEqual(sum(endpoint == "sendMessage" for endpoint, _ in self.transports[1].calls), 1)
+
+    async def test_vaca_web_delivery_needs_no_telegram_link_and_is_idempotent(self):
+        self.bridge.portal = Portal(self.bridge, None, "https://portal.example")
+        self.stack.enter_context(patch.dict(os.environ, {
+            "CASTORI_WEB_ONLY_DELIVERY": "true", "VACA_CHAT_ID": ""}))
+        unread.initialize(self.data)
+        self.apps["vaca"] = main.build_animal_app("vaca")
+        await self.apps["vaca"].initialize()
+        cow = main.Vaca(main.load_data, main.save_data, main.vaca_authorized_users,
+                        main.vaca_send, main.vaca_notify)
+        self.stack.enter_context(patch.object(main, "vaca", cow))
+        text = "Muuu, patita, te mando un abrazo de pezuña."
+        self.assertIsNone(main.get_partner_chat_id("vaca"))
+        self.assertFalse(main.has_seen_start("vaca", 11))
+
+        response = await self.action("/vaca " + text, "cowweb001")
+        self.assertEqual(response.status, 202)
+        receipt = await self.client.get("/castori-web/request?request_id=cowweb001", headers=HEADERS)
+        self.assertEqual((await receipt.json())["status"], "processed")
+        events = self.data.get("web_bridge", {}).get("inboxes", {}).get("11:vaca", [])
+        self.assertEqual([event["text"] for event in events], [text])
+        self.assertEqual(events[0]["source"], "web")
+        self.assertLess(events[0]["message_id"], 0)
+        self.assertEqual(cow.session(11)["history"], [{"role": "assistant", "content": text}])
+        self.assertEqual([(item["direction"], item["text"]) for item in main.get_history("vaca")],
+                         [("out", text)])
+        self.assertEqual(unread.summary(self.data, 11)["animals"]["vaca"]["count"], 1)
+        self.assertEqual(unread.summary(self.data, 22)["total_messages"], 0)
+        self.assertIsNone(main.get_partner_chat_id("vaca"))
+        self.assertFalse(main.has_seen_start("vaca", 11))
+        self.assertTrue(any("Enviado desde" in event["text"] for event in (await self.events())["events"]))
+
+        before = copy.deepcopy(self.data)
+        duplicate = await self.action("/vaca " + text, "cowweb001")
+        self.assertTrue((await duplicate.json())["duplicate"])
+        self.assertEqual(self.data, before)
+        self.assertFalse(any(endpoint in {"sendMessage", "sendChatAction"}
+                             for endpoint, _ in self.transports[-1].calls))
+        self.assertFalse(any(endpoint == "sendMessage" and int(params["chat_id"]) == 11
+                             for transport in self.transports for endpoint, params in transport.calls))
 
     async def test_admin_notifications_are_owner_only_ephemeral_and_never_animal_history(self):
         await self.app.bot.send_message(22, "REGALO_PRIVADO_AVISO_COMPARTIDO")

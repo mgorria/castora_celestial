@@ -559,6 +559,10 @@ Pruebas offline: `python -m unittest discover -s tests -q`. Los tests de web uti
 ## Avisos de mensajes sin leer
 
 Con el portal configurado, las conversaciones de Sandra se entregan en la web.
+En este modo, la Vaca usa la identidad de Sandra en la oficina tanto para los
+mensajes del Despacho como para sus visitas; no necesita un vínculo propio de
+Telegram ni que Sandra haya enviado `/start` al bot. El requisito de `/start`
+se conserva cuando la entrega por Telegram está habilitada.
 El bot de Oficina Castori queda como canal de avisos: cada día a las **07:00 y
 19:00 de Europe/Madrid** comprueba si hay mensajes nuevos sin leer y, solo en ese
 caso, envía un aviso genérico con el botón «Abrir Oficina Castori». El enlace usa

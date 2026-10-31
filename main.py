@@ -1978,10 +1978,16 @@ async def send_as_animal(
     if animal_key == "vaca":
         partner_chat_id = vaca_recipient()
     if not partner_chat_id:
-        await update.effective_chat.send_message(
-            f"Todavia no tengo el chat_id de {ANIMALS[animal_key]['display_name']}. "
-            "Sandra debe iniciar ese bot con /start una primera vez."
-        )
+        if animal_key == "vaca" and portal_delivery_enabled():
+            await update.effective_chat.send_message(
+                "No encuentro la cuenta de Sandra en la oficina. "
+                "No se ha enviado el mensaje."
+            )
+        else:
+            await update.effective_chat.send_message(
+                f"Todavia no tengo el chat_id de {ANIMALS[animal_key]['display_name']}. "
+                "Sandra debe iniciar ese bot con /start una primera vez."
+            )
         return
 
     animal_app = animal_apps.get(animal_key)
@@ -2665,7 +2671,18 @@ def is_private_owner(update: Update) -> bool:
                 and update.effective_chat.id == owner_chat_id())
 
 
+def portal_delivery_enabled() -> bool:
+    return (web_bridge is not None and web_bridge.portal is not None
+            and os.getenv("CASTORI_WEB_ONLY_DELIVERY", "true").lower() == "true")
+
+
 def vaca_partner_id() -> int | None:
+    if portal_delivery_enabled():
+        # Use the same trusted identity as portal delivery and authorization.
+        # A missing web identity must never fall back to a legacy Telegram link.
+        partner = resolve_web_actor("sandra")
+        return (partner if type(partner) is int and partner > 0
+                and partner != owner_chat_id() else None)
     value = (SANDRA_TELEGRAM_ID or get_partner_chat_id("vaca")
              or get_partner_chat_id("mimosuga") or get_partner_chat_id("castori"))
     partner = int(value) if value else None
@@ -2679,6 +2696,8 @@ def vaca_authorized_users() -> set[int]:
 
 def vaca_recipient() -> int | None:
     partner = vaca_partner_id()
+    if portal_delivery_enabled():
+        return partner
     # Configuring a Telegram ID is not proof she opened this particular bot.
     if partner and get_partner_chat_id("vaca") == partner and has_seen_start("vaca", partner):
         return partner
