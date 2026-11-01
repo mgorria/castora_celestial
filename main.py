@@ -71,6 +71,9 @@ DATA_FILE = Path(os.getenv("DATA_FILE", str(DEFAULT_DATA_FILE)))
 MAX_HISTORY_PER_ANIMAL = int(os.getenv("MAX_HISTORY_PER_ANIMAL", "50"))
 APP_TIMEZONE = ZoneInfo(os.getenv("APP_TIMEZONE", "Europe/Madrid"))
 SCHEDULER_POLL_SECONDS = int(os.getenv("SCHEDULER_POLL_SECONDS", "30"))
+MIMOSUGA_MONDAY_DESCRIPTION = (
+    "Un mensaje cariñoso nuevo de Mimosuga para Patita, según la fecha y la época del año."
+)
 STARTUP_DELAY_SECONDS = int(os.getenv("STARTUP_DELAY_SECONDS", "8"))
 AUTO_REPLY_IDLE_SECONDS = int(os.getenv("AUTO_REPLY_IDLE_SECONDS", "90"))
 
@@ -895,6 +898,39 @@ def mimosuga_monday_recipient() -> int | None:
     return recipient
 
 
+def is_mimosuga_schedule_description(text: Any) -> bool:
+    return (isinstance(text, str)
+            and " ".join(text.split()).casefold() == MIMOSUGA_MONDAY_DESCRIPTION.casefold())
+
+
+def log_mimosuga_schedule_status() -> None:
+    """Read the persisted schedules; log readiness without messages or identities."""
+    now = datetime.now(APP_TIMEZONE)
+    rows = [row for row in get_schedules() if row.get("animal_key") == "mimosuga"]
+    logger.info("MIMOSUGA_SCHEDULE_AUDIT count=%s", len(rows))
+    for row in rows:
+        try:
+            upcoming = next_schedule_time(row, now)
+        except (KeyError, TypeError, ValueError, OverflowError):
+            upcoming = None
+        history = row.get("greeting_history", [])
+        status = {
+            "id": str(row.get("id", ""))[:80],
+            "kind": row.get("kind", "weekly"),
+            "weekday": row.get("weekday"), "time": row.get("time"),
+            "timezone": str(APP_TIMEZONE),
+            "generated_greeting": row.get("generator") == "mimosuga_monday",
+            "office_delivery": row.get("delivery") == "office",
+            "description_only": is_mimosuga_schedule_description(row.get("text")),
+            "description_send_protected": True,
+            "paused": schedules_paused(), "blocked": bool(row.get("blocked_reason")),
+            "sandra_office_ready": mimosuga_monday_recipient() is not None,
+            "next_at": upcoming.isoformat() if upcoming else None,
+            "remembered_greetings": len(history) if isinstance(history, list) else 0,
+        }
+        logger.info("MIMOSUGA_SCHEDULE_AUDIT %s", json.dumps(status, ensure_ascii=False))
+
+
 async def central_schedule_mimosuga(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_chat or not is_private_owner(update):
         return
@@ -928,7 +964,7 @@ async def central_schedule_mimosuga(update: Update, context: ContextTypes.DEFAUL
         "id": uuid.uuid4().hex[:8], "kind": "weekly", "animal_key": "mimosuga",
         "weekday": 0, "time": when, "generator": "mimosuga_monday",
         "delivery": "office", "greeting_history": [],
-        "text": "Un mensaje cariñoso nuevo de Mimosuga para Patita, según la fecha y la época del año.",
+        "text": MIMOSUGA_MONDAY_DESCRIPTION,
         "last_sent_date": now.date().isoformat() if now.weekday() == 0 and (now.hour, now.minute) >= (hour, minute) else None,
     }
     schedules.append(schedule)
@@ -2044,6 +2080,11 @@ async def send_scheduled_message(schedule: dict[str, Any]) -> bool:
             return False
     else:
         text = schedule["text"]
+    # The panel caption is never recipient-facing content, even if a damaged
+    # record loses its generator flag or a provider returns the caption itself.
+    if is_mimosuga_schedule_description(text):
+        logger.error("Mimosuga schedule %s blocked: description is not a greeting", schedule["id"])
+        return False
     if has_out_of_character_language(text):
         schedules = get_schedules()
         newly_blocked = False
@@ -3029,6 +3070,7 @@ async def main() -> None:
         await start_app(app)
 
     logger.info("Centralita y bots animales en marcha")
+    log_mimosuga_schedule_status()
     scheduler_task = asyncio.create_task(scheduler_loop())
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()

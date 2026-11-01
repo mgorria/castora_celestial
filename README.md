@@ -98,6 +98,10 @@ y se cancela con `/cancelar ID`. Repetir el comando no duplica el mismo horario.
 La generación tiene un tiempo máximo y una alternativa cariñosa si no está
 disponible. Los envíos se reservan antes de entregarlos y no se repiten si su
 resultado es incierto. Esta programación no envía copias por Telegram.
+La frase descriptiva del panel nunca se entrega como saludo, incluso si falta por
+error la marca de generación automática. Al arrancar, `MIMOSUGA_SCHEDULE_AUDIT`
+registra el estado guardado, la próxima fecha y la disponibilidad del buzón de
+Patita, sin incluir textos de mensajes ni identificadores personales.
 Si algo raro ocurre, `/pausar_programas` detiene los envios programados hasta usar `/reanudar_programas`.
 `/status` muestra el estado general: bots vinculados, Railway/worker, base de datos,
 OpenAI, programaciones, respuestas suaves de Mimosuga, cuentos y comandos utiles.

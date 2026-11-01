@@ -5,6 +5,7 @@ import ast
 import asyncio
 import copy
 from datetime import date, datetime, timedelta, timezone
+import json
 from pathlib import Path
 import re
 from types import SimpleNamespace
@@ -17,6 +18,7 @@ from zoneinfo import ZoneInfo
 MADRID = ZoneInfo("Europe/Madrid")
 MONDAY = datetime(2026, 10, 26, 6, 0, tzinfo=MADRID)
 GREETING = "Buenos días, Patita. Hoy tengo un libro y un abrazo guardados para ti."
+DESCRIPTION = "Un mensaje cariñoso nuevo de Mimosuga para Patita, según la fecha y la época del año."
 
 
 def weekly(**values):
@@ -57,6 +59,7 @@ class Runtime:
 
         self.ns = {
             "datetime": Clock, "date": date, "timedelta": timedelta, "uuid": uuid, "re": re,
+            "json": json, "MIMOSUGA_MONDAY_DESCRIPTION": DESCRIPTION,
             "APP_TIMEZONE": MADRID, "SCHEDULER_POLL_SECONDS": 30, "logger": Mock(),
             "WEEKDAYS": {"lunes": 0, "martes": 1, "miercoles": 2, "jueves": 3,
                          "viernes": 4, "sabado": 5, "domingo": 6},
@@ -83,7 +86,7 @@ class Runtime:
         functions = {node.name: node for node in tree.body
                      if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
         pending = ["central_schedule_mimosuga", "send_scheduled_message", "scheduler_loop",
-                   "mark_schedule_before_send", "mark_schedule_after_send"]
+                   "mark_schedule_before_send", "mark_schedule_after_send", "log_mimosuga_schedule_status"]
         selected = {}
         while pending:
             name = pending.pop()
@@ -119,6 +122,7 @@ class MondayScheduleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((row["kind"], row["animal_key"], row["generator"], row["weekday"], row["time"]),
                          ("weekly", "mimosuga", "mimosuga_monday", 0, "06:00"))
         self.assertEqual(row["delivery"], "office")
+        self.assertEqual(row["text"], DESCRIPTION)
         self.assertIsNone(row["last_sent_date"])
         runtime.ns["generate_monday_greeting"].assert_not_awaited()
         runtime.bot.send_message.assert_not_awaited()
@@ -194,6 +198,65 @@ class MondayScheduleTests(unittest.IsolatedAsyncioTestCase):
         runtime.ns["get_partner_chat_id"].assert_called_once_with("mimosuga")
         runtime.ns["generate_monday_greeting"].assert_not_awaited()
         self.assertEqual(runtime.rows, [original])
+
+    async def test_panel_description_cannot_be_sent_when_generator_flag_is_missing(self):
+        for description in (DESCRIPTION, "  " + DESCRIPTION.upper().replace(" ", "\n") + "  "):
+            with self.subTest(description=description):
+                row = weekly(text=description)
+                del row["generator"]
+                runtime = Runtime([row])
+                self.assertFalse(await runtime.ns["send_scheduled_message"](copy.deepcopy(row)))
+                runtime.bot.send_message.assert_not_awaited()
+                runtime.bot.send_chat_action.assert_not_awaited()
+                runtime.ns["append_history"].assert_not_called()
+                self.assertEqual(runtime.rows, [row])
+
+    async def test_panel_description_cannot_be_sent_as_a_generated_greeting(self):
+        runtime = Runtime([weekly(text=DESCRIPTION)])
+        runtime.ns["generate_monday_greeting"].return_value = DESCRIPTION
+        self.assertFalse(await runtime.ns["send_scheduled_message"](copy.deepcopy(runtime.rows[0])))
+        runtime.bot.send_message.assert_not_awaited()
+        runtime.bot.send_chat_action.assert_not_awaited()
+        self.assertEqual(runtime.rows[0]["greeting_history"], [])
+
+    async def test_saved_panel_description_is_replaced_by_generated_greeting(self):
+        row = weekly(id="3e3a6573", text=DESCRIPTION)
+        runtime = Runtime([row])
+        self.assertTrue(await runtime.ns["send_scheduled_message"](copy.deepcopy(row)))
+        runtime.bot.send_message.assert_awaited_once_with(chat_id=11, text=GREETING)
+
+    async def test_startup_audit_reads_saved_schedule_without_delivery_or_private_text(self):
+        row = weekly(id="3e3a6573", text=DESCRIPTION, greeting_history=["PRIVATE_GREETING"])
+        runtime = Runtime([row], now=MONDAY - timedelta(days=1))
+        runtime.ns["log_mimosuga_schedule_status"]()
+        status = json.loads(runtime.ns["logger"].info.call_args.args[1])
+        self.assertEqual(status, {
+            "id": "3e3a6573", "kind": "weekly", "weekday": 0, "time": "06:00",
+            "timezone": "Europe/Madrid", "generated_greeting": True,
+            "office_delivery": True, "description_only": True,
+            "description_send_protected": True, "paused": False, "blocked": False,
+            "sandra_office_ready": True, "next_at": MONDAY.isoformat(), "remembered_greetings": 1,
+        })
+        self.assertNotIn("PRIVATE_GREETING", str(runtime.ns["logger"].info.call_args_list))
+        self.assertEqual(runtime.rows, [row])
+        self.assertEqual(runtime.saves, [])
+        runtime.bot.send_message.assert_not_awaited()
+        runtime.ns["generate_monday_greeting"].assert_not_awaited()
+
+    async def test_startup_audit_reports_a_static_or_unavailable_schedule_honestly(self):
+        row = weekly(text=DESCRIPTION)
+        del row["generator"]
+        del row["delivery"]
+        runtime = Runtime([row])
+        runtime.ns["schedules_paused"].return_value = True
+        runtime.ns["web_bridge"] = None
+        runtime.ns["log_mimosuga_schedule_status"]()
+        status = json.loads(runtime.ns["logger"].info.call_args.args[1])
+        self.assertFalse(status["generated_greeting"])
+        self.assertFalse(status["office_delivery"])
+        self.assertFalse(status["sandra_office_ready"])
+        self.assertTrue(status["paused"])
+        self.assertEqual(runtime.rows, [row])
 
     async def test_an_unavailable_office_never_falls_back_to_telegram(self):
         for change in ("no_bridge", "no_portal", "telegram_mode", "no_bot", "no_recipient"):
