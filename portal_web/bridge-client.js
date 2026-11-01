@@ -29,6 +29,7 @@
     } finally { clearTimeout(timer); if (options.signal) options.signal.removeEventListener('abort', abort); }
   }
   window.CastoriBridge = Object.freeze({
+    seasonalMystery: signal => request('/seasonal-mystery', { signal }),
     state: signal => request('/state', { signal }),
     events: (animal, after, signal) => request('/events?animal=' + encodeURIComponent(animal) + '&after=' + encodeURIComponent(after || 0), { signal }),
     read: body => request('/read', { body }),

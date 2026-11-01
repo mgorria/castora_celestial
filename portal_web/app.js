@@ -149,7 +149,7 @@
     refreshUnreadViews();
   }
   function refreshUnreadViews() {
-    if (view === 'home' || view === 'conversations') main.innerHTML = view === 'home' ? home() : conversations();
+    if (view === 'home' || view === 'conversations') { main.innerHTML = view === 'home' ? home() : conversations(); mountHomeDetails(); }
     if (view === 'chat') {
       const log = document.getElementById('chat-messages'), html = renderMessages(activeId);
       if (log && log.innerHTML !== html) {
@@ -264,7 +264,7 @@
     } catch (_) { if (version !== accountVersion) return; account.loading = false; account.error = 'No hemos podido comprobar tu acceso. Vuelve a intentarlo en un momento.'; renderAccountGate(); }
   }
   function clearAccountContent(keepNotifications = false) {
-    window.CastoriDecorationReview?.unmount();
+    window.CastoriDecorationReview?.unmount(); window.CastoriMystery?.unmount(true);
     connectVersion++; stopPolling(); clearLiveState(keepNotifications); sending.clear(); callbackBusy.clear(); serverState = { characters: [], wishes: [] }; actorKey = undefined;
     main.innerHTML = ''; document.getElementById('friend-nav').innerHTML = ''; document.getElementById('connection-banner').innerHTML = ''; document.getElementById('modal-content').innerHTML = ''; closeMenu();
   }
@@ -310,8 +310,13 @@
   }
   function title(eyebrow, heading, text) { return `<div class="page-title"><div class="eyebrow">${icon('star')}${esc(eyebrow)}</div><h1>${esc(heading)}</h1><p>${esc(text)}</p></div>`; }
   function card(id) { return `<button class="character-card ${unreadCount(id) ? 'has-unread' : ''}" data-chat="${id}"><div class="portrait-wrap">${portrait(id)}${unreadBadge(unreadCount(id), 'card-unread')}</div><h3>${esc(characters[id].name)}</h3><p>${esc(details[id].short)}</p><span class="card-bottom">${esc(ready(id) ? (id === 'salchicher' ? 'Visitar el consultorio' : id === 'vaca' ? 'Charlar con la Vaca' : 'Entrar a charlar') : status(id))} ${icon('arrow')}</span></button>`; }
+  function mountHomeDetails() {
+    window.CastoriDecorationReview?.mount(main.querySelector('[data-decoration-review]'));
+    window.CastoriMystery?.mount(main.querySelector('[data-seasonal-mystery]'));
+    window.CastoriChristmas?.refresh();
+  }
   function home() {
-    return `${unreadOverview()}<section class="hero" aria-labelledby="welcome-title"><img class="hero-art" src="assets/casa-celestial-v2.png" alt="Castori, Mimosuga y la Vaca Mágica en una oficina iluminada dentro de un árbol"><div class="hero-content"><div class="eyebrow">${icon('star')} UN LUGAR HECHO DE CARIÑO</div><h1 id="welcome-title">Qué bien que estés<br>aquí, <em>Patita.</em></h1><p>Al otro lado hay una historia, un abrazo<br>y alguien con ganas de escucharte.</p><div class="hero-buttons"><button class="button" data-chat="mimosuga">¿Charlamos un ratito? ${icon('arrow')}</button><button class="text-button" id="discover-friends">Conocer a mis amigos</button></div></div><div class="hero-caption">${icon('heart')} Pasa. Estás en casa.</div></section>${window.CastoriDecorationReview?.render() || ''}<section id="our-friends"><div class="section-heading"><div><h2>¿Con quién te apetece hablar?</h2><p>Tu pequeño universo, con todas sus historias.</p></div><span class="aside-note">Siempre hay una silla para ti.</span></div><div class="character-grid">${orderedIds().map(card).join('')}</div></section><div class="below-home"><button class="story-feature" data-story="${stories[0].id}"><span class="mini-book">${icon('book')}</span><span><span class="eyebrow">UN CUENTO PARA TI</span><h3>${esc(stories[0].title)}</h3><p>Una historia de bienvenida, guardada para ti.</p></span>${icon('arrow')}</button><div class="daily-note"><span>✧</span><div><span class="eyebrow">UNA COSITA PARA RECORDAR</span><blockquote>Lo bonito también está<br>en los días normales.</blockquote></div></div></div>`;
+    return `${unreadOverview()}<section class="hero" aria-labelledby="welcome-title"><img class="hero-art" src="assets/casa-celestial-v2.png" alt="Castori, Mimosuga y la Vaca Mágica en una oficina iluminada dentro de un árbol"><div class="hero-content"><div class="eyebrow">${icon('star')} UN LUGAR HECHO DE CARIÑO</div><h1 id="welcome-title">Qué bien que estés<br>aquí, <em>Patita.</em></h1><p>Al otro lado hay una historia, un abrazo<br>y alguien con ganas de escucharte.</p><div class="hero-buttons"><button class="button" data-chat="mimosuga">¿Charlamos un ratito? ${icon('arrow')}</button><button class="text-button" id="discover-friends">Conocer a mis amigos</button></div></div><div class="hero-caption">${icon('heart')} Pasa. Estás en casa.</div></section>${window.CastoriMystery?.render() || ''}${window.CastoriDecorationReview?.render() || ''}<section id="our-friends"><div class="section-heading"><div><h2>¿Con quién te apetece hablar?</h2><p>Tu pequeño universo, con todas sus historias.</p></div><span class="aside-note">Siempre hay una silla para ti.</span></div><div class="character-grid">${orderedIds().map(card).join('')}</div></section><div class="below-home"><button class="story-feature" data-story="${stories[0].id}"><span class="mini-book">${icon('book')}</span><span><span class="eyebrow">UN CUENTO PARA TI</span><h3>${esc(stories[0].title)}</h3><p>Una historia de bienvenida, guardada para ti.</p></span>${icon('arrow')}</button><div class="daily-note"><span>✧</span><div><span class="eyebrow">UNA COSITA PARA RECORDAR</span><blockquote>Lo bonito también está<br>en los días normales.</blockquote></div></div></div>`;
   }
   function demoHistory(id) {
     if (id === 'corte') return [];
@@ -906,8 +911,7 @@
     if (next === 'clinic' || next === 'consultation') activeId = 'salchicher'; else if (next === 'vaca') activeId = 'vaca';
     if (next === 'chat') { initialChatScroll = activeId; unreadBoundary(activeId); }
     const views = { home, conversations, library, memories, wishes, control }; main.innerHTML = experiences && ['clinic', 'consultation', 'vaca'].includes(next) ? experiences.render(next, experienceId) : next === 'chat' ? chat(activeId) : (views[next] || home)();
-    window.CastoriDecorationReview?.mount(main.querySelector('[data-decoration-review]'));
-    window.CastoriChristmas?.refresh();
+    mountHomeDetails();
     const labels = { home: 'Mi rincón', conversations: 'Conversaciones', library: 'La biblioteca', memories: 'Mis recuerdos', wishes: 'Cuaderno de ilusiones', control: 'Despacho del Castor', clinic: 'El consultorio de Salchicher', consultation: 'Mi consulta', vaca: 'El establo de las ilusiones' };
     document.getElementById('breadcrumb-current').textContent = next === 'chat' ? characters[activeId].name : labels[next] || 'Mi rincón';
     document.querySelectorAll('.nav-item').forEach(b => { const active = b.dataset.view === next || (next === 'chat' && b.dataset.view === 'conversations'); b.classList.toggle('active', active); if (active) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); b.querySelector('.nav-dot')?.remove(); if (active) b.insertAdjacentHTML('beforeend', '<span class="nav-dot"></span>'); });

@@ -34,6 +34,7 @@ from aiohttp import web
 from telegram import Message, Update
 from telegram.ext import ExtBot
 import unread_notifications as unread
+import seasonal_mystery
 from salchicher_copy import retired_automatic_message
 
 
@@ -791,6 +792,7 @@ class WebBridge:
         app = web.Application(middlewares=[authentication], client_max_size=24000)
         app.router.add_get("/castori-web/health", self._health)
         app.router.add_get("/castori-web/state", self._state)
+        app.router.add_get("/castori-web/seasonal-mystery", self._seasonal_mystery)
         app.router.add_get("/castori-web/events", self._events)
         app.router.add_post("/castori-web/read", self._mark_read)
         app.router.add_get("/castori-web/request", self._request_status)
@@ -881,6 +883,11 @@ class WebBridge:
 
     async def _health(self, request):
         return web.json_response({"ok": True}, headers={"Cache-Control": "no-store"})
+
+    async def _seasonal_mystery(self, request):
+        if request.query:
+            return _failure("invalid_query")
+        return web.json_response(seasonal_mystery.public_snapshot(), headers={"Cache-Control": "no-store"})
 
     async def _state(self, request):
         self.maintenance()

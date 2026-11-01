@@ -1,0 +1,116 @@
+{
+  "id": "seven-seals-2026",
+  "finale_at": "2026-11-22T00:00:00+01:00",
+  "expires_at": "2027-01-11T00:00:00+01:00",
+  "entries": [
+    {
+      "id": "01",
+      "release_at": "2026-11-01T00:00:00+01:00",
+      "title": "Lo que no se cruza",
+      "lines": [
+        "Seis voces custodian una entrada.",
+        "Ninguna atraviesa su propio reflejo.",
+        "Una despedida jamás pierde su principio.",
+        "",
+        "Entre la cerradura y el deseo tiembla una lámpara.",
+        "Si te pierdes, no preguntes al norte: escucha al agua.",
+        "Por mucho que avances, siempre te precede un rumor.",
+        "En el sitio donde falta una puerta, respira una brasa.",
+        "Justo al borde del sueño, no queda más que memoria.",
+        "Otra luz espera quieta tras el último universo."
+      ],
+      "hint": "Las cabezas de las seis voces te dirán cómo mirar. De sus últimas palabras, conserva sólo el nacimiento. El reflejo decide desde qué extremo escucharlas."
+    },
+    {
+      "id": "02",
+      "release_at": "2026-11-04T00:00:00+01:00",
+      "title": "Lo que no vuelve",
+      "lines": [
+        "Sólo sobreviven quienes no encuentran a su doble.",
+        "El orden pertenece a las mesas, no a sus huéspedes.",
+        "Un mismo huésped no puede despedirse dos veces.",
+        "",
+        "CENA · CAN",
+        "SALTO · ALTO",
+        "PRISA · RISA",
+        "PERA · PAR",
+        "ARCO · OCA",
+        "ALMA · MAL"
+      ],
+      "hint": "En cada mesa, la palabra de la derecha reclama sus letras a la de la izquierda. Tacha una por una: una aparición sólo puede pagarse una vez. Lee lo que sobre."
+    },
+    {
+      "id": "03",
+      "release_at": "2026-11-07T00:00:00+01:00",
+      "title": "El desvío",
+      "lines": [
+        "La segunda palabra me hizo avanzar.",
+        "Cada una de sus letras valía un paso; todas pesaban lo mismo.",
+        "Mi sendero vuelve a empezar donde termina.",
+        "Mi alfabeto olvidó la Ñ.",
+        "Encuéntrame regresando por donde vine.",
+        "",
+        "YORKTIOU"
+      ],
+      "hint": "La respuesta del segundo sobre mide el desvío. Cuenta sus letras y retrocede ese número en A–Z desde cada letra del mensaje. Antes de A, espera Z."
+    },
+    {
+      "id": "04",
+      "release_at": "2026-11-10T00:00:00+01:00",
+      "title": "Desde el otro lado",
+      "lines": [
+        "Siete voces; una distancia justa.",
+        "Quien camina igual hacia ambos bordes no llega a ninguno.",
+        "La puerta te observa desde el otro lado.",
+        "",
+        "MAR · PINOS · PAZ · ASTRO · LUNAS · CIELO · AVE"
+      ],
+      "hint": "En cada voz hay una letra equidistante de sus extremos. Reúne las siete. La puerta las lee desde el lado opuesto al tuyo."
+    },
+    {
+      "id": "05",
+      "release_at": "2026-11-13T00:00:00+01:00",
+      "title": "Las dos orillas",
+      "lines": [
+        "Dos orillas guardan una sola corriente.",
+        "La que conserva una huella de más fue la primera en partir.",
+        "No concedas dos pasos seguidos a ninguna.",
+        "",
+        "EECA",
+        "SNI"
+      ],
+      "hint": "El cauce se recompone cruzándolo después de cada paso. Empieza por la orilla más larga; conserva el orden dentro de cada una."
+    },
+    {
+      "id": "06",
+      "release_at": "2026-11-16T00:00:00+01:00",
+      "title": "La procesión sin orden",
+      "lines": [
+        "Nada ocupa su sitio.",
+        "La voz más breve abre la marcha.",
+        "Ninguna puede preceder a otra más breve.",
+        "Cuando encuentren su lugar, sólo sus cabezas podrán hablar.",
+        "",
+        "RECUERDO · NUBE · OSCURECIDO · IMAGEN",
+        "IRA · NAVEGANTE · VALLE · ESPEJOS"
+      ],
+      "hint": "No pesan lo que significan. Cuenta las letras, ordena de menor a mayor y escucha únicamente el principio de cada voz."
+    },
+    {
+      "id": "07",
+      "release_at": "2026-11-19T00:00:00+01:00",
+      "title": "La llave que ya tenías",
+      "lines": [
+        "La primera respuesta no era sólo una entrada: también era una llave.",
+        "Lo que pesaba debajo ya no debe pesar arriba.",
+        "A no pesa nada; Z pesa veinticinco. La Ñ quedó fuera.",
+        "Si caes antes del principio, regresa desde el final.",
+        "",
+        "LUULAW",
+        "",
+        "Lo que encuentres no pertenece a una sola vez."
+      ],
+      "hint": "Escribe la respuesta del primer sobre debajo de las seis letras. Con A=0 y Z=25, resta a cada letra de arriba el valor de la de abajo. Si el resultado es negativo, súmale 26."
+    }
+  ]
+}

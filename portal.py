@@ -10,7 +10,7 @@ from aiohttp import web
 from account_service import AccountError
 
 COOKIE = "__Host-castori_session"
-PUBLIC_GET = ("state", "events", "request", "history", "stories", "story", "consultations", "consultation", "push-status")
+PUBLIC_GET = ("state", "events", "request", "history", "stories", "story", "consultations", "consultation", "push-status", "seasonal-mystery")
 PUBLIC_POST = ("message", "callback", "consultation-action", "consultation-message", "read", "push-subscribe", "push-unsubscribe")
 ADMIN_GET = ("admin-state", "admin-events", "admin-invitation", "admin-owner-invitation", "admin-auth")
 ADMIN_POST = ("admin-action", "admin-callback", "admin-invitation", "admin-owner-invitation", "admin-auth")
