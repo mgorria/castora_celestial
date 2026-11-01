@@ -1,0 +1,199 @@
+/* The Vaca's Christmas jury: a pending score, never an invented percentage. */
+.decoration-review {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 240px;
+  gap: 34px;
+  align-items: center;
+  margin: 26px 0 38px;
+  padding: 32px 35px;
+  overflow: hidden;
+  color: #fff4dc;
+  background: radial-gradient(ellipse at 7% 100%, #63724855, transparent 60%), linear-gradient(120deg, #183e32, #294b38);
+  border: 1px solid #b69a5e;
+  border-radius: 18px;
+  box-shadow: inset 0 0 0 5px #214333, inset 0 0 0 6px #e9ce8740, 0 12px 30px #233c2410;
+}
+.decoration-review[hidden], .decoration-review [hidden] { display: none; }
+.decoration-review::after {
+  content: '';
+  position: absolute;
+  inset: auto 35px 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, #f5dfa0a0, transparent);
+  pointer-events: none;
+}
+.decoration-review-sprig {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: -1;
+  width: 190px;
+  height: 140px;
+  color: #9fbd8980;
+  opacity: .65;
+  pointer-events: none;
+}
+.decoration-review-main, .decoration-review-copy { min-width: 0; }
+.decoration-review-intro { display: flex; align-items: center; gap: 22px; }
+.decoration-review-portrait {
+  display: block;
+  width: 88px;
+  height: 104px;
+  flex: 0 0 88px;
+  object-fit: cover;
+  object-position: center 25%;
+  border: 2px solid #ddbe78;
+  border-radius: 48% 48% 43% 43%;
+  background: #f2dfb9;
+  box-shadow: 0 0 0 4px #254634, 0 0 0 5px #dec48165, 0 8px 18px #091f2640;
+  transform: rotate(-4deg);
+}
+body .decoration-review .decoration-review-kicker {
+  margin: 0 0 10px;
+  color: #ecd49b;
+  font: 600 10px/1.6 var(--sans);
+  letter-spacing: 1.8px;
+}
+body .decoration-review h2 {
+  margin: 0 0 10px;
+  color: #fff2d5;
+  font: 500 clamp(24px, 2.25vw, 31px)/1.23 var(--serif);
+  letter-spacing: -.5px;
+  text-wrap: pretty;
+}
+body .decoration-review [data-decoration-review-copy] {
+  margin: 0;
+  max-width: 470px;
+  color: #dde7d5;
+  font: 400 13px/1.7 var(--sans);
+}
+.decoration-review-rating {
+  position: relative;
+  margin: 25px 0 0;
+  padding: 17px 20px 13px;
+  background: #081f1b30;
+  border: 1px solid #c0ad743d;
+  border-radius: 12px;
+}
+.decoration-review-rating-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+body .decoration-review-rating-heading > span {
+  color: #ecdfbf;
+  font: 500 12px/1.5 var(--sans);
+  letter-spacing: .2px;
+}
+body .decoration-review-rating-heading > strong { color: #f0d38d; font: 500 27px/1 var(--serif); white-space: nowrap; }
+body .decoration-review-rating-heading small { color: #c6d4bc; font: 400 12px/1 var(--sans); }
+.decoration-review-thermometer {
+  position: relative;
+  height: 17px;
+  margin: 20px 2px 15px 11px;
+  border: 1px solid #cbb377;
+  border-radius: 0 20px 20px 0;
+  background: linear-gradient(180deg, #f9e7ac12, #051b181c);
+  box-shadow: inset 0 1px 4px #061c2340, 0 0 0 3px #dfc68b0b;
+}
+.decoration-review-thermometer::before {
+  content: '';
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  left: -13px;
+  width: 29px;
+  height: 29px;
+  transform: translateY(-50%);
+  border: 1px solid #e5ca89;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #f6dd9b60, #365641 58%);
+  box-shadow: inset 0 0 0 3px #173d31, 0 0 0 3px #dfc68b12;
+}
+.decoration-review-thermometer::after {
+  content: '';
+  position: absolute;
+  inset: 3px 18px 3px 29px;
+  background: repeating-linear-gradient(90deg, transparent 0, transparent calc(25% - 1px), #d7c68c55 calc(25% - 1px), #d7c68c55 25%);
+  opacity: .7;
+}
+.decoration-review-mercury {
+  position: absolute;
+  inset: 3px 5px 3px 15px;
+  border-radius: 20px;
+  background: linear-gradient(90deg, #f5d89410, #f5d89428, #f5d89410);
+  opacity: .55;
+  animation: decoration-review-glimmer 5s ease-in-out infinite;
+}
+.decoration-review-thermometer > i { display: none; }
+body .decoration-review-rating-note { margin: 0; color: #c7d7bf; font: italic 400 11px/1.5 var(--sans); }
+.decoration-review-deadline {
+  position: relative;
+  min-width: 0;
+  padding: 20px 0 20px 28px;
+  border-left: 1px solid #cdb77555;
+  text-align: center;
+}
+body .decoration-review .decoration-review-date { margin: 0 0 20px; color: #d8dcbf; font: 550 9px/1.7 var(--sans); letter-spacing: 1.2px; }
+.decoration-review-date time { display: block; margin-top: 5px; color: #f2d99f; font: italic 500 24px/1.25 var(--serif); letter-spacing: -.2px; }
+.decoration-review-clock { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; width: 100%; }
+.decoration-review-unit { min-width: 0; text-align: center; }
+.decoration-review-unit > span:first-child {
+  display: block;
+  padding: 11px 2px 12px;
+  color: #244635;
+  background: linear-gradient(180deg, #fff6df, #f3e2b8);
+  border: 1px solid #e8d197;
+  border-radius: 7px;
+  box-shadow: 0 3px 7px #102c2526;
+  font: 500 27px/1 var(--serif);
+  font-variant-numeric: tabular-nums;
+}
+.decoration-review-label { display: block; margin-top: 8px; color: #e7d19a; font: 500 8px/1.3 var(--sans); letter-spacing: .35px; text-transform: uppercase; }
+body .decoration-review-verdict { margin: 13px 0 0; color: #f0dcad; font: italic 400 19px/1.5 var(--serif); text-wrap: pretty; }
+.decoration-review-closed .decoration-review-mercury { animation: none; opacity: .25; }
+.decoration-review-announcement { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+body.moon .decoration-review { background: radial-gradient(ellipse at 5% 100%, #40584060, transparent 65%), #173329; border-color: #a18b57; box-shadow: inset 0 0 0 5px #173329, inset 0 0 0 6px #d9c17c35, 0 12px 30px #091d241f; }
+body.christmas-paused .decoration-review-mercury,
+body[data-christmas-motion="off"] .decoration-review-mercury { animation: none; opacity: .4; }
+@keyframes decoration-review-glimmer { 0%, 100% { opacity: .3; } 50% { opacity: .8; } }
+@media (max-width: 1100px) {
+  .decoration-review { grid-template-columns: minmax(0, 1fr) 220px; gap: 23px; padding: 29px; }
+  .decoration-review-intro { gap: 17px; }
+  .decoration-review-portrait { width: 70px; height: 87px; flex-basis: 70px; }
+  .decoration-review-deadline { padding-left: 22px; }
+  body .decoration-review h2 { font-size: 25px; }
+}
+@media (min-width: 681px) and (max-width: 1000px) {
+  .decoration-review { grid-template-columns: minmax(0, 1fr); gap: 21px; }
+  .decoration-review-deadline { display: grid; grid-template-columns: minmax(0, 1fr) 240px; align-items: center; gap: 20px; padding: 21px 0 0; border-left: 0; border-top: 1px solid #cdb77555; }
+  body .decoration-review .decoration-review-date { margin: 0; }
+  body .decoration-review-verdict { margin: 0; }
+}
+@media (max-width: 680px) {
+  .decoration-review { grid-template-columns: minmax(0, 1fr); gap: 22px; margin: 22px 0 30px; padding: 26px 24px; border-radius: 16px; }
+  .decoration-review-intro { align-items: flex-start; gap: 17px; }
+  .decoration-review-portrait { width: 68px; height: 82px; flex-basis: 68px; margin-top: 7px; }
+  body .decoration-review .decoration-review-kicker { margin-bottom: 8px; font-size: 9px; letter-spacing: 1.3px; }
+  body .decoration-review h2 { font-size: 25px; }
+  body .decoration-review [data-decoration-review-copy] { font-size: 12px; }
+  .decoration-review-rating { margin-top: 22px; padding: 16px 17px 13px; }
+  .decoration-review-deadline { padding: 20px 0 0; border-left: 0; border-top: 1px solid #cdb77555; }
+  body .decoration-review .decoration-review-date { margin-bottom: 16px; }
+  .decoration-review-date time { font-size: 25px; }
+  .decoration-review-clock { max-width: 330px; margin-inline: auto; gap: 9px; }
+  .decoration-review-unit > span:first-child { padding: 12px 2px; font-size: 30px; }
+  .decoration-review-label { font-size: 8px; letter-spacing: .3px; }
+  .decoration-review-sprig { width: 150px; height: 115px; opacity: .4; }
+  body .decoration-review-verdict { font-size: 21px; }
+}
+@media (max-width: 380px) {
+  .decoration-review { padding: 25px 20px; }
+  .decoration-review-intro { gap: 13px; }
+  .decoration-review-portrait { width: 56px; height: 70px; flex-basis: 56px; }
+  body .decoration-review h2 { font-size: 23px; }
+  .decoration-review-clock { gap: 6px; }
+  .decoration-review-unit > span:first-child { font-size: 28px; }
+  .decoration-review-rating { padding-inline: 15px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .decoration-review-mercury { animation: none; opacity: .4; }
+}
