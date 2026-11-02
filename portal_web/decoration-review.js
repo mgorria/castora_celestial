@@ -7,8 +7,63 @@
   const END = calendar?.END ?? Date.parse('2027-01-11T00:00:00+01:00');
   const currentTime = () => calendar?.now() ?? Date.now();
   const units = [['days', 'días'], ['hours', 'horas'], ['minutes', 'minutos'], ['seconds', 'segundos']];
+  const madridDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' });
+  const shortDate = new Intl.DateTimeFormat('es-ES', { timeZone: 'UTC', day: 'numeric', month: 'short' });
+  const weekday = new Intl.DateTimeFormat('es-ES', { timeZone: 'UTC', weekday: 'short' });
+  // Storytelling forecasts: stable per date, with the possible surprise windows
+  // suggested by Miguel. These are magical signals, not measured probabilities.
+  const visitSignals = {
+    '2026-11-02': 18, '2026-11-03': 23, '2026-11-04': 31, '2026-11-05': 43,
+    '2026-11-06': 62, '2026-11-07': 76, '2026-11-08': 72,
+    '2026-11-09': 68, '2026-11-10': 58, '2026-11-11': 64, '2026-11-12': 72,
+    '2026-11-13': 79, '2026-11-14': 86, '2026-11-15': 82,
+    '2026-11-19': 66, '2026-11-20': 74, '2026-11-21': 88, '2026-11-22': 92
+  };
+  const skies = [
+    { limit: 30, outlook: 'quiet', signal: 'Bruma en el establo' },
+    { limit: 50, outlook: 'whisper', signal: 'Cascabeles lejanos' },
+    { limit: 70, outlook: 'near', signal: 'Huellas en la nieve' },
+    { limit: 101, outlook: 'bright', signal: 'Magia muy cerca' }
+  ];
   let section = null, timer = null;
 
+  function dayKey(now) {
+    const parts = Object.fromEntries(madridDate.formatToParts(new Date(now)).map(part => [part.type, part.value]));
+    return `${parts.year}-${parts.month}-${parts.day}`;
+  }
+  function forecast(now = currentTime()) {
+    // UTC here represents a civil date, so moving one day also works across
+    // month/year and daylight-saving boundaries without skipping a day.
+    const firstDay = Date.parse(dayKey(now) + 'T00:00:00Z');
+    return Array.from({ length: 7 }, (_, index) => {
+      const date = new Date(firstDay + index * 86400000), iso = date.toISOString().slice(0, 10);
+      const dayNumber = Math.floor(date.getTime() / 86400000);
+      const weekend = [0, 6].includes(date.getUTCDay());
+      const chance = visitSignals[iso] ?? (22 + (dayNumber * 17 % 33 + 33) % 33 + (weekend ? 10 : 0));
+      const sky = skies.find(item => chance < item.limit);
+      return { iso, weekday: index === 0 ? 'Hoy' : weekday.format(date).replace('.', ''), dateLabel: shortDate.format(date).replace('.', ''), chance, signal: sky.signal, outlook: sky.outlook };
+    });
+  }
+  function weatherIcon(outlook) {
+    const cloud = '<path d="M12 34h23a7 7 0 0 0 0-14 11 11 0 0 0-20-3 9 9 0 0 0-3 17Z" fill="currentColor" fill-opacity=".12"/>';
+    const art = outlook === 'quiet'
+      ? '<path d="M34 5a10 10 0 0 0 9 15 10 10 0 0 1-16-11"/>' + cloud
+      : outlook === 'whisper'
+        ? cloud + '<path d="M17 40h.1M25 43h.1M33 39h.1" stroke-width="3"/>'
+        : outlook === 'near'
+          ? '<circle cx="32" cy="13" r="7" fill="currentColor" fill-opacity=".2"/><path d="M32 2V0m11 5 2-2M43 13h3M22 5l-2-2"/>' + cloud
+          : '<path d="m24 4 5 13 14 7-14 6-5 14-6-14L4 24l14-7Z" fill="currentColor" fill-opacity=".15"/><path d="m40 4 1.5 4L46 10l-4.5 1.5L40 16l-1.5-4.5L34 10l4.5-2ZM5 38l1 3 3 1-3 1-1 3-1-3-3-1 3-1"/>';
+    return `<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${art}</svg>`;
+  }
+  function forecastBody(days) {
+    return `<div class="vaca-forecast-heading"><div><p class="vaca-forecast-kicker">OBSERVATORIO DE CASCABELES</p><h3 id="vaca-forecast-title">¿Vendrá la Vaca?</h3><p class="vaca-forecast-intro">Probabilidad de visita a Casa Tosico</p></div><p class="vaca-forecast-range">${days[0].dateLabel} — ${days[6].dateLabel}</p></div>
+      <ol class="vaca-forecast-days">${days.map((day, index) => `<li class="vaca-forecast-day" data-outlook="${day.outlook}"${index === 0 ? ' aria-current="date"' : ''}><p class="vaca-forecast-weekday">${day.weekday}</p><time class="vaca-forecast-date" datetime="${day.iso}">${day.dateLabel}</time><span class="vaca-forecast-icon">${weatherIcon(day.outlook)}</span><strong class="vaca-forecast-chance" aria-label="${day.chance}% de probabilidad de visita">${day.chance}<small>%</small></strong><span class="vaca-forecast-signal">${day.signal}</span></li>`).join('')}</ol>
+      <p class="vaca-forecast-note">Parte mágico orientativo. La Vaca se reserva el derecho a aparecer por sorpresa.</p>`;
+  }
+  function renderForecast(now) {
+    const days = forecast(now);
+    return `<section class="vaca-forecast" data-vaca-forecast data-forecast-day="${days[0].iso}" aria-labelledby="vaca-forecast-title">${forecastBody(days)}</section>`;
+  }
   function remaining(now = currentTime()) {
     const total = Math.max(0, Math.ceil((DEADLINE - now) / 1000));
     return { closed: now >= DEADLINE, days: Math.floor(total / 86400), hours: Math.floor(total / 3600) % 24, minutes: Math.floor(total / 60) % 60, seconds: total % 60 };
@@ -39,6 +94,7 @@
         <div class="decoration-review-clock" role="timer" aria-live="off" aria-label="Tiempo para modificar la decoración antes del 1 de diciembre"${value.closed ? ' hidden' : ''}>${units.map(([key, label]) => `<div class="decoration-review-unit"><span data-decoration-review-unit="${key}">${pad(value[key])}</span><span class="decoration-review-label">${label}</span></div>`).join('')}</div>
         <p class="decoration-review-verdict"${value.closed ? '' : ' hidden'}>Evaluación cerrada.<br>Esperando el veredicto de la Vaca.</p>
       </div>
+      ${renderForecast(now)}
       <span class="decoration-review-announcement" role="status" aria-live="polite"></span>
     </section>`;
   }
@@ -57,6 +113,12 @@
     if (!section?.isConnected) { unmount(); return; }
     const now = currentTime();
     if (now >= END) { section.hidden = true; unmount(); return; }
+    const weather = section.querySelector('[data-vaca-forecast]');
+    const today = dayKey(now);
+    if (weather.getAttribute('data-forecast-day') !== today) {
+      weather.innerHTML = forecastBody(forecast(now));
+      weather.setAttribute('data-forecast-day', today);
+    }
     const value = remaining(now);
     const wasClosed = section.classList.contains('decoration-review-closed');
     section.classList.toggle('decoration-review-closed', value.closed);
@@ -72,7 +134,7 @@
       const text = pad(value[key]);
       if (node.textContent !== text) node.textContent = text;
     }
-    if (!value.closed && section.ownerDocument.visibilityState !== 'hidden') timer = setTimeout(refresh, Math.min(1000, DEADLINE - now));
+    if (section.ownerDocument.visibilityState !== 'hidden') timer = setTimeout(refresh, value.closed ? 60000 : Math.min(1000, DEADLINE - now));
   }
   function mount(node) {
     unmount();
@@ -82,5 +144,5 @@
     section.ownerDocument.addEventListener('castori:seasonchange', refresh);
     refresh();
   }
-  root.CastoriDecorationReview = { render, mount, unmount, remaining };
+  root.CastoriDecorationReview = { render, mount, unmount, remaining, forecast };
 })(typeof window === 'undefined' ? globalThis : window);

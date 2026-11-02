@@ -197,3 +197,81 @@ body[data-christmas-motion="off"] .decoration-review-mercury { animation: none; 
 @media (prefers-reduced-motion: reduce) {
   .decoration-review-mercury { animation: none; opacity: .4; }
 }
+
+/* A small Christmas weather station for the Vaca's possible visits. */
+.vaca-forecast {
+  grid-column: 1 / -1;
+  min-width: 0;
+  padding-top: 27px;
+  border-top: 1px solid #cdb77555;
+}
+.vaca-forecast-heading { display: flex; justify-content: space-between; align-items: flex-end; gap: 18px; margin-bottom: 20px; }
+.vaca-forecast-heading > div { min-width: 0; }
+body .decoration-review .vaca-forecast-kicker { margin: 0 0 7px; color: #d7bf87; font: 600 9px/1.6 var(--sans); letter-spacing: 1.5px; }
+body .decoration-review .vaca-forecast-heading h3 { margin: 0 0 5px; color: #fff0cf; font: 500 27px/1.2 var(--serif); letter-spacing: -.4px; }
+body .decoration-review .vaca-forecast-intro { margin: 0; color: #cedcc7; font: 400 12px/1.65 var(--sans); }
+body .decoration-review .vaca-forecast-range { flex-shrink: 0; margin: 0 0 3px; padding: 7px 11px; color: #e6d7b1; border: 1px solid #bfa77245; border-radius: 6px; background: #102f2726; font: 500 10px/1.5 var(--sans); font-variant-numeric: tabular-nums; text-align: center; }
+body .decoration-review .vaca-forecast-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; }
+.vaca-forecast-day {
+  --forecast-icon: #bdd2ce;
+  display: flex;
+  position: relative;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+  padding: 15px 8px 13px;
+  color: #dce5d6;
+  background: #0b261e30;
+  border: 1px solid #9daf8c3d;
+  border-radius: 10px;
+  text-align: center;
+}
+.vaca-forecast-day[data-outlook="whisper"] { --forecast-icon: #c3dab0; background: #46684929; border-color: #a5bb844f; }
+.vaca-forecast-day[data-outlook="near"] { --forecast-icon: #e8cf90; background: #8c885332; border-color: #ccb06b5c; }
+.vaca-forecast-day[data-outlook="bright"] { --forecast-icon: #f6d991; background: linear-gradient(160deg, #9b875447, #56634838); border-color: #d4b96c8f; }
+.vaca-forecast-day[aria-current="date"] { border-color: #e3c786; box-shadow: inset 0 3px 0 #d9bb78, 0 3px 10px #09241c24; }
+body .decoration-review .vaca-forecast-weekday { margin: 0 0 3px; color: #f0e2c3; font: 600 11px/1.4 var(--sans); text-transform: capitalize; }
+body .decoration-review .vaca-forecast-date { display: block; color: #bdceb9; font: 400 10px/1.5 var(--sans); font-variant-numeric: tabular-nums; }
+.vaca-forecast-icon { display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; margin: 13px 0 7px; color: var(--forecast-icon); }
+.vaca-forecast-icon svg { display: block; width: 36px; height: 36px; }
+body .decoration-review .vaca-forecast-chance { display: block; margin: 0; color: #f4e2b5; font: 500 28px/1.1 var(--serif); font-variant-numeric: tabular-nums; white-space: nowrap; }
+body .decoration-review .vaca-forecast-chance small { margin-left: 2px; color: #c3d2bd; font: 400 12px/1 var(--sans); }
+body .decoration-review .vaca-forecast-signal { display: block; max-width: 105px; margin-top: 10px; color: #c5d3bd; font: 400 10px/1.5 var(--sans); text-wrap: pretty; }
+body .decoration-review .vaca-forecast-day[data-outlook="bright"] .vaca-forecast-signal { color: #e9dcae; }
+body .decoration-review .vaca-forecast-note { max-width: 620px; margin: 14px 0 0; color: #c1ceb6; font: italic 400 11px/1.65 var(--sans); }
+body.moon .vaca-forecast-day { background: #061c1738; }
+body.moon .vaca-forecast-day[data-outlook="near"] { background: #79734332; }
+body.moon .vaca-forecast-day[data-outlook="bright"] { background: linear-gradient(160deg, #8d79483d, #3a513530); }
+@media (max-width: 1100px) and (min-width: 541px) {
+  body .decoration-review .vaca-forecast-days { grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 10px; }
+  .vaca-forecast-day { grid-column: span 2; }
+  .vaca-forecast-day:nth-child(5) { grid-column: 2 / span 2; }
+  .vaca-forecast-day:nth-child(6), .vaca-forecast-day:nth-child(7) { grid-column: span 2; }
+  .vaca-forecast-icon { margin-top: 9px; }
+}
+@media (max-width: 680px) {
+  .vaca-forecast { padding-top: 23px; }
+  .vaca-forecast-heading { align-items: flex-start; flex-direction: column; gap: 12px; margin-bottom: 16px; }
+  body .decoration-review .vaca-forecast-heading h3 { font-size: 25px; }
+  body .decoration-review .vaca-forecast-range { margin-bottom: 0; padding: 6px 9px; }
+  body .decoration-review .vaca-forecast-kicker { font-size: 8px; letter-spacing: 1.2px; }
+}
+@media (max-width: 540px) {
+  body .decoration-review .vaca-forecast-days { grid-template-columns: minmax(0, 1fr); gap: 7px; }
+  .vaca-forecast-day { display: grid; grid-template-columns: 44px 30px 48px minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 9px; row-gap: 1px; align-items: center; min-height: 64px; padding: 10px 12px; border-radius: 8px; text-align: left; }
+  .vaca-forecast-day[aria-current="date"] { box-shadow: inset 3px 0 0 #d9bb78, 0 3px 10px #09241c24; }
+  body .decoration-review .vaca-forecast-weekday { grid-column: 1; grid-row: 1; align-self: end; margin: 0; }
+  body .decoration-review .vaca-forecast-date { grid-column: 1; grid-row: 2; align-self: start; }
+  .vaca-forecast-icon { grid-column: 2; grid-row: 1 / span 2; width: 30px; height: 34px; margin: 0; }
+  .vaca-forecast-icon svg { width: 30px; height: 30px; }
+  body .decoration-review .vaca-forecast-chance { grid-column: 3; grid-row: 1 / span 2; font-size: 26px; text-align: center; }
+  body .decoration-review .vaca-forecast-chance small { margin-left: 1px; font-size: 10px; }
+  body .decoration-review .vaca-forecast-signal { grid-column: 4; grid-row: 1 / span 2; max-width: none; margin: 0; padding-left: 8px; border-left: 1px solid #9bb28a38; font-size: 10px; line-height: 1.55; }
+  body .decoration-review .vaca-forecast-note { margin-top: 13px; font-size: 10px; }
+}
+@media (max-width: 360px) {
+  .vaca-forecast-day { grid-template-columns: 37px 26px 42px minmax(0, 1fr); column-gap: 6px; padding-inline: 9px; }
+  .vaca-forecast-icon, .vaca-forecast-icon svg { width: 26px; height: 28px; }
+  body .decoration-review .vaca-forecast-chance { font-size: 23px; }
+  body .decoration-review .vaca-forecast-signal { padding-left: 6px; }
+}
