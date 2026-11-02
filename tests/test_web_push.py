@@ -7,13 +7,14 @@ import json
 import re
 import time
 import unittest
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import unread_notifications as unread
 from web_push import (
     BODY, MAX_DEVICES, MAX_EVENT_AGE, MAX_TEST_RECEIPTS, NETWORK_TIMEOUT, STORE_KEY, TEST_BODY, TEST_TAG, WebPushError,
-    WebPushService, _PushTransport, _post_webpush, validate_endpoint, validate_subscription,
+    WebPushService, _PushTransport, _forecast_payload, _post_webpush, validate_endpoint, validate_subscription,
 )
 
 
@@ -151,7 +152,10 @@ class SubscriptionValidationTests(unittest.TestCase):
 
 class WebPushServiceTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        environment = patch.dict("os.environ", {"WEB_PUSH_TEST_REQUEST_ID": "", "WEB_PUSH_TEST_EXPIRES_AT": ""})
+        environment = patch.dict("os.environ", {
+            "WEB_PUSH_TEST_REQUEST_ID": "", "WEB_PUSH_TEST_EXPIRES_AT": "",
+            "WEB_PUSH_FORECAST_REQUEST_ID": "", "WEB_PUSH_FORECAST_EXPIRES_AT": "",
+            "WEB_PUSH_FORECAST_DATE": "", "WEB_PUSH_FORECAST_CHANCE": ""})
         environment.start()
         self.addCleanup(environment.stop)
         self.now = time.time()
@@ -738,6 +742,259 @@ class WebPushTestRequestTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await self.service.tick())["status"], "storage_unavailable")
         self.assertEqual((await self.restart().tick())["test_status"], "uncertain")
         self.sender.assert_awaited_once()
+
+
+class WebPushForecastRequestTests(unittest.IsolatedAsyncioTestCase):
+    make_service = WebPushServiceTests.make_service
+    save = WebPushServiceTests.save
+    register = WebPushServiceTests.register
+    put = WebPushServiceTests.put
+    device = WebPushServiceTests.device
+
+    async def asyncSetUp(self):
+        await WebPushServiceTests.asyncSetUp(self)
+        self.now = datetime.fromisoformat("2026-11-02T12:00:00+01:00").timestamp()
+        self.request_id = "forecast-request-one"
+        self.expires_at = self.now + 3600
+        self.forecast_date = "2026-11-03"
+        self.chance = 23
+        self.service = self.restart()
+
+    def restart(self, **options):
+        return self.make_service(**{
+            "forecast_request_id": self.request_id, "forecast_expires_at": self.expires_at,
+            "forecast_date": self.forecast_date, "forecast_chance": self.chance, **options})
+
+    def receipt(self):
+        return self.data[STORE_KEY]["forecast_receipts"][self.request_id]
+
+    async def test_waits_then_reserves_before_await_sends_exact_payload_once_without_unread_changes(self):
+        before = copy.deepcopy(self.data)
+        with patch("web_push.logger") as log:
+            self.assertEqual((await self.service.tick())["forecast_status"], "waiting")
+            self.assertEqual((await self.restart().tick())["forecast_status"], "waiting")
+            self.assertEqual(log.log.call_count, 1)
+        self.sender.assert_not_awaited()
+        identity = self.register()
+        self.register("chrome", endpoint="https://fcm.googleapis.com/fcm/send/chrome")
+
+        async def reserved(sub, payload):
+            self.assertEqual(self.receipt()["status"], "sending")
+            self.assertEqual(self.receipt()["device_id"], identity)
+            self.assertEqual(self.device(identity)["last_reserved_seq"], 0)
+            self.assertEqual(sub["endpoint"], subscription()["endpoint"])
+            self.assertEqual(payload, {"web_push": 8030, "mutable": False, "notification": {
+                "title": "Parte vacunológico de mañana",
+                "body": "Martes 3 de noviembre: 23 % de probabilidad de visita. Bruma en el establo. La Vaca aún guarda sus sorpresas.",
+                "navigate": "https://oficinacastori.es/castori/#inicio", "silent": False,
+                "tag": "castori-vaca-forecast-2026-11-03"}, "kind": "vaca-forecast", "date": "2026-11-03", "chance": 23})
+            self.data["concurrent_writer"] = {"keep": True}
+            return 201
+
+        self.sender.side_effect = reserved
+        self.assertEqual((await self.service.tick())["forecast_status"], "sent")
+        self.assertEqual((await self.restart().tick())["forecast_status"], "sent")
+        self.sender.assert_awaited_once()
+        self.assertEqual(self.receipt()["http_status"], 201)
+        self.assertEqual(self.data["concurrent_writer"], {"keep": True})
+        self.assertEqual(self.data["web_bridge"], before["web_bridge"])
+        self.assertEqual(self.data[unread.STORE_KEY], before[unread.STORE_KEY])
+        self.assertNotIn("test_receipts", self.data[STORE_KEY])
+
+    async def test_only_sandra_valid_apple_is_eligible(self):
+        self.register("chrome", endpoint="https://fcm.googleapis.com/fcm/send/chrome")
+        self.register("firefox", endpoint="https://updates.push.services.mozilla.com/wpush/v2/firefox")
+        invalid = self.register("expired", expirationTime=(self.now + 10) * 1000)
+        self.data[STORE_KEY]["devices"]["22"] = {"other-account": {
+            "subscription": subscription("owner"), "generation": "owner"}}
+        self.now += 10
+        self.assertEqual((await self.service.tick())["forecast_status"], "waiting")
+        self.assertEqual(self.receipt()["apple_devices"], 0)
+        self.sender.assert_not_awaited()
+        self.register("valid")
+        self.assertEqual((await self.service.tick())["forecast_status"], "sent")
+        self.assertEqual(self.sender.call_args.args[0]["endpoint"], subscription("valid")["endpoint"])
+        self.assertIn(invalid, self.data[STORE_KEY]["devices"]["11"])
+
+    async def test_multiple_apple_devices_are_ambiguous_until_one_is_removed(self):
+        self.register("one")
+        self.register("two")
+        self.assertEqual((await self.service.tick())["forecast_status"], "ambiguous")
+        self.assertEqual((await self.restart().tick())["forecast_status"], "ambiguous")
+        self.assertEqual(self.receipt()["apple_devices"], 2)
+        self.sender.assert_not_awaited()
+        self.service.unsubscribe(11, subscription("two")["endpoint"])
+        self.assertEqual((await self.service.tick())["forecast_status"], "sent")
+        self.sender.assert_awaited_once()
+
+    async def test_expiry_is_capped_at_madrid_midnight_and_cannot_be_extended(self):
+        self.expires_at = self.now + 7 * 86400
+        self.service = self.restart()
+        self.assertEqual((await self.service.tick())["forecast_status"], "waiting")
+        midnight = datetime.fromisoformat("2026-11-03T00:00:00+01:00").timestamp()
+        self.assertEqual(self.receipt()["expires_at"], midnight)
+        self.assertLessEqual(self.receipt()["expires_at"] - self.now, 86400)
+        self.now = midnight
+        self.register()
+        self.assertEqual((await self.restart().tick())["forecast_status"], "expired")
+        self.now += 86400
+        self.expires_at = self.now + 86400
+        self.assertEqual((await self.restart().tick())["forecast_status"], "expired")
+        self.sender.assert_not_awaited()
+
+    async def test_tomorrow_calendar_in_madrid_including_year_end_and_dst(self):
+        cases = (("2026-11-02T23:30:00+00:00", "2026-11-04"),
+                 ("2026-12-31T12:00:00+01:00", "2027-01-01"),
+                 ("2026-03-28T23:30:00+00:00", "2026-03-30"),
+                 ("2026-10-24T22:30:00+00:00", "2026-10-26"))
+        for index, (instant, target) in enumerate(cases):
+            with self.subTest(instant=instant):
+                self.now = datetime.fromisoformat(instant).timestamp()
+                service = self.restart(forecast_request_id=f"calendar-{index}", forecast_date=target,
+                                       forecast_expires_at=self.now + 3 * 86400)
+                self.assertEqual((await service.tick())["forecast_status"], "waiting")
+                receipt = self.data[STORE_KEY]["forecast_receipts"][f"calendar-{index}"]
+                self.assertLessEqual(receipt["expires_at"] - self.now, 86400)
+        self.sender.assert_not_awaited()
+
+    async def test_non_tomorrow_and_expired_orders_are_terminal_without_sending(self):
+        self.register()
+        for index, target in enumerate(("2026-11-02", "2026-11-04", "2025-11-03")):
+            with self.subTest(target=target):
+                service = self.restart(forecast_request_id=f"bad-date-{index}", forecast_date=target)
+                self.assertEqual((await service.tick())["forecast_status"], "expired")
+        self.assertEqual((await self.restart(forecast_expires_at=self.now).tick())["forecast_status"], "expired")
+        self.sender.assert_not_awaited()
+
+    async def test_invalid_configuration_ignored_and_complete_forecast_env_is_not_test_env(self):
+        for field, values in {
+            "forecast_request_id": ("short", "private\nvalue"),
+            "forecast_expires_at": ("nan", True, -1),
+            "forecast_date": ("20261103", "2026-11-31", "2026-1-03"),
+            "forecast_chance": (0, 100, True, 23.5, "23.0", "+23", " 23"),
+        }.items():
+            for value in values:
+                with self.subTest(field=field, value=value):
+                    service = self.restart(**{field: value})
+                    self.assertIsNone(service.forecast_request)
+                    self.assertNotIn("forecast_status", await service.tick())
+        with patch.dict("os.environ", {"WEB_PUSH_FORECAST_REQUEST_ID": self.request_id,
+                                      "WEB_PUSH_FORECAST_EXPIRES_AT": str(self.expires_at),
+                                      "WEB_PUSH_FORECAST_DATE": self.forecast_date,
+                                      "WEB_PUSH_FORECAST_CHANCE": "23"}):
+            service = self.make_service()
+        self.assertIsNone(service.test_request)
+        self.assertEqual((await service.tick())["forecast_status"], "waiting")
+        self.assertNotIn("test_receipts", self.data[STORE_KEY])
+        self.sender.assert_not_awaited()
+
+    async def test_same_request_content_cannot_change_after_waiting(self):
+        self.assertEqual((await self.service.tick())["forecast_status"], "waiting")
+        self.register()
+        self.assertEqual((await self.restart(forecast_chance=99).tick())["forecast_status"], "uncertain")
+        self.assertEqual(self.receipt()["chance"], 23)
+        self.assertEqual((await self.restart().tick())["forecast_status"], "uncertain")
+        self.sender.assert_not_awaited()
+
+    async def test_only_known_provider_2xx_is_sent_and_uncertain_is_never_retried(self):
+        self.register()
+        cases = ((None, "uncertain", None), (403, "uncertain", 403), (500, "uncertain", 500),
+                 (RuntimeError("PRIVATE PROVIDER BODY"), "uncertain", None),
+                 (TimeoutError(), "uncertain", None), (204, "sent", 204))
+        for index, (response, outcome, status) in enumerate(cases):
+            with self.subTest(response=type(response).__name__):
+                self.request_id = f"outcome-{index}"
+                self.sender.reset_mock(side_effect=True)
+                self.sender.side_effect = response if isinstance(response, Exception) else None
+                self.sender.return_value = response
+                with patch("web_push.logger") as log:
+                    self.assertEqual((await self.restart().tick())["forecast_status"], outcome)
+                    self.assertEqual((await self.restart().tick())["forecast_status"], outcome)
+                    output = str(log.mock_calls)
+                    for secret in (PRIVATE, subscription()["endpoint"], "PRIVATE PROVIDER BODY", "La Vaca"):
+                        self.assertNotIn(secret, output)
+                self.assertEqual(self.receipt()["http_status"], status)
+                self.sender.assert_awaited_once()
+
+    async def test_cancelled_delivery_is_reserved_and_restart_marks_uncertain(self):
+        self.register()
+        self.sender.side_effect = asyncio.CancelledError
+        with self.assertRaises(asyncio.CancelledError):
+            await self.service.tick()
+        self.assertEqual(self.receipt()["status"], "sending")
+        self.assertEqual((await self.restart().tick())["forecast_status"], "uncertain")
+        self.sender.assert_awaited_once()
+
+    async def test_gone_provider_expires_device_but_preserves_concurrent_renewal(self):
+        identity = self.register()
+
+        async def renew(sub, payload):
+            replacement = subscription(keys={"p256dh": PUBLIC, "auth": b64(bytes(range(1, 17)))})
+            self.service.subscribe(11, replacement)
+            return 410
+
+        self.sender.side_effect = renew
+        self.assertEqual((await self.service.tick())["forecast_status"], "expired")
+        self.assertIn(identity, self.data[STORE_KEY]["devices"]["11"])
+        self.assertEqual(self.receipt()["http_status"], 410)
+        self.assertEqual((await self.restart().tick())["forecast_status"], "expired")
+        self.sender.assert_awaited_once()
+
+    async def test_storage_failure_cannot_send_unreserved_or_repeat_after_success(self):
+        self.register()
+        with patch.object(self.service, "save", side_effect=OSError("private path")):
+            self.assertEqual((await self.service.tick())["status"], "storage_unavailable")
+        self.sender.assert_not_awaited()
+        original_save, writes = self.service.save, 0
+
+        def fail_after_reserving(data):
+            nonlocal writes
+            writes += 1
+            if writes == 2:
+                raise OSError("private path")
+            original_save(data)
+
+        with patch.object(self.service, "save", side_effect=fail_after_reserving):
+            self.assertEqual((await self.service.tick())["status"], "storage_unavailable")
+        self.assertEqual((await self.restart().tick())["forecast_status"], "uncertain")
+        self.sender.assert_awaited_once()
+
+    async def test_actor_guard_and_missing_vapid_cannot_send(self):
+        self.register()
+        for actors in ({"sandra": None, "owner": 22}, {"sandra": 11, "owner": 11}):
+            with patch.dict(self.actors, actors):
+                self.assertEqual((await self.restart().tick())["forecast_status"], "unavailable")
+        service = self.restart(private_key="")
+        with patch("web_push.logger") as log:
+            self.assertEqual((await service.tick())["status"], "unavailable")
+            self.assertEqual((await service.tick())["forecast_status"], "unavailable")
+            self.assertEqual(log.log.call_count, 1)
+            self.assertIn("configuration", str(log.log.call_args))
+            self.assertIn(self.request_id, str(log.log.call_args))
+        self.sender.assert_not_awaited()
+        self.assertNotIn("forecast_receipts", self.data[STORE_KEY])
+
+    def test_sky_thresholds_match_ui_and_spanish_dates_are_locale_independent(self):
+        for chance, sky in ((1, "Bruma en el establo"), (29, "Bruma en el establo"),
+                            (30, "Cascabeles lejanos"), (49, "Cascabeles lejanos"),
+                            (50, "Huellas en la nieve"), (69, "Huellas en la nieve"),
+                            (70, "Magia muy cerca"), (99, "Magia muy cerca")):
+            self.assertIn(sky, _forecast_payload("2026-11-03", chance)["notification"]["body"])
+        self.assertTrue(_forecast_payload("2027-01-01", 23)["notification"]["body"].startswith("Viernes 1 de enero:"))
+
+    def test_provider_topic_and_ttl_are_bounded_at_madrid_midnight(self):
+        now = datetime.fromisoformat("2026-11-02T23:59:00+01:00").timestamp()
+        payload = _forecast_payload("2026-11-03", 23)
+        with patch("web_push.time.time", return_value=now), patch("web_push._PushTransport") as transport, \
+                patch("pywebpush.webpush", return_value=SimpleNamespace(status_code=201)) as send:
+            self.assertEqual(_post_webpush(subscription(), payload, PRIVATE, "https://oficinacastori.es"), 201)
+            self.assertEqual(send.call_args.kwargs["ttl"], 60)
+            self.assertEqual(send.call_args.kwargs["headers"]["Topic"], "castori-vaca-forecast-2026-11-03")
+            transport.return_value.close.assert_called_once()
+        with patch("web_push.time.time", return_value=now + 60), patch("pywebpush.webpush") as send:
+            with self.assertRaises(WebPushError):
+                _post_webpush(subscription(), payload, PRIVATE, "https://oficinacastori.es")
+            send.assert_not_called()
 
 
 if __name__ == "__main__":

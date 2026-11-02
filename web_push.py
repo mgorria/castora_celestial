@@ -7,6 +7,8 @@ replayed. This intentionally provides at-most-once attempts, not guaranteed
 delivery. Endpoint capabilities and encryption keys never enter log messages.
 An optional, expiring WEB_PUSH_TEST_REQUEST_ID order follows the same durable
 reservation rule, independently of message queues and read cursors.
+WEB_PUSH_FORECAST_REQUEST_ID separately authorizes one tomorrow forecast for
+Sandra's single valid Apple subscription, expiring no later than Madrid midnight.
 """
 
 import asyncio
@@ -20,7 +22,9 @@ import math
 import os
 import re
 import time
+from datetime import date, datetime, time as day_time, timedelta
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo
 
 import unread_notifications as unread
 
@@ -42,6 +46,8 @@ TEST_BODY = "Esta es una notificación de prueba de Oficina Castori."
 _EXACT_HOSTS = frozenset(("fcm.googleapis.com", "updates.push.services.mozilla.com"))
 _DOMAIN_LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
 _TEST_REQUEST_ID = re.compile(r"[A-Za-z0-9_-]{8,64}\Z")
+_MADRID = ZoneInfo("Europe/Madrid")
+_FORECAST_URL = "https://oficinacastori.es/castori/#inicio"
 
 
 class WebPushError(RuntimeError):
@@ -77,6 +83,52 @@ def _test_receipts(state):
     if not isinstance(state.get("test_receipts"), dict):
         state["test_receipts"] = {}
     return state["test_receipts"]
+
+
+def _forecast_request(request_id, expires_at, forecast_date, chance):
+    order = _test_request(request_id, expires_at)
+    if order is None or not isinstance(forecast_date, str):
+        return None
+    try:
+        parsed = date.fromisoformat(forecast_date)
+        if parsed.isoformat() != forecast_date:
+            return None
+    except ValueError:
+        return None
+    if type(chance) is str and re.fullmatch(r"[1-9][0-9]?", chance):
+        chance = int(chance)
+    if type(chance) is not int or not 1 <= chance <= 99:
+        return None
+    return (*order, forecast_date, chance)
+
+
+def _forecast_receipts(state):
+    if not isinstance(state.get("forecast_receipts"), dict):
+        state["forecast_receipts"] = {}
+    return state["forecast_receipts"]
+
+
+def _forecast_payload(forecast_date, chance):
+    target = date.fromisoformat(forecast_date)
+    weekdays = ("Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo")
+    months = ("enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto",
+              "septiembre", "octubre", "noviembre", "diciembre")
+    sky = ("Bruma en el establo" if chance < 30 else "Cascabeles lejanos" if chance < 50
+           else "Huellas en la nieve" if chance < 70 else "Magia muy cerca")
+    body = (f"{weekdays[target.weekday()]} {target.day} de {months[target.month - 1]}: "
+            f"{chance} % de probabilidad de visita. {sky}. La Vaca aún guarda sus sorpresas.")
+    return {"web_push": 8030, "mutable": False, "notification": {
+        "title": "Parte vacunológico de mañana", "body": body, "navigate": _FORECAST_URL,
+        "silent": False, "tag": "castori-vaca-forecast-" + forecast_date},
+        "kind": "vaca-forecast", "date": forecast_date, "chance": chance}
+
+
+def _log_forecast(request_id, receipt):
+    # Only bounded operator metadata; never subscription URLs, keys or payloads.
+    logger.log(logging.WARNING if receipt["status"] == "uncertain" else logging.INFO,
+               "Web Push forecast request=%s status=%s date=%s chance=%s apple_devices=%s http_status=%s reason=%s",
+               request_id, receipt["status"], receipt.get("date"), receipt.get("chance"),
+               receipt.get("apple_devices", 0), receipt.get("http_status"), receipt.get("reason"))
 
 
 def _prune_test_receipts(receipts, keep):
@@ -231,6 +283,15 @@ def _post_webpush(subscription, payload, private_key, subject):
 
     # Parse the key explicitly; never let a configured string be treated as a
     # filesystem path by the library. No key is generated at runtime.
+    ttl = PUSH_TTL
+    topic = TEST_TAG if payload.get("kind") == "test" else TAG
+    if payload.get("kind") == "vaca-forecast":
+        target = date.fromisoformat(payload["date"])
+        deadline = datetime.combine(target, day_time.min, _MADRID).timestamp()
+        ttl = min(PUSH_TTL, int(deadline - time.time()))
+        if ttl < 1:
+            raise WebPushError("forecast_expired")
+        topic = "castori-vaca-forecast-" + target.isoformat()
     vapid = Vapid.from_string(private_key)
     transport = _PushTransport(subscription["endpoint"])
     try:
@@ -238,8 +299,8 @@ def _post_webpush(subscription, payload, private_key, subject):
             subscription_info={"endpoint": subscription["endpoint"], "keys": subscription["keys"]},
             data=json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
             vapid_private_key=vapid, vapid_claims={"sub": subject},
-            content_encoding="aes128gcm", timeout=NETWORK_TIMEOUT, ttl=PUSH_TTL,
-            headers={"Urgency": "normal", "Topic": TEST_TAG if payload.get("kind") == "test" else TAG}, requests_session=transport, verbose=False,
+            content_encoding="aes128gcm", timeout=NETWORK_TIMEOUT, ttl=ttl,
+            headers={"Urgency": "normal", "Topic": topic}, requests_session=transport, verbose=False,
         )
         return getattr(response, "status_code", None)
     finally:
@@ -260,7 +321,8 @@ def _http_status(value):
 class WebPushService:
     def __init__(self, load_data, save_data, resolve_actor, *, send=None, clock=time.time,
                  debounce_seconds=2.5, private_key=None, public_key=None, subject=None,
-                 test_request_id=None, test_expires_at=None):
+                 test_request_id=None, test_expires_at=None, forecast_request_id=None,
+                 forecast_expires_at=None, forecast_date=None, forecast_chance=None):
         self.load, self.save, self.resolve_actor = load_data, save_data, resolve_actor
         self.clock, self.send = clock, send
         self.debounce_seconds = min(max(float(debounce_seconds), 0), MAX_DEBOUNCE_SECONDS)
@@ -270,6 +332,12 @@ class WebPushService:
         self.test_request = _test_request(
             test_request_id if test_request_id is not None else os.getenv("WEB_PUSH_TEST_REQUEST_ID", ""),
             test_expires_at if test_expires_at is not None else os.getenv("WEB_PUSH_TEST_EXPIRES_AT", ""))
+        self.forecast_request = _forecast_request(
+            forecast_request_id if forecast_request_id is not None else os.getenv("WEB_PUSH_FORECAST_REQUEST_ID", ""),
+            forecast_expires_at if forecast_expires_at is not None else os.getenv("WEB_PUSH_FORECAST_EXPIRES_AT", ""),
+            forecast_date if forecast_date is not None else os.getenv("WEB_PUSH_FORECAST_DATE", ""),
+            forecast_chance if forecast_chance is not None else os.getenv("WEB_PUSH_FORECAST_CHANCE", ""))
+        self._forecast_unavailable_logged = False
         self.lock = asyncio.Lock()
 
     def _allowed(self, chat_id):
@@ -493,6 +561,111 @@ class WebPushService:
         logger.log(logging.WARNING if outcome == "uncertain" else logging.INFO, "Web Push test %s", outcome)
         result["test_status"] = outcome
 
+    def _forecast_unavailable(self, result, reason):
+        if self.forecast_request is None:
+            return
+        result["forecast_status"] = "unavailable"
+        if not self._forecast_unavailable_logged:
+            request_id, _, forecast_date, chance = self.forecast_request
+            _log_forecast(request_id, {"status": "unavailable", "date": forecast_date,
+                                       "chance": chance, "reason": reason})
+            self._forecast_unavailable_logged = True
+
+    async def _tick_forecast(self, result):
+        """One tomorrow forecast, only for Sandra's single unambiguous Apple device."""
+        if self.forecast_request is None:
+            return
+        request_id, expires_at, forecast_date, chance = self.forecast_request
+        try:
+            chat_id = self.resolve_actor("sandra")
+        except Exception:
+            chat_id = None
+        if not self._allowed(chat_id):
+            self._forecast_unavailable(result, "identity")
+            return
+        current = self._read()
+        state = _state(current)
+        receipts = _forecast_receipts(state)
+        previous = receipts.get(request_id)
+        if previous is not None and (not isinstance(previous, dict)
+                                     or previous.get("status") not in ("waiting", "ambiguous")):
+            if isinstance(previous, dict) and previous.get("status") == "sending":
+                previous.update(status="uncertain", finished_at=self.clock())
+                self._save(current)
+                _log_forecast(request_id, previous)
+            result["forecast_status"] = previous.get("status", "uncertain") if isinstance(previous, dict) else "uncertain"
+            return
+        now = self.clock()
+        tomorrow = datetime.fromtimestamp(now, _MADRID).date() + timedelta(days=1)
+        deadline = datetime.combine(tomorrow, day_time.min, _MADRID).timestamp()
+        expires_at = min(expires_at, now + 86400, deadline)
+        if previous and _number(previous.get("expires_at")):
+            expires_at = min(expires_at, previous["expires_at"])
+        receipt = {**(previous or {}), "created_at": previous.get("created_at", now) if previous else now,
+                   "expires_at": expires_at, "date": forecast_date, "chance": chance}
+
+        def record(status):
+            receipt["status"] = status
+            result["forecast_status"] = status
+            if receipt != previous:
+                receipts[request_id] = receipt
+                _prune_test_receipts(receipts, request_id)
+                self._save(current)
+            if previous is None or previous.get("status") != status:
+                _log_forecast(request_id, receipt)
+
+        # Reusing an identifier may shorten its lifetime, but cannot change its content.
+        if previous and (previous.get("date") != forecast_date or previous.get("chance") != chance):
+            receipt.update(date=previous.get("date"), chance=previous.get("chance"))
+            record("uncertain")
+            return
+        if expires_at <= now or forecast_date != tomorrow.isoformat():
+            record("expired")
+            return
+        candidates = []
+        for identity, device in state["devices"].get(str(chat_id), {}).items():
+            try:
+                candidate = validate_subscription(device.get("subscription"), now)
+            except (WebPushError, AttributeError):
+                continue
+            host = urlsplit(candidate["endpoint"]).hostname
+            if host == "push.apple.com" or host.endswith(".push.apple.com"):
+                candidates.append((identity, device, candidate))
+        receipt["apple_devices"] = len(candidates)
+        if len(candidates) != 1:
+            record("waiting" if not candidates else "ambiguous")
+            return
+        identity, device, subscription = candidates[0]
+        generation = device.get("generation")
+        receipt.update(attempted_at=now, device_id=identity)
+        record("sending")  # Durable reservation before the first await; never retry an uncertain attempt.
+        outcome, http_status = "uncertain", None
+        try:
+            response = await asyncio.wait_for(
+                self._deliver(subscription, _forecast_payload(forecast_date, chance)), SEND_TIMEOUT_SECONDS)
+            http_status = _http_status(response)
+            if http_status is not None and 200 <= http_status < 300:
+                outcome = "sent"
+        except asyncio.CancelledError:
+            _log_forecast(request_id, {**receipt, "status": "uncertain"})
+            raise
+        except Exception as exc:
+            http_status = _http_status(exc)
+        if http_status in (404, 410):
+            outcome = "expired"
+        latest = self._read()
+        latest_state = _state(latest)
+        latest_receipt = _forecast_receipts(latest_state).get(request_id)
+        if isinstance(latest_receipt, dict) and latest_receipt.get("status") == "sending":
+            latest_receipt.update(status=outcome, finished_at=self.clock(), http_status=http_status)
+            latest_devices = latest_state["devices"].get(str(chat_id), {})
+            latest_device = latest_devices.get(identity)
+            if outcome == "expired" and latest_device and latest_device.get("generation") == generation:
+                del latest_devices[identity]
+            self._save(latest)
+        _log_forecast(request_id, {**receipt, "status": outcome, "http_status": http_status})
+        result["forecast_status"] = outcome
+
     def _skip_disabled_backlog(self):
         data = self._read()
         if STORE_KEY not in data:
@@ -518,6 +691,7 @@ class WebPushService:
         if self.lock.locked():
             return {**result, "status": "busy"}
         if not self._configured():
+            self._forecast_unavailable(result, "configuration")
             try:
                 self._skip_disabled_backlog()
             except WebPushError:
@@ -526,6 +700,7 @@ class WebPushService:
         async with self.lock:
             try:
                 await self._tick_test(result)
+                await self._tick_forecast(result)
                 snapshot = self._read()
                 work = list(snapshot.get(STORE_KEY, {}).get("pending", {}).items())
                 for key, batch in work:
