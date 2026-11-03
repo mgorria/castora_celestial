@@ -81,13 +81,16 @@
       <svg class="decoration-review-sprig" viewBox="0 0 180 130" fill="none" aria-hidden="true"><g stroke="currentColor" stroke-linecap="round"><path d="M180 8C131 23 89 56 22 113" stroke-width="2"/><path d="m145 21-32-9m30 10-11 32m-12-18-34-8m33 9-9 33m-15-20-34-6m33 8-7 34m-15-19-32-5m30 7-4 32m-15-18-26-2m25 4-3 25"/></g><g fill="#d87c76"><circle cx="96" cy="46" r="4"/><circle cx="105" cy="48" r="3"/><circle cx="99" cy="55" r="3.5"/></g></svg>
       <div class="decoration-review-main">
         <div class="decoration-review-intro">
-          <img class="decoration-review-portrait" src="assets/vaca-v2.png" alt="" width="88" height="88">
+          <div class="decoration-review-juror" aria-hidden="true">
+            <span class="decoration-review-thought"><span>?</span><span>?</span><span>?</span></span>
+            <img class="decoration-review-portrait" src="assets/vaca-v2.png" alt="" width="88" height="104">
+          </div>
           <div class="decoration-review-copy"><p class="decoration-review-kicker">EL JURADO DE CASA TOSICO</p><h2 id="decoration-review-title">${heading(value.closed)}</h2><p data-decoration-review-copy>${copy(value.closed)}</p></div>
         </div>
         <div class="decoration-review-rating">
           <div class="decoration-review-rating-heading"><span>Termómetro navideño</span><strong aria-label="Puntuación pendiente">— <small>/ 10</small></strong></div>
-          <div class="decoration-review-thermometer" aria-hidden="true"><span class="decoration-review-mercury"></span><i></i><i></i><i></i></div>
-          <p class="decoration-review-rating-note">Puntuación pendiente de la Vaca</p>
+          <div class="decoration-review-thermometer" aria-hidden="true"><span class="decoration-review-mercury"></span><span class="decoration-review-bulb"></span></div>
+          <p class="decoration-review-rating-note"><span class="decoration-review-deliberation">Deliberando<span class="decoration-review-thinking-dots" aria-hidden="true"><i></i><i></i><i></i></span></span><span>Puntuación pendiente de la Vaca</span></p>
         </div>
       </div>
       <div class="decoration-review-deadline"><p class="decoration-review-date">CIERRE DE LA EVALUACIÓN<time datetime="2026-12-01T00:00:00+01:00">1 de diciembre</time></p>
