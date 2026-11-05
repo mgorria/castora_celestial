@@ -60,7 +60,7 @@ no cambian datos, instrucciones necesarias de seguridad ni formatos funcionales.
 _FALLBACKS = {
     "castori": "Patita, se me han mezclado dos papeles en la ventanilla. Déjame tu recadito otra vez y lo miramos con calma.",
     "mimosuga": "Se me ha escapado el hilo, nietecita. Acércame otra vez tus palabras; esta abuela quiere escucharte bien.",
-    "vaca": "Muuu… se me ha enredado el lápiz entre las pezuñas, patita. Cuéntamelo otra vez, que quiero leerte con las orejas bien atentas.",
+    "vaca": "¡Muuu! He intentado pasar por debajo de una cinta y me he llevado el cuaderno por delante. Repítemelo, que esta vez freno las pezuñas.",
     "salchicher": "Se me ha torcido una página del cuaderno. Cuéntame de nuevo qué les pasa a esas plumitas; quiero entenderte bien.",
     "corte": "La Corte hace una pequeña pausa para ordenar sus plumas. Repite tu alegación con calma; queremos escucharla como merece.",
     "dulcimiel": "Se me ha quedado una gotita de horchata en el cuaderno. Cuéntamelo otra vez, patita, que te escucho.",

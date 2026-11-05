@@ -12,7 +12,7 @@
     const entry = snapshot.entries.find(item => item.id === selected) || snapshot.entries.at(-1);
     if (!entry) return '';
     const index = snapshot.entries.indexOf(entry);
-    return `<div class="mystery-heading"><div><p class="mystery-kicker">CORRESPONDENCIA RESERVADA · CASA TOSICO</p><h2 id="mystery-title">El gabinete de los siete sellos</h2><p class="mystery-intro">La Vaca custodia algo que aún no tiene nombre. Cada sobre guarda una parte de la respuesta.</p></div><span class="mystery-emblem" aria-hidden="true">✧<small>VII</small></span></div>
+    return `<div class="mystery-heading"><div><p class="mystery-kicker">CORRESPONDENCIA RESERVADA · CASA TOSICO</p><h2 id="mystery-title">El gabinete de los siete sellos</h2><p class="mystery-intro">La Vaca ha escondido algo y se le escapa un MUUU cada vez que preguntas. Ha dejado siete sobres. Dice que no son pistas. Miente fatal.</p></div><span class="mystery-emblem" aria-hidden="true">✧<small>VII</small></span></div>
       <div class="mystery-body"><article class="mystery-letter" aria-labelledby="mystery-clue-title"><p class="mystery-letter-number">SOBRE ${numerals[index]} <span>·</span> ${escape(date(entry.release_at))}</p><h3 id="mystery-clue-title">${escape(entry.title)}</h3><div class="mystery-lines">${entry.lines.map(line => `<p>${escape(line) || '&nbsp;'}</p>`).join('')}</div><details class="mystery-hint"><summary>Mirar el reverso del sobre</summary><p>${escape(entry.hint)}</p></details></article>
       <aside class="mystery-dossier" aria-label="Los siete sobres"><p class="mystery-dossier-label">EL ARCHIVO DE LA VACA</p><div class="mystery-seals">${numerals.map((roman, i) => {
         const item = snapshot.entries[i];

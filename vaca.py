@@ -16,24 +16,24 @@ MAX_WISHES = 60
 MAX_PENDING_MESSAGES = 12
 MAX_PENDING_CHARS = 16000
 UNAVAILABLE_TEXT = (
-    "Patita, se me ha enredado el lápiz entre las pezuñas. No he cambiado tu lista. "
+    "¡Muuu! Se me ha ido el cuaderno derrapando. No he cambiado tu lista. "
     "Puedes seguir apuntando deseos con /pedir regalo y consultarlos con /lista."
 )
 WELCOME = (
-    "¡Patita! 🐄✨\n\n"
-    "¡Me hace mucha ilusión tenerte por aquí! Soy tu Vaca Mágica, la Mugidora, "
-    "y tengo un cuaderno de ilusiones con tu nombre.\n\n"
-    "Cuéntame qué regalos te harían sonreír y los iremos apuntando juntas. También "
-    "puede escapárseme alguna pista… pero mis visitas son un secreto de pezuña.\n\n"
-    "Ponte cómoda, patita: aquí hay mucho cariño y un rinconcito de magia para ti."
+    "¡MUUU! ¿Por aquí se sale? 🐄✨\n\n"
+    "Soy la Vaca Mágica, la Mugidora. Me dicen que me esté quieta en el establo, "
+    "pero es que fuera hay muchas cosas que olisquear… y regalos que esconder.\n\n"
+    "Tengo un cuaderno de ilusiones para tus deseos. Cuéntame lo que te gusta; "
+    "yo intentaré sujetar el lápiz sin agujerear la página.\n\n"
+    "Y si oyes cascabeles, disimula. Mis escapadas son un secreto de pezuña."
 )
 WELCOME_BACK = (
-    "¡Patita, qué alegría verte otra vez! 🐄✨ Tu cuaderno de ilusiones sigue aquí, "
-    "entre mis pezuñas. Cuéntame, que tengo muchas ganas de leerte."
+    "¡Muuu, has vuelto! 🐄✨ Yo estaba quietísima. Esa purpurina ya estaba ahí. "
+    "Tu cuaderno sigue a salvo; ¿qué se cuenta por ese lado del establo?"
 )
 HELP = (
-    "Soy tu Vaca Mágica, patita. 🐄✨ Puedes contarme tus ilusiones y te ayudaré a "
-    "guardarlas en nuestro cuaderno. ¡Me hace mucha ilusión leerte!\n\n"
+    "¡Muuu! Soy la Vaca Mágica. Trae tus deseos, que he encontrado el cuaderno "
+    "debajo de una montaña de lazos. Por supuesto, yo no he sido. 🐄✨\n\n"
     "/lista — ver tus deseos\n"
     "/pedir regalo — apuntar un deseo directamente (puedes añadir un enlace)\n"
     "/quitar w1 — quitar un deseo por su identificador\n"
@@ -180,7 +180,7 @@ class Vaca:
         wishes = (self.session(chat_id) or {}).get("wishes", [])
         heading = "📒 Cuaderno de ilusiones de Patita"
         if not wishes:
-            return heading + "\n\nTodavía no hay deseos apuntados. Cuéntame qué te hace ilusión, patita."
+            return heading + "\n\n¡Muuu! Ni un deseo todavía. Estas páginas necesitan algo que investigar con el hocico."
         lines = [heading, ""]
         for wish in wishes:
             lines.append(f"{wish['id']}. {'⭐ ' if wish.get('favorite') else ''}{wish['name']}")
@@ -221,7 +221,7 @@ class Vaca:
         if command == "/olvidar":
             self._invalidate(session)
             session["history"] = []
-            reply = "He borrado nuestra conversación de mi memoria, patita. Tu lista sigue guardada."
+            reply = "Conversación borrada, muuu. Tu lista sigue guardada; esa no se ha escapado."
         elif command == "/pedir":
             if not argument:
                 await self._deliver(chat_id, "Dime el deseo después de /pedir, patita. Por ejemplo: /pedir zapatillas rosas talla 38")
@@ -243,7 +243,7 @@ class Vaca:
                 return
             wish = self._new_wish(session, name=name, url=url)
             self._invalidate(session)
-            reply = f"Apuntado en tu cuaderno, patita: {wish['id']}. {wish['name']}"
+            reply = f"¡Muuu, apuntado! {wish['id']}. {wish['name']}"
             changed = True
         elif command in {"/quitar", "/favorito"}:
             wish = next((w for w in session["wishes"] if w["id"] == argument.lower()), None)
@@ -292,7 +292,7 @@ class Vaca:
             await self._command(chat_id, command.split("@", 1)[0].lower(), argument.strip())
             return
         if not self.enabled():
-            await self._deliver(chat_id, "Estoy descansando un poquito, patita. Tu cuaderno sigue abierto con /lista, /pedir, /quitar y /favorito.")
+            await self._deliver(chat_id, "Pausa de pezuñas, muuu. Tu cuaderno sigue abierto con /lista, /pedir, /quitar y /favorito.")
             return
         session = self.session(chat_id) or self.new_session()
         pending_texts = session.get("pending_texts", [])

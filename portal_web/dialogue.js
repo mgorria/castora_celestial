@@ -25,9 +25,9 @@
     },
     vaca: {
       name: 'La Vaca Mágica',
-      tagline: 'Profecías y secretos a medias',
-      greeting: '¡Tolón, tolón, Patita! Se me ha escapado un poquito de purpurina iridiscente al encender las luces de Navidad. Aquí caben los deseos grandes, los pequeños y los que todavía no tienen nombre.',
-      suggestions: ['¿Me susurras una profecía?', '¿Qué dice tu campanilla?', 'Quiero guardar un deseo'],
+      tagline: 'Fugas, regalos y algún que otro MUUU',
+      greeting: '¡MUUU, Patita! Si preguntan, llevo toda la tarde en el establo. Ese rastro de purpurina no demuestra NADA. Tengo un plan, dos pezuñas enredadas en un lazo y una campanilla incapaz de guardar secretos. ¿Te apuntas al lío?',
+      suggestions: ['¿Qué secreto estás tramando?', '¿Qué dice tu campanilla?', 'Quiero guardar un deseo'],
       color: '#A16C74'
     },
     dulcimiel: {
@@ -54,9 +54,9 @@
     },
     {
       id: 'el-deseo-sin-lazo',
-      title: 'El deseo que no necesitaba un lazo',
+      title: 'La fuga del lazo interminable',
       eyebrow: 'Una historia de La Vaca Mágica',
-      body: 'La Vaca Mágica estaba colocando pequeñas estrellas de papel cuando Patita apareció con un sobre sin dirección. Dentro había un deseo, escrito con letra muy pequeña.\n\n—No sé si este deseo sirve para Navidad —dijo Patita—. No se puede envolver.\n\nLa Vaca Mágica acercó una luz cálida al sobre.\n\n—Muchos de mis favoritos no caben en una caja.\n\nPatita había escrito: «Me gustaría tener una tarde tranquila con las personas que quiero». La vaca no prometió hacer aparecer aquella tarde. En cambio, puso una estrella junto al sobre y preguntó cómo sería.\n\nEntre las dos imaginaron una mesa algo desigual, tazas de distintos colores y una canción que alguien tarareaba sin conocer la letra. En su tarde inventada nadie tenía que decir nada extraordinario. Bastaba con acercar una silla.\n\nDespués hicieron una pequeña invitación de papel: «Cuando podamos, merendamos». Patita la guardó para decidir a quién enseñársela.\n\nLa Vaca Mágica volvió a colgar sus estrellas. Una quedó torcida y las dos decidieron dejarla así.\n\nEl deseo seguía siendo un deseo, con su futuro abierto. Pero ahora tenía una forma, una mesa y una primera frase. Y aquella noche, bajo la estrella torcida, eso ya parecía una cosa preciosa.'
+      body: 'La Vaca Mágica había escrito «NO ESTOY» en la puerta del establo. Luego se dio cuenta de que aquello era una pista bastante mala y lo cambió por «ESTOY MUUUCHO».\n\nLlevaba un regalo de cuento bajo la capa roja y un carrete de lazo entre los dientes. Su plan era sencillo: salir sin que sonara la campanilla, cruzar tres nubes y sorprender a Patita.\n\n—Silencio absoluto —ordenó.\n\n—Tolón —respondió la campanilla.\n\nLa Vaca saltó la primera nube. El lazo se enganchó en el picaporte. Saltó la segunda. El carrete empezó a girar. Al llegar a la tercera había envuelto el establo, dos farolas y a un reno que solo había salido a mirar.\n\n—¡MUUU! Decoración espontánea. Todo previsto.\n\nPatita apareció al otro extremo del lazo.\n\n—¿Te has escapado?\n\n—He ampliado el establo hasta aquí. Es distinto.\n\nLa Vaca intentó esconder el paquete detrás de una pezuña. No cupo. Probó detrás de la otra. Tampoco. Así que dio una vuelta sobre sí misma, hizo una reverencia y acabó sentada dentro de un lazo gigantesco.\n\nPatita desató el nudo entre carcajadas. Dentro del paquete había una campanilla diminuta con un cartel: «Para avisarme cuando se te ocurra otra trastada».\n\n—Pero entonces te oirán venir.\n\nLa Vaca abrió muchísimo los ojos.\n\n—Muuu. Necesitamos un plan peor.\n\nY las dos se fueron a buscar al reno, que seguía esperando que alguien lo desenvolviera.'
     }
   ];
 
@@ -89,13 +89,13 @@
       default: ['Lo anoto en el cuaderno de los patos, Patita. ¿Lo notas desde hace un ratito o lleva más tiempo acompañándote?', 'Me ajusto las gafitas, Patita. Vamos con calma y una pregunta cada vez: ¿cómo llevas hoy las alas y las reservas de mojo de Oso?']
     },
     vaca: {
-      hello: ['¡Tolón, tolón, Patita! Un poquito de purpurina iridiscente y ya tenemos saludo. Hay una estrella de papel esperando un nombre bonito. ¿Cómo llamamos a tu día?', 'Hola, Patita. Las lucecitas están encendidas en nuestro cuento. Aquí también celebramos las alegrías de cualquier martes.'],
-      tired: ['Hoy puede ser una Navidad pequeñita, Patita: una sola luz en una ventana y ningún gran preparativo. ¿Qué escena tranquila te gustaría imaginar?', 'Ven al rincón de las luces suaves, Patita. Nuestro cuento de hoy puede caminar muy despacio. ¿Te cuento el del deseo que no necesitaba un lazo?'],
-      sad: ['Te acompaño un ratito con palabras, Patita. Las lucecitas también pueden estar encendidas en un día triste. ¿Quieres contarme qué te pasa?', 'No todos los días suenan a cascabeles, Patita. Aquí hay sitio para cómo te sientes hoy. Podemos hablar o imaginar una escena tranquila.'],
-      thanks: ['Muuuuchas gracias a ti, Patita. Si esta charla fuera una estrella de papel, le pondríamos un hilo dorado.'],
-      gift: ['Podemos imaginar un deseo, Patita. No puedo prometer regalos ni hacer que se cumpla, pero sí ayudarte a ponerlo en palabras. ¿Qué te gustaría escribir?', 'Un deseo no siempre cabe en una caja, Patita. Puede ser una tarde compartida o una conversación pendiente. ¿Qué forma tiene el tuyo?'],
-      everyday: ['Imaginemos una Navidad de bolsillo, Patita: una estrella, una mesa y alguien a quien acercar una silla. ¿Qué añadirías tú?', 'En nuestro cuento las luces siguen encendidas todo el año. ¿Qué detalle pequeño de hoy te gustaría convertir en una estrella de papel?'],
-      default: ['Te escucho, Patita. Podemos darle palabras a un deseo, imaginar una Navidad bonita o abrir un cuento. ¿Por dónde seguimos?', 'Dejamos una lucecita junto a esa idea, Patita. ¿Te apetece contarme algo más sobre ella?']
+      hello: ['¡MUUU! Cierra la puerta, Patita, que mi campanilla va contando por ahí que me he escapado. Técnicamente solo estoy en una inspección de posibles travesuras. ¿Qué tramamos?', '¡Patita! He intentado entrar de puntillas. Tengo pezuñas. Ha salido regular. ¿Me guardas el secreto o negociamos una pista?'],
+      tired: ['Muuu, hoy vienes sin batería. Cancelo la estampida y me siento; si cruje algo, es el taburete, no tú. ¿Prefieres contarme qué te ha agotado o escuchar mi fuga más desastrosa?', 'Vale, Patita: hoy corro yo y tú diriges desde el sofá. O no corre nadie. ¿Te apetece una historia de mi campanilla chivata?'],
+      sad: ['Ay, Patita. Guardo la campanilla, que ahora toca escucharte. Muuu bajito. ¿Qué ha pasado?', 'Muuu… te leo, Patita. No voy a intentar arreglarlo lanzando confeti. Cuéntame lo que quieras; la trastada puede esperar.'],
+      thanks: ['¡Muuu, trato hecho! Si alguien pregunta por el lío, fue una corriente de aire con pezuñas. Me ha encantado conspirar contigo, Patita.'],
+      gift: ['¡Muuu, palabra peligrosa: REGALO! Se me ponen las pezuñas en posición de fuga. Dime qué te hace ilusión y lo apuntamos; este cuaderno guarda deseos, no confirma entregas.', '¡A ver ese deseo, Patita! Mi lápiz ya está trotando por la mesa. Podemos imaginar un plan disparatado para envolverlo, sin prometer que vaya a llegar.'],
+      everyday: ['Mi informe de hoy: una fuga frustrada, dos cascabeles sospechosos y cero arrepentimiento. Muuu. ¿Qué ha pasado por tu lado?', 'Patita, necesito una coartada de cuento. ¿Una vaca cubierta de purpurina puede decir que estaba regando las nubes? ¿O suena muuuuy sospechoso?'],
+      default: ['Muuu, espera, que dejo el lazo: me interesa eso. ¿Qué pasó después, Patita?', 'Tengo las orejas levantadas, Patita. Sigue, que por una vez el ruido no lo estoy haciendo yo.']
     },
     dulcimiel: {
       hello: ['Hola, Patita. Me acomodo el pañuelo turquesa y abro mi cuaderno. Mi prima, la Vaca Mágica, dice que las mejores aventuras empiezan con una idea pequeña. ¿Inventamos una?', 'Qué gusto verte, Patita. Soy una vaca exploradora de sabores de cuento: hoy podemos imaginar uno tan tranquilo como una tarde junto a la ventana.'],
@@ -281,8 +281,8 @@
 
     if (characterId === 'vaca' && /\b(profecia|profecias|pista|pistas|campanilla|venir|vienes|llegas|llegada|visita|secreto)\b/.test(input)) {
       const prophecies = [
-        'Muuu… mi campanilla ha soñado que una estrella se enganchaba en un lazo y se negaba a soltarlo. «Ese lazo guarda algo», decía. Y yo, que soy muuuuy discreta, he cerrado el cuaderno antes de que leyera tu nombre. ¿Qué crees que habrá visto? ✧\n\nProfecía de ejemplo del boceto; no anuncia una visita real.',
-        'Tolón… Patita, en esta profecía de ejemplo hay un paquetito tan impaciente que se ha puesto los zapatos del revés. No te digo más, que luego mi campanilla me llama bocazas. ¿Tú crees que sabe esperar? ✧\n\nEs una escena del boceto, sin fecha ni entrega real.'
+        '¡Muuu! Mi campanilla iba a chivarse, así que le he atado un lazo. Ahora suena igual, pero va elegante. La pista: algo que se abre guarda algo que se cuenta… ¡Eh, tú no tires del lazo! ✧\n\nProfecía de ejemplo del boceto; no anuncia una visita real.',
+        '¡Muuu, Patita! En esta profecía de ejemplo hay un paquetito fugado. Yo solo le enseñé la puerta. Y le até los zapatos. Y le dibujé un mapa. No veo por qué me miráis así. ¿Qué esconderá? ✧\n\nEs una escena del boceto, sin fecha ni entrega real.'
       ];
       return prophecies[turns % prophecies.length];
     }

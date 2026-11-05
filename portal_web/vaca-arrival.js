@@ -7,15 +7,15 @@
   const SEEN_KEY = 'castori.vaca-arrival.2026-11.v1';
   const DURATION = 26000;
   const news = [
-    { title: 'La Vaca ha abandonado la Castora Celestial.', text: 'Mimosuga confirma: falta una vaca y sobra purpurina.', aside: 'Comunicado urgente para Casa Tosico.' },
-    { title: 'Autopista astral abierta', text: 'Peaje pagado con tres campanillas. Tráfico de renos desviado. Destino: Casa Tosico.', aside: 'Velocidad autorizada: completamente absurda.' },
-    { title: '¡Llegada inminente!', text: 'Despejad balcones. Sujetad macetas. Dejad un poquito de sitio para lo imposible.', aside: 'Patita: los animales mágicos hemos hablado.' }
+    { title: 'La Vaca ha abandonado la Castora Celestial.', text: 'Mimosuga confirma: falta una vaca y sobra purpurina.', aside: '«¡MUUU! No me he escapado. He salido sin avisar.»' },
+    { title: 'Autopista astral abierta', text: 'Peaje pagado con tres campanillas. Tráfico de renos desviado. Destino: Casa Tosico.', aside: '«¡Muuu! El peaje se ha quedado con mi lazo. ¡Era de regalo!»' },
+    { title: '¡Llegada inminente!', text: 'Despejad balcones. Sujetad macetas. Dejad un poquito de sitio para lo imposible.', aside: '«¡Patita, haz sitio! Lo del lazo en el cuerno estaba planeado. MUUU.»' }
   ];
   const acts = [
-    { label: '00 · PROTOCOLO DE LLEGADA', title: '¡ALERTA VACUNA!', text: 'La Vaca ha activado el protocolo de llegada.', aside: 'Patita, esto requiere toda tu atención.' },
-    { label: '01 · DESPEGUE CONFIRMADO', title: '¡LA VACA HA SALIDO!', text: 'Ha abandonado la Castora Celestial. Mimosuga confirma: falta una vaca y sobra purpurina.', aside: 'Última posición conocida: una nube que todavía está temblando.' },
-    { label: '02 · HIPERESPACIO', title: '¡AUTOPISTA ASTRAL ABIERTA!', text: 'Peaje pagado con tres campanillas. Tráfico de renos desviado. Destino: Casa Tosico.', aside: 'Velocidad autorizada: completamente absurda.' },
-    { label: '03 · APROXIMACIÓN A CASA TOSICO', title: '¡DESPEJAD LOS BALCONES!', text: 'La llegada es inminente. Sujetad macetas. Dejad sitio para lo imposible.', aside: 'Patita: los animales mágicos hemos hablado.' }
+    { label: '00 · PROTOCOLO DE LLEGADA', title: '¡ALERTA VACUNA!', text: 'La Vaca ha tocado el botón que ponía NO TOCAR.', aside: '«Muuu… ¿y si lo vuelvo a tocar?»' },
+    { label: '01 · DESPEGUE CONFIRMADO', title: '¡LA VACA HA SALIDO!', text: 'Ha abandonado la Castora Celestial. Mimosuga confirma: falta una vaca y sobra purpurina.', aside: '«No me he escapado. La puerta estaba MUUUY abierta.»' },
+    { label: '02 · HIPERESPACIO', title: '¡AUTOPISTA ASTRAL ABIERTA!', text: 'Peaje pagado con tres campanillas. Tráfico de renos desviado. Destino: Casa Tosico.', aside: '«¡Muuu! El peaje se ha quedado con mi lazo. ¡Era de regalo!»' },
+    { label: '03 · APROXIMACIÓN A CASA TOSICO', title: '¡DESPEJAD LOS BALCONES!', text: 'La llegada es inminente. Sujetad macetas. Dejad sitio para lo imposible.', aside: '«¡Patita, haz sitio! Lo del lazo en el cuerno estaba planeado. MUUU.»' }
   ];
   let active = null, seenInMemory = false;
   const now = () => root.CastoriChristmas?.now() ?? Date.now();

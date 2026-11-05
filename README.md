@@ -339,8 +339,12 @@ Fuentes para el catalogo (revisadas el 15/10/2026):
 ### Vaca Mágica
 
 La Vaca habla con Patita, guarda su lista de ilusiones y prepara mensajes para las
-visitas sorpresa de diciembre. Tiene una voz cariñosa y traviesa, con expresiones
-como «muuuuy» y «muuuucho». Apuntar un deseo nunca promete que vaya a recibirlo.
+visitas sorpresa de la temporada navideña. Es revoltosa, impulsiva y cómplice: en sus historias
+se escapa del establo para llevar regalos, arma pequeños líos y los justifica con
+un «muuu» descarado. Le entusiasman las sorpresas y habla con mugidos y palabras
+como «muuuuy» y «muuuucho», sin repetir siempre el mismo arranque. Mimosuga conserva
+la voz de abuela; la Vaca expresa su cariño jugando y tramando travesuras. Apuntar
+un deseo nunca promete que vaya a recibirlo ni anuncia una visita.
 
 En el servicio **worker**, configurar:
 
@@ -388,7 +392,7 @@ Desde el chat **privado** del propietario con Control Castori:
 /vaca_auto on
 /vaca_auto off
 /vaca_auto status
-/vaca Un abrazo de pezuñas, patita.
+/vaca ¡Muuu! Ese cascabel se ha puesto a sonar solo. Yo estaba siendo discretísima.
 /vaca_visita 15/12/2026 08:30 | un libro de ilustraciones y unos calcetines suaves
 ```
 
@@ -415,7 +419,7 @@ activarlo. La conversación de Patita no recibe los regalos ni las fechas pendie
 Para ajustar una visita, los eventos se llaman `pista1`, `pista2` y `manana`:
 
 ```text
-/vaca_texto ID pista1 | He encontrado una cinta con un secreto de pezuña.
+/vaca_texto ID pista1 | Muuu… he escondido una pista tan bien que ahora me está escondiendo ella a mí.
 /vaca_hora ID pista1 12/12/2026 19:00
 /vaca_fecha ID 20/12/2026 08:30
 /vaca_cancelar ID
