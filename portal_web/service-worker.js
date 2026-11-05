@@ -38,17 +38,22 @@ self.addEventListener('push', event => {
   if (!payload || typeof payload !== 'object') payload = {};
   const isTest = payload.kind === 'test';
   const forecast = forecastNotice(payload);
+  const notice = payload.kind === 'vaca-arrival' ? {
+    title: '🐮 Tienes un mensaje de la Vaca',
+    body: 'Patita, hay algo MUUUY importante que tienes que ver. Entra en Casa Tosico y abre el mensaje de la Vaca. ✨',
+    tag: 'castori-vaca-arrival-2026-11', url: OFFICE_PATH + '#inicio'
+  } : forecast;
   const count = pushCount(payload.unread_count);
   // Conversations retain fixed private copy. A requested forecast is built only
   // from a validated date and percentage, never from arbitrary message content.
-  const displayed = self.registration.showNotification(forecast?.title || 'Oficina Castori', {
-    body: forecast?.body || (isTest ? 'Esta es una notificación de prueba de Oficina Castori.' : 'Hay mensajes nuevos sin leer en la Oficina Castori.'),
+  const displayed = self.registration.showNotification(notice?.title || 'Oficina Castori', {
+    body: notice?.body || (isTest ? 'Esta es una notificación de prueba de Oficina Castori.' : 'Hay mensajes nuevos sin leer en la Oficina Castori.'),
     icon: OFFICE_PATH + 'assets/castori.png',
-    tag: forecast?.tag || (isTest ? 'castori-test' : 'castori-unread'),
-    data: { url: officeURL(forecast?.url || payload.url) }
+    tag: notice?.tag || (isTest ? 'castori-test' : 'castori-unread'),
+    data: { url: officeURL(notice?.url || payload.url) }
   });
   // Always display, including when a window is focused. Apple disallows silent pushes.
-  event.waitUntil(isTest || forecast ? displayed : Promise.all([displayed, updateBadge(count)]));
+  event.waitUntil(isTest || notice ? displayed : Promise.all([displayed, updateBadge(count)]));
 });
 self.addEventListener('notificationclick', event => {
   event.notification.close();

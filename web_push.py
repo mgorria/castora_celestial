@@ -9,6 +9,8 @@ An optional, expiring WEB_PUSH_TEST_REQUEST_ID order follows the same durable
 reservation rule, independently of message queues and read cursors.
 WEB_PUSH_FORECAST_REQUEST_ID separately authorizes one tomorrow forecast for
 Sandra's single valid Apple subscription, expiring no later than Madrid midnight.
+WEB_PUSH_ARRIVAL_REQUEST_ID separately authorizes the fixed arrival-message
+notice, with its own expiring receipt and the same single-Apple-device rule.
 """
 
 import asyncio
@@ -43,6 +45,7 @@ BODY = "Hay mensajes nuevos en Oficina Castori"
 TAG = "castori-new-messages"
 TEST_TAG = "castori-test"
 TEST_BODY = "Esta es una notificación de prueba de Oficina Castori."
+ARRIVAL_TAG = "castori-vaca-arrival-2026-11"
 _EXACT_HOSTS = frozenset(("fcm.googleapis.com", "updates.push.services.mozilla.com"))
 _DOMAIN_LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
 _TEST_REQUEST_ID = re.compile(r"[A-Za-z0-9_-]{8,64}\Z")
@@ -129,6 +132,27 @@ def _log_forecast(request_id, receipt):
                "Web Push forecast request=%s status=%s date=%s chance=%s apple_devices=%s http_status=%s reason=%s",
                request_id, receipt["status"], receipt.get("date"), receipt.get("chance"),
                receipt.get("apple_devices", 0), receipt.get("http_status"), receipt.get("reason"))
+
+
+def _arrival_receipts(state):
+    if not isinstance(state.get("arrival_receipts"), dict):
+        state["arrival_receipts"] = {}
+    return state["arrival_receipts"]
+
+
+def _arrival_payload():
+    return {"web_push": 8030, "mutable": False, "notification": {
+        "title": "🐮 Tienes un mensaje de la Vaca",
+        "body": "Patita, hay algo MUUUY importante que tienes que ver. Entra en Casa Tosico y abre el mensaje de la Vaca. ✨",
+        "navigate": "https://oficinacastori.es/castori/#inicio", "silent": False, "tag": ARRIVAL_TAG},
+        "kind": "vaca-arrival"}
+
+
+def _log_arrival(request_id, receipt):
+    logger.log(logging.WARNING if receipt["status"] == "uncertain" else logging.INFO,
+               "Web Push arrival request=%s status=%s apple_devices=%s http_status=%s reason=%s",
+               request_id, receipt["status"], receipt.get("apple_devices", 0),
+               receipt.get("http_status"), receipt.get("reason"))
 
 
 def _prune_test_receipts(receipts, keep):
@@ -277,7 +301,7 @@ class _PushTransport:
         self.session.close()
 
 
-def _post_webpush(subscription, payload, private_key, subject):
+def _post_webpush(subscription, payload, private_key, subject, *, expires_at=None):
     from py_vapid import Vapid
     from pywebpush import webpush
 
@@ -292,6 +316,13 @@ def _post_webpush(subscription, payload, private_key, subject):
         if ttl < 1:
             raise WebPushError("forecast_expired")
         topic = "castori-vaca-forecast-" + target.isoformat()
+    elif payload.get("kind") == "vaca-arrival":
+        topic = ARRIVAL_TAG
+        if not _number(expires_at):
+            raise WebPushError("arrival_expired")
+        ttl = min(PUSH_TTL, int(expires_at - time.time()))
+        if ttl < 1:
+            raise WebPushError("arrival_expired")
     vapid = Vapid.from_string(private_key)
     transport = _PushTransport(subscription["endpoint"])
     try:
@@ -322,7 +353,8 @@ class WebPushService:
     def __init__(self, load_data, save_data, resolve_actor, *, send=None, clock=time.time,
                  debounce_seconds=2.5, private_key=None, public_key=None, subject=None,
                  test_request_id=None, test_expires_at=None, forecast_request_id=None,
-                 forecast_expires_at=None, forecast_date=None, forecast_chance=None):
+                 forecast_expires_at=None, forecast_date=None, forecast_chance=None,
+                 arrival_request_id=None, arrival_expires_at=None):
         self.load, self.save, self.resolve_actor = load_data, save_data, resolve_actor
         self.clock, self.send = clock, send
         self.debounce_seconds = min(max(float(debounce_seconds), 0), MAX_DEBOUNCE_SECONDS)
@@ -338,6 +370,10 @@ class WebPushService:
             forecast_date if forecast_date is not None else os.getenv("WEB_PUSH_FORECAST_DATE", ""),
             forecast_chance if forecast_chance is not None else os.getenv("WEB_PUSH_FORECAST_CHANCE", ""))
         self._forecast_unavailable_logged = False
+        self.arrival_request = _test_request(
+            arrival_request_id if arrival_request_id is not None else os.getenv("WEB_PUSH_ARRIVAL_REQUEST_ID", ""),
+            arrival_expires_at if arrival_expires_at is not None else os.getenv("WEB_PUSH_ARRIVAL_EXPIRES_AT", ""))
+        self._arrival_unavailable_logged = False
         self.lock = asyncio.Lock()
 
     def _allowed(self, chat_id):
@@ -466,10 +502,11 @@ class WebPushService:
             del pending[str(chat_id)]
             self._save(data)
 
-    async def _deliver(self, subscription, payload):
+    async def _deliver(self, subscription, payload, *, expires_at=None):
         if self.send is not None:
             return await self.send(copy.deepcopy(subscription), copy.deepcopy(payload))
-        return await asyncio.to_thread(_post_webpush, subscription, payload, self.private_key, self.subject)
+        return await asyncio.to_thread(_post_webpush, subscription, payload, self.private_key, self.subject,
+                                       expires_at=expires_at)
 
     async def _tick_test(self, result):
         """One explicit, expiring operator request; no messages or unread mutations."""
@@ -666,6 +703,104 @@ class WebPushService:
         _log_forecast(request_id, {**receipt, "status": outcome, "http_status": http_status})
         result["forecast_status"] = outcome
 
+    def _arrival_unavailable(self, result, reason):
+        if self.arrival_request is None:
+            return
+        result["arrival_status"] = "unavailable"
+        if not self._arrival_unavailable_logged:
+            _log_arrival(self.arrival_request[0], {"status": "unavailable", "reason": reason})
+            self._arrival_unavailable_logged = True
+
+    async def _tick_arrival(self, result):
+        """A fixed notice, explicitly armed and independent of test/forecast orders."""
+        if self.arrival_request is None:
+            return
+        request_id, expires_at = self.arrival_request
+        try:
+            chat_id = self.resolve_actor("sandra")
+        except Exception:
+            chat_id = None
+        if not self._allowed(chat_id):
+            self._arrival_unavailable(result, "identity")
+            return
+        current = self._read()
+        state = _state(current)
+        receipts = _arrival_receipts(state)
+        previous = receipts.get(request_id)
+        if previous is not None and (not isinstance(previous, dict)
+                                     or previous.get("status") not in ("waiting", "ambiguous")):
+            if isinstance(previous, dict) and previous.get("status") == "sending":
+                previous.update(status="uncertain", finished_at=self.clock(), reason="interrupted")
+                self._save(current)
+                _log_arrival(request_id, previous)
+            result["arrival_status"] = previous.get("status", "uncertain") if isinstance(previous, dict) else "uncertain"
+            return
+        now = self.clock()
+        expires_at = min(expires_at, now + MAX_EVENT_AGE)
+        if previous and _number(previous.get("expires_at")):
+            expires_at = min(expires_at, previous["expires_at"])
+        receipt = {**(previous or {}), "created_at": previous.get("created_at", now) if previous else now,
+                   "expires_at": expires_at}
+
+        def record(status, reason=None):
+            receipt.update(status=status, reason=reason)
+            result["arrival_status"] = status
+            if receipt != previous:
+                receipts[request_id] = receipt
+                _prune_test_receipts(receipts, request_id)
+                self._save(current)
+            if previous is None or previous.get("status") != status:
+                _log_arrival(request_id, receipt)
+
+        if expires_at <= now:
+            record("expired", "request_expired")
+            return
+        candidates = []
+        for identity, device in state["devices"].get(str(chat_id), {}).items():
+            try:
+                candidate = validate_subscription(device.get("subscription"), now)
+            except (WebPushError, AttributeError):
+                continue
+            host = urlsplit(candidate["endpoint"]).hostname
+            if host == "push.apple.com" or host.endswith(".push.apple.com"):
+                candidates.append((identity, device, candidate))
+        receipt["apple_devices"] = len(candidates)
+        if len(candidates) != 1:
+            record("waiting" if not candidates else "ambiguous",
+                   "no_apple_device" if not candidates else "multiple_apple_devices")
+            return
+        identity, device, subscription = candidates[0]
+        generation = device.get("generation")
+        receipt.update(attempted_at=now, device_id=identity)
+        record("sending")  # Reservation is durable before the first await.
+        outcome, http_status = "uncertain", None
+        try:
+            response = await asyncio.wait_for(
+                self._deliver(subscription, _arrival_payload(), expires_at=expires_at), SEND_TIMEOUT_SECONDS)
+            http_status = _http_status(response)
+            if http_status is not None and 200 <= http_status < 300:
+                outcome = "sent"
+        except asyncio.CancelledError:
+            _log_arrival(request_id, {**receipt, "status": "uncertain", "reason": "interrupted"})
+            raise
+        except Exception as exc:
+            http_status = _http_status(exc)
+        if http_status in (404, 410):
+            outcome = "expired"
+        reason = "subscription_expired" if outcome == "expired" else "provider_outcome" if outcome == "uncertain" else None
+        latest = self._read()
+        latest_state = _state(latest)
+        latest_receipt = _arrival_receipts(latest_state).get(request_id)
+        if isinstance(latest_receipt, dict) and latest_receipt.get("status") == "sending":
+            latest_receipt.update(status=outcome, finished_at=self.clock(), http_status=http_status, reason=reason)
+            latest_devices = latest_state["devices"].get(str(chat_id), {})
+            latest_device = latest_devices.get(identity)
+            if outcome == "expired" and latest_device and latest_device.get("generation") == generation:
+                del latest_devices[identity]
+            self._save(latest)
+        _log_arrival(request_id, {**receipt, "status": outcome, "http_status": http_status, "reason": reason})
+        result["arrival_status"] = outcome
+
     def _skip_disabled_backlog(self):
         data = self._read()
         if STORE_KEY not in data:
@@ -692,6 +827,7 @@ class WebPushService:
             return {**result, "status": "busy"}
         if not self._configured():
             self._forecast_unavailable(result, "configuration")
+            self._arrival_unavailable(result, "configuration")
             try:
                 self._skip_disabled_backlog()
             except WebPushError:
@@ -701,6 +837,7 @@ class WebPushService:
             try:
                 await self._tick_test(result)
                 await self._tick_forecast(result)
+                await self._tick_arrival(result)
                 snapshot = self._read()
                 work = list(snapshot.get(STORE_KEY, {}).get("pending", {}).items())
                 for key, batch in work:
