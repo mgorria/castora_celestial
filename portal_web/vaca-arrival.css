@@ -1,0 +1,190 @@
+/* An excessively official announcement from a very magical cow. */
+.vaca-arrival-card { margin: 8px 0 24px; }
+body:not(.christmas-season) .vaca-arrival-card { display: none; }
+.vaca-arrival-trigger {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  align-items: center;
+  gap: 21px;
+  width: 100%;
+  min-height: 108px;
+  padding: 20px 27px;
+  overflow: hidden;
+  border: 1px solid #edb391;
+  border-radius: 17px;
+  background: radial-gradient(ellipse at 7% 0%, #fa70624d, transparent 55%), linear-gradient(115deg, #8a1737, #b72e43 55%, #651b38);
+  color: #fff4d9;
+  text-align: left;
+  box-shadow: inset 0 0 0 4px #8e203d, inset 0 0 0 5px #f8d3a42e, 0 6px 0 #651b38, 0 12px 30px #6b203c23;
+  cursor: pointer;
+  transition: transform .2s ease, box-shadow .2s ease;
+}
+.vaca-arrival-trigger::after { content: ''; position: absolute; inset: -100% auto -100% -40%; width: 25%; background: linear-gradient(90deg, transparent, #ffe4bc26, transparent); transform: rotate(25deg); animation: vaca-arrival-button-shine 8s ease-in-out infinite; pointer-events: none; }
+.vaca-arrival-trigger:hover { transform: translateY(-2px); box-shadow: inset 0 0 0 4px #8e203d, inset 0 0 0 5px #f8d3a459, 0 8px 0 #651b38, 0 16px 36px #6b203c2f; }
+.vaca-arrival-trigger:active { transform: translateY(3px); box-shadow: inset 0 0 0 4px #8e203d, 0 3px 0 #651b38; }
+.vaca-arrival-trigger:focus-visible { outline: 3px solid #cb9150; outline-offset: 5px; }
+.vaca-arrival-beacon { position: relative; display: grid; place-items: center; flex: 0 0 57px; width: 57px; height: 57px; border: 1px solid #ffdba48c; border-radius: 50%; background: #5b1634; box-shadow: 0 0 0 6px #fca58815; font-size: 29px; }
+.vaca-arrival-beacon::before { content: ''; position: absolute; inset: -7px; border: 1px solid #f5c99470; border-radius: inherit; animation: vaca-arrival-signal 3.5s ease-out infinite; }
+.vaca-arrival-beacon svg { width: 29px; height: 29px; }
+.vaca-arrival-button-copy { display: grid; min-width: 0; gap: 5px; flex: 1; }
+.vaca-arrival-button-copy > small { color: #f9ceaa; font: 650 9px/1.4 var(--sans); letter-spacing: 1.9px; text-transform: uppercase; }
+.vaca-arrival-button-copy > strong { color: #fff5db; font: 500 clamp(23px, 2.3vw, 30px)/1.12 var(--serif); letter-spacing: -.4px; text-wrap: pretty; }
+.vaca-arrival-button-copy > span { color: #f5cabc; font: 400 11px/1.5 var(--sans); }
+.vaca-arrival-new { align-self: center; padding: 6px 9px; min-width: 27px; border: 1px solid #ffdca678; border-radius: 50px; color: #fff2d2; background: #631c36; font: 700 9px/1.2 var(--sans); letter-spacing: 1px; text-align: center; }
+.vaca-arrival-button-arrow { flex-shrink: 0; font: 400 30px/1 var(--serif); color: #ffe1ad; }
+
+#vaca-arrival {
+  --arrival-gold: #f4d393;
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  max-width: none;
+  height: 100vh;
+  height: 100dvh;
+  max-height: none;
+  margin: 0;
+  padding: max(20px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right)) max(18px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
+  overflow-x: hidden;
+  overflow-y: auto;
+  border: 0;
+  border-radius: 0;
+  color: #fff3d6;
+  background: #17152a;
+  isolation: isolate;
+  font-family: var(--sans), sans-serif;
+}
+#vaca-arrival::backdrop { background: #17152a; }
+#vaca-arrival [hidden] { display: none !important; }
+#vaca-arrival *, #vaca-arrival *::before, #vaca-arrival *::after { box-sizing: border-box; }
+#vaca-arrival .vaca-arrival-cosmos {
+  position: fixed;
+  z-index: -2;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  background: radial-gradient(ellipse at 15% 54%, #513e6470, transparent 54%), radial-gradient(ellipse at 88% 12%, #28685d88, transparent 52%), radial-gradient(ellipse at 80% 100%, #7a264f7a, transparent 50%), #141728;
+}
+#vaca-arrival .vaca-arrival-cosmos::before { content: ''; position: absolute; inset: -60%; opacity: .55; background: repeating-conic-gradient(from 0deg at 45% 55%, transparent 0deg 32deg, #f8d8a110 34deg 35deg, transparent 39deg 60deg); animation: vaca-arrival-rays 50s linear infinite; }
+#vaca-arrival .vaca-arrival-cosmos::after { content: ''; position: absolute; inset: 0; background-image: radial-gradient(circle, #fff1ceaa 1px, transparent 1.6px), radial-gradient(circle, #c8a6ed99 .7px, transparent 1.3px); background-size: 89px 101px, 139px 127px; background-position: 21px 17px, 67px 71px; opacity: .45; }
+#vaca-arrival .vaca-arrival-lights { position: fixed; z-index: 4; top: 0; left: 0; right: 0; display: flex; justify-content: space-around; height: 27px; border-top: 2px solid #bc9d6a70; pointer-events: none; }
+#vaca-arrival .vaca-arrival-lights > i { position: relative; top: 4px; width: 8px; height: 13px; border-radius: 45% 45% 50% 50%; background: var(--color, #ffd895); box-shadow: 0 0 16px 3px var(--color, #ffd895); opacity: .8; animation: vaca-arrival-light 3.6s ease-in-out var(--delay, 0s) infinite; }
+#vaca-arrival .vaca-arrival-lights > i::before { content: ''; position: absolute; inset: -5px 2px auto; height: 6px; background: #b39b65; }
+#vaca-arrival .vaca-arrival-particles { position: fixed; inset: 0; z-index: 3; pointer-events: none; overflow: hidden; }
+#vaca-arrival .vaca-arrival-particles > span { position: absolute; top: var(--y, -5%); left: var(--x, 50%); display: block; color: var(--color, #ffe4a8); font: 400 15px/1 Georgia, serif; text-shadow: 0 0 8px currentColor; opacity: 0; animation: vaca-arrival-confetti var(--duration, 8s) linear var(--delay, 0s) infinite; will-change: transform, opacity; }
+#vaca-arrival .vaca-arrival-particles > span:nth-child(3n) { font-size: 9px; }
+#vaca-arrival .vaca-arrival-particles > span:nth-child(7n) { font-size: 25px; }
+#vaca-arrival .vaca-arrival-stage { position: relative; z-index: 2; display: flex; flex-direction: column; justify-content: center; width: min(1100px, 100%); min-height: 100%; margin: 0 auto; }
+#vaca-arrival .vaca-arrival-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; margin: 16px 0 24px; color: #eac890; font: 600 10px/1.5 var(--sans); letter-spacing: 2px; }
+#vaca-arrival .vaca-arrival-toolbar > :first-child { border-left: 3px solid #e08397; padding-left: 12px; }
+#vaca-arrival button { cursor: pointer; font-family: var(--sans); }
+#vaca-arrival button:focus-visible { outline: 3px solid #ffe2a8; outline-offset: 5px; }
+#vaca-arrival .vaca-arrival-close { display: flex; justify-content: center; align-items: center; gap: 8px; flex: 0 0 auto; min-width: 44px; min-height: 44px; padding: 8px 12px; border: 1px solid #e8d3a747; border-radius: 50px; color: #f8e4c3; background: #ffffff09; font: 500 11px/1 var(--sans); letter-spacing: 0; }
+#vaca-arrival .vaca-arrival-close > span { font-size: 23px; }
+#vaca-arrival .vaca-arrival-close:hover { background: #ffffff1f; }
+#vaca-arrival .vaca-arrival-layout { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: clamp(30px, 5vw, 70px); align-items: center; flex: 1; }
+#vaca-arrival .vaca-arrival-visual { position: relative; width: 100%; max-width: 420px; aspect-ratio: 1; margin: 12px auto 40px; display: grid; place-items: center; }
+#vaca-arrival .vaca-arrival-visual::before { content: ''; position: absolute; inset: -10%; border-radius: 50%; background: radial-gradient(circle, #fbd8a136, #b87eeb17 55%, transparent 70%); animation: vaca-arrival-portal-glow 5s ease-in-out infinite; }
+#vaca-arrival .vaca-arrival-rings { position: absolute; inset: 0; pointer-events: none; }
+#vaca-arrival .vaca-arrival-rings > i { position: absolute; inset: -3%; border-radius: 50%; border: 1px solid #ecc78c8c; box-shadow: 0 0 24px #dfad5c26, inset 0 0 18px #dfad5c16; }
+#vaca-arrival .vaca-arrival-rings > i:first-child { inset: -8%; border-style: dashed; border-color: #eed3a14d; animation: vaca-arrival-rays 48s linear infinite; }
+#vaca-arrival .vaca-arrival-rings > i:nth-child(2) { inset: 2%; border-width: 2px; border-color: #e7b86d; }
+#vaca-arrival .vaca-arrival-rings > i:nth-child(3) { inset: -13%; border: 0; background: conic-gradient(transparent 0deg 60deg, #fff2ba 61deg 62deg, transparent 63deg 200deg, #e5a3f0 201deg 202deg, transparent 203deg); mask: radial-gradient(transparent 69.2%, #000 69.5% 70%, transparent 70.3%); animation: vaca-arrival-rays 14s linear infinite reverse; }
+#vaca-arrival .vaca-arrival-portrait { display: block; width: 88%; height: 88%; border-radius: 50%; border: 5px solid #e8bd79; padding: 4px; object-fit: cover; object-position: 50% 30%; background: #ead2b2; box-shadow: 0 0 0 5px #44273a, 0 0 55px #edb97440; animation: vaca-arrival-hover 6s ease-in-out infinite; }
+#vaca-arrival .vaca-arrival-orbit { position: absolute; inset: auto -3% 4% auto; display: flex; justify-content: center; align-items: center; gap: 2px; width: 62px; height: 62px; border: 1px solid #e6b86d; border-radius: 50%; background: #2c2440; box-shadow: 0 0 25px #f9cb7159; font-size: 20px; transform: rotate(15deg); }
+#vaca-arrival .vaca-arrival-orbit > span:nth-child(2) { font-size: 11px; }
+#vaca-arrival .vaca-arrival-seal { position: absolute; bottom: -21px; left: 50%; width: max-content; max-width: 110%; padding: 10px 18px; color: #ffedbc; border: 1px solid #d5aa62; border-radius: 5px; background: linear-gradient(125deg, #a02b4b, #651f42); box-shadow: 0 5px 25px #120d284d; font: 700 10px/1.4 var(--sans); letter-spacing: 1.8px; text-align: center; transform: translateX(-50%) rotate(-5deg); }
+#vaca-arrival .vaca-arrival-copy { min-width: 0; padding: 12px 0 20px; }
+#vaca-arrival .vaca-arrival-kicker { display: inline-block; margin: 0 0 17px; padding: 7px 11px; border: 1px solid #d4aa625e; background: #c9995612; color: #ebc783; font: 700 10px/1.5 var(--sans); letter-spacing: 2px; }
+#vaca-arrival #vaca-arrival-title { margin: 0 0 24px; color: #fff0cc; font: 500 clamp(37px, 4.8vw, 65px)/1.04 var(--serif); letter-spacing: -1.8px; text-wrap: balance; text-shadow: 0 3px 20px #0b061f50; }
+#vaca-arrival[data-stage="2"] #vaca-arrival-title { color: #ffe3a2; font-size: clamp(49px, 6vw, 80px); }
+#vaca-arrival #vaca-arrival-description { margin: 0; color: #efdfd2; font: 450 clamp(16px, 1.55vw, 19px)/1.7 var(--sans); text-wrap: pretty; }
+#vaca-arrival .vaca-arrival-aside { margin: 17px 0 24px; color: #d3adc9; font: italic 400 16px/1.6 var(--serif); }
+#vaca-arrival .vaca-arrival-route { display: flex; align-items: center; justify-content: space-between; gap: 13px; padding: 16px 0; border-top: 1px solid #d9b68040; border-bottom: 1px solid #d9b68040; color: #f1d29c; font: 600 10px/1.6 var(--sans); letter-spacing: 1.1px; text-transform: uppercase; }
+#vaca-arrival .vaca-arrival-route > span { display: grid; gap: 4px; }
+#vaca-arrival .vaca-arrival-route > span:last-child { text-align: right; }
+#vaca-arrival .vaca-arrival-route small { color: #b6a6ac; font: 500 8px/1.5 var(--sans); letter-spacing: 1.6px; }
+#vaca-arrival .vaca-arrival-route > i { flex: 1; min-width: 20px; color: #dda3cc; font-style: normal; text-align: center; }
+#vaca-arrival .vaca-arrival-route strong { color: #ffe8ba; font-weight: 650; }
+#vaca-arrival .vaca-arrival-summary { display: grid; gap: 7px; margin: 20px 0 0; padding: 0; list-style: none; }
+#vaca-arrival .vaca-arrival-summary > li { display: grid; grid-template-columns: 10px minmax(0, 1fr); column-gap: 8px; row-gap: 3px; align-items: baseline; padding: 9px 0; border-bottom: 1px solid #d9b6801f; color: #d7dbca; font: 400 12px/1.6 var(--sans); }
+#vaca-arrival .vaca-arrival-summary > li::before { content: '✦'; grid-column: 1; grid-row: 1 / 4; color: #e5bf7c; font-size: 9px; }
+#vaca-arrival .vaca-arrival-summary > li > * { grid-column: 2; }
+#vaca-arrival .vaca-arrival-summary strong { color: #f7dba6; font-weight: 600; }
+#vaca-arrival .vaca-arrival-summary small { color: #bba8ba; font-style: italic; font-size: 11px; }
+#vaca-arrival .vaca-arrival-progress { display: flex; justify-content: center; gap: 12px; width: min(400px, 100%); margin: 25px auto 21px; }
+#vaca-arrival .vaca-arrival-progress > span { position: relative; flex: 1; padding: 11px 0 0; border-top: 2px solid #f5d28a30; color: #b6aaa7; font: 600 9px/1.4 var(--sans); letter-spacing: 1.5px; text-align: center; text-transform: uppercase; }
+#vaca-arrival .vaca-arrival-progress > span[aria-current="step"], #vaca-arrival .vaca-arrival-progress > span.is-active { border-color: #ffd994; color: #ffe8bc; }
+#vaca-arrival .vaca-arrival-progress > span[aria-current="step"]::before { content: ''; position: absolute; top: -4px; left: 50%; width: 6px; height: 6px; background: #ffe1a0; border-radius: 50%; box-shadow: 0 0 12px #f9d385; }
+#vaca-arrival .vaca-arrival-actions { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 12px 22px; margin: 0 auto; }
+#vaca-arrival .vaca-arrival-mute, #vaca-arrival .vaca-arrival-skip { min-height: 44px; padding: 10px 3px; border: 0; border-radius: 4px; background: transparent; color: #ddcbbc; font: 500 11px/1.5 var(--sans); text-decoration: underline; text-underline-offset: 5px; }
+#vaca-arrival .vaca-arrival-mute:disabled { opacity: .7; cursor: default; text-decoration: none; }
+#vaca-arrival .vaca-arrival-close-final { min-height: 49px; padding: 14px 25px; border: 1px solid #ffe1a0; border-radius: 50px; background: linear-gradient(115deg, #f1ca88, #ffe5b5, #deb472); color: #422238; box-shadow: 0 4px 24px #e7be6c2b; font: 700 12px/1.5 var(--sans); }
+#vaca-arrival .vaca-arrival-close-final:hover { filter: brightness(1.1); }
+#vaca-arrival .vaca-arrival-footer { margin: 23px 0 6px; color: #bba9b4; font: italic 400 12px/1.6 var(--serif); text-align: center; }
+#vaca-arrival.is-complete .vaca-arrival-particles { opacity: 0; transition: opacity 1.8s ease; }
+#vaca-arrival.is-complete .vaca-arrival-particles > span { animation-play-state: paused; }
+#vaca-arrival.is-complete .vaca-arrival-lights > i { animation: none; }
+#vaca-arrival.is-complete .vaca-arrival-progress > span { border-color: #e3c58d99; color: #e6c58f; }
+/* The user can pause the show through the existing Christmas controls. */
+body.christmas-paused .vaca-arrival-card *, body.christmas-paused .vaca-arrival-card *::before, body.christmas-paused .vaca-arrival-card *::after,
+body[data-christmas-motion="off"] .vaca-arrival-card *, body[data-christmas-motion="off"] .vaca-arrival-card *::before, body[data-christmas-motion="off"] .vaca-arrival-card *::after,
+#vaca-arrival.is-still *, #vaca-arrival.is-still *::before, #vaca-arrival.is-still *::after { animation: none !important; transition: none !important; }
+#vaca-arrival.is-still .vaca-arrival-particles { display: none; }
+@keyframes vaca-arrival-button-shine { 0%, 67% { left: -40%; } 90%, 100% { left: 130%; } }
+@keyframes vaca-arrival-signal { 0% { transform: scale(.95); opacity: .6; } 70%, 100% { transform: scale(1.38); opacity: 0; } }
+@keyframes vaca-arrival-rays { to { transform: rotate(360deg); } }
+@keyframes vaca-arrival-light { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+@keyframes vaca-arrival-confetti { 0% { transform: translate3d(0,-15vh,0) rotate(0deg); opacity: 0; } 10% { opacity: .9; } 85% { opacity: .8; } 100% { transform: translate3d(var(--drift, 40px),110vh,0) rotate(310deg); opacity: 0; } }
+@keyframes vaca-arrival-portal-glow { 0%, 100% { opacity: .6; transform: scale(.95); } 50% { opacity: 1; transform: scale(1.04); } }
+@keyframes vaca-arrival-hover { 0%, 100% { transform: translateY(0) rotate(-2deg); } 50% { transform: translateY(-7px) rotate(2deg); } }
+@media (max-width: 760px) {
+  .vaca-arrival-trigger { padding: 19px 20px; gap: 16px; }
+  .vaca-arrival-button-copy > small { font-size: 8px; letter-spacing: 1.3px; }
+  .vaca-arrival-button-copy > strong { font-size: 25px; }
+  .vaca-arrival-new { position: absolute; top: 11px; right: 11px; padding: 4px 6px; min-width: 21px; font-size: 8px; }
+  .vaca-arrival-button-arrow { display: none; }
+  #vaca-arrival { padding-inline: max(23px, env(safe-area-inset-left)); }
+  #vaca-arrival .vaca-arrival-toolbar { margin: 12px 0 20px; font-size: 8px; letter-spacing: 1.3px; }
+  #vaca-arrival .vaca-arrival-layout { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  #vaca-arrival .vaca-arrival-visual { width: min(54vw, 245px); margin: 12px auto 34px; }
+  #vaca-arrival .vaca-arrival-portrait { border-width: 3px; padding: 3px; }
+  #vaca-arrival .vaca-arrival-orbit { width: 44px; height: 44px; font-size: 14px; }
+  #vaca-arrival .vaca-arrival-seal { bottom: -16px; padding: 7px 11px; font-size: 8px; letter-spacing: 1.3px; }
+  #vaca-arrival .vaca-arrival-copy { padding: 2px 0 0; text-align: center; }
+  #vaca-arrival .vaca-arrival-kicker { margin-bottom: 13px; font-size: 8px; padding: 6px 9px; letter-spacing: 1.6px; }
+  #vaca-arrival #vaca-arrival-title { max-width: 520px; margin: 0 auto 17px; font-size: clamp(33px, 7.5vw, 49px); letter-spacing: -1px; }
+  #vaca-arrival[data-stage="2"] #vaca-arrival-title { font-size: clamp(43px, 11vw, 63px); }
+  #vaca-arrival #vaca-arrival-description { max-width: 460px; margin: auto; font-size: 14px; line-height: 1.65; }
+  #vaca-arrival .vaca-arrival-aside { margin: 12px 0 19px; font-size: 14px; }
+  #vaca-arrival .vaca-arrival-route { padding-block: 12px; font-size: 9px; letter-spacing: .5px; }
+  #vaca-arrival .vaca-arrival-summary { max-width: 430px; margin: 16px auto 0; text-align: left; }
+  #vaca-arrival .vaca-arrival-summary > li { font-size: 11px; }
+  #vaca-arrival .vaca-arrival-progress { margin-block: 22px 15px; }
+  #vaca-arrival .vaca-arrival-progress > span { font-size: 8px; letter-spacing: 1px; }
+  #vaca-arrival .vaca-arrival-footer { margin-top: 17px; font-size: 11px; }
+}
+@media (max-width: 400px) {
+  .vaca-arrival-trigger { gap: 14px; padding: 20px 16px; }
+  .vaca-arrival-beacon { flex-basis: 43px; width: 43px; height: 43px; font-size: 24px; }
+  .vaca-arrival-button-copy > strong { font-size: 22px; }
+  .vaca-arrival-button-copy > span { font-size: 10px; }
+  #vaca-arrival { padding-inline: 18px; }
+  #vaca-arrival .vaca-arrival-toolbar { font-size: 7px; gap: 10px; letter-spacing: 1px; }
+  #vaca-arrival .vaca-arrival-visual { width: 51vw; }
+  #vaca-arrival .vaca-arrival-route { gap: 8px; font-size: 8px; }
+  #vaca-arrival .vaca-arrival-actions { gap: 8px 17px; }
+  #vaca-arrival .vaca-arrival-close-final { width: 100%; font-size: 11px; padding-inline: 18px; }
+}
+@media (max-height: 740px) and (min-width: 761px) {
+  #vaca-arrival .vaca-arrival-visual { max-width: 310px; }
+  #vaca-arrival #vaca-arrival-title { font-size: 48px; }
+  #vaca-arrival[data-stage="2"] #vaca-arrival-title { font-size: 62px; }
+  #vaca-arrival .vaca-arrival-toolbar { margin-block: 12px 18px; }
+  #vaca-arrival .vaca-arrival-progress { margin-top: 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vaca-arrival-card *, .vaca-arrival-card *::before, .vaca-arrival-card *::after,
+  #vaca-arrival *, #vaca-arrival *::before, #vaca-arrival *::after { animation: none !important; transition: none !important; }
+  #vaca-arrival .vaca-arrival-particles { display: none; }
+}

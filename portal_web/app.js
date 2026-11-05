@@ -264,6 +264,7 @@
     } catch (_) { if (version !== accountVersion) return; account.loading = false; account.error = 'No hemos podido comprobar tu acceso. Vuelve a intentarlo en un momento.'; renderAccountGate(); }
   }
   function clearAccountContent(keepNotifications = false) {
+    window.CastoriVacaArrival?.stop();
     window.CastoriDecorationReview?.unmount(); window.CastoriMystery?.unmount(true);
     connectVersion++; stopPolling(); clearLiveState(keepNotifications); sending.clear(); callbackBusy.clear(); serverState = { characters: [], wishes: [] }; actorKey = undefined;
     main.innerHTML = ''; document.getElementById('friend-nav').innerHTML = ''; document.getElementById('connection-banner').innerHTML = ''; document.getElementById('modal-content').innerHTML = ''; closeMenu();
@@ -316,7 +317,7 @@
     window.CastoriChristmas?.refresh();
   }
   function home() {
-    return `${unreadOverview()}<section class="hero" aria-labelledby="welcome-title"><img class="hero-art" src="assets/casa-celestial-v2.png" alt="Castori, Mimosuga y la Vaca Mágica en una oficina iluminada dentro de un árbol"><div class="hero-content"><div class="eyebrow">${icon('star')} UN LUGAR HECHO DE CARIÑO</div><h1 id="welcome-title">Qué bien que estés<br>aquí, <em>Patita.</em></h1><p>Al otro lado hay una historia, un abrazo<br>y alguien con ganas de escucharte.</p><div class="hero-buttons"><button class="button" data-chat="mimosuga">¿Charlamos un ratito? ${icon('arrow')}</button><button class="text-button" id="discover-friends">Conocer a mis amigos</button></div></div><div class="hero-caption">${icon('heart')} Pasa. Estás en casa.</div></section>${window.CastoriMystery?.render() || ''}${window.CastoriDecorationReview?.render() || ''}<section id="our-friends"><div class="section-heading"><div><h2>¿Con quién te apetece hablar?</h2><p>Tu pequeño universo, con todas sus historias.</p></div><span class="aside-note">Siempre hay una silla para ti.</span></div><div class="character-grid">${orderedIds().map(card).join('')}</div></section><div class="below-home"><button class="story-feature" data-story="${stories[0].id}"><span class="mini-book">${icon('book')}</span><span><span class="eyebrow">UN CUENTO PARA TI</span><h3>${esc(stories[0].title)}</h3><p>Una historia de bienvenida, guardada para ti.</p></span>${icon('arrow')}</button><div class="daily-note"><span>✧</span><div><span class="eyebrow">UNA COSITA PARA RECORDAR</span><blockquote>Lo bonito también está<br>en los días normales.</blockquote></div></div></div>`;
+    return `${window.CastoriVacaArrival?.render() || ''}${unreadOverview()}<section class="hero" aria-labelledby="welcome-title"><img class="hero-art" src="assets/casa-celestial-v2.png" alt="Castori, Mimosuga y la Vaca Mágica en una oficina iluminada dentro de un árbol"><div class="hero-content"><div class="eyebrow">${icon('star')} UN LUGAR HECHO DE CARIÑO</div><h1 id="welcome-title">Qué bien que estés<br>aquí, <em>Patita.</em></h1><p>Al otro lado hay una historia, un abrazo<br>y alguien con ganas de escucharte.</p><div class="hero-buttons"><button class="button" data-chat="mimosuga">¿Charlamos un ratito? ${icon('arrow')}</button><button class="text-button" id="discover-friends">Conocer a mis amigos</button></div></div><div class="hero-caption">${icon('heart')} Pasa. Estás en casa.</div></section>${window.CastoriMystery?.render() || ''}${window.CastoriDecorationReview?.render() || ''}<section id="our-friends"><div class="section-heading"><div><h2>¿Con quién te apetece hablar?</h2><p>Tu pequeño universo, con todas sus historias.</p></div><span class="aside-note">Siempre hay una silla para ti.</span></div><div class="character-grid">${orderedIds().map(card).join('')}</div></section><div class="below-home"><button class="story-feature" data-story="${stories[0].id}"><span class="mini-book">${icon('book')}</span><span><span class="eyebrow">UN CUENTO PARA TI</span><h3>${esc(stories[0].title)}</h3><p>Una historia de bienvenida, guardada para ti.</p></span>${icon('arrow')}</button><div class="daily-note"><span>✧</span><div><span class="eyebrow">UNA COSITA PARA RECORDAR</span><blockquote>Lo bonito también está<br>en los días normales.</blockquote></div></div></div>`;
   }
   function demoHistory(id) {
     if (id === 'corte') return [];
@@ -899,6 +900,7 @@
   function stopPolling() { pollVersion++; clearTimeout(pollTimer); if (pollController) pollController.abort(); pollController = null; }
   function navigate(next, id, updateHash = true, direct = false) {
     if (accountLocked()) return;
+    window.CastoriVacaArrival?.stop();
     if (experiences && next === 'chat' && id === 'salchicher') next = 'clinic';
     if (experiences && next === 'wishes') next = 'vaca';
     const experienceId = next === 'consultation' ? (id && !ids.includes(id) ? id : experiences?.selectedId()) : null;
@@ -1153,6 +1155,7 @@
     else if (b.hasAttribute('data-account-show-password')) { const input = document.getElementById('account-password'), visible = input.type === 'password'; input.type = visible ? 'text' : 'password'; b.textContent = visible ? 'Ocultar' : 'Mostrar'; b.setAttribute('aria-label', visible ? 'Ocultar contraseña' : 'Mostrar contraseña'); }
     else if (b.hasAttribute('data-account-logout') || b.id === 'account-logout') logoutAccount();
     else if (accountLocked()) return;
+    else if (b.hasAttribute('data-vaca-arrival-play')) { e.preventDefault(); window.CastoriVacaArrival?.play({ event: e, trigger: b }); return; }
     else if (experiences && await experiences.handle(b)) return;
     else if (b.hasAttribute('data-admin-auth-refresh')) loadAdminAuth();
     else if (b.hasAttribute('data-admin-lock')) lockAdmin();

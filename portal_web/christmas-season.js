@@ -209,5 +209,6 @@
     root.addEventListener('pagehide', suspend);
     refresh();
   }
-  root.CastoriChristmas = { START, END, period, now, init, refresh, isActive: () => active };
+  root.CastoriChristmas = { START, END, period, now, init, refresh, isActive: () => active,
+    preferences: () => ({ soundMuted, motionPaused, reducedMotion: !!media?.matches }) };
 })(typeof window === 'undefined' ? globalThis : window);
