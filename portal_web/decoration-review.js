@@ -20,11 +20,11 @@
     '2026-11-16': 16, '2026-11-17': 22, '2026-11-18': 28,
     '2026-11-19': 66, '2026-11-20': 74, '2026-11-21': 88, '2026-11-22': 92
   };
-  const skies = [
-    { limit: 30, outlook: 'quiet', signal: 'Bruma en el establo' },
-    { limit: 50, outlook: 'whisper', signal: 'Cascabeles lejanos' },
-    { limit: 70, outlook: 'near', signal: 'Huellas en la nieve' },
-    { limit: 101, outlook: 'bright', signal: 'Magia muy cerca' }
+  const orbits = [
+    { limit: 30, outlook: 'quiet', signal: 'Órbita exterior' },
+    { limit: 50, outlook: 'whisper', signal: 'Desvío astral' },
+    { limit: 70, outlook: 'near', signal: 'Rumbo a Tosico' },
+    { limit: 101, outlook: 'bright', signal: 'Órbita de aproximación' }
   ];
   let section = null, timer = null;
 
@@ -41,25 +41,12 @@
       const dayNumber = Math.floor(date.getTime() / 86400000);
       const weekend = [0, 6].includes(date.getUTCDay());
       const chance = visitSignals[iso] ?? (22 + (dayNumber * 17 % 33 + 33) % 33 + (weekend ? 10 : 0));
-      const sky = skies.find(item => chance < item.limit);
-      return { iso, weekday: index === 0 ? 'Hoy' : weekday.format(date).replace('.', ''), dateLabel: shortDate.format(date).replace('.', ''), chance, signal: sky.signal, outlook: sky.outlook };
+      const orbit = orbits.find(item => chance < item.limit);
+      return { iso, weekday: index === 0 ? 'Hoy' : weekday.format(date).replace('.', ''), dateLabel: shortDate.format(date).replace('.', ''), chance, signal: orbit.signal, outlook: orbit.outlook };
     });
   }
-  function weatherIcon(outlook) {
-    const cloud = '<path d="M12 34h23a7 7 0 0 0 0-14 11 11 0 0 0-20-3 9 9 0 0 0-3 17Z" fill="currentColor" fill-opacity=".12"/>';
-    const art = outlook === 'quiet'
-      ? '<path d="M34 5a10 10 0 0 0 9 15 10 10 0 0 1-16-11"/>' + cloud
-      : outlook === 'whisper'
-        ? cloud + '<path d="M17 40h.1M25 43h.1M33 39h.1" stroke-width="3"/>'
-        : outlook === 'near'
-          ? '<circle cx="32" cy="13" r="7" fill="currentColor" fill-opacity=".2"/><path d="M32 2V0m11 5 2-2M43 13h3M22 5l-2-2"/>' + cloud
-          : '<path d="m24 4 5 13 14 7-14 6-5 14-6-14L4 24l14-7Z" fill="currentColor" fill-opacity=".15"/><path d="m40 4 1.5 4L46 10l-4.5 1.5L40 16l-1.5-4.5L34 10l4.5-2ZM5 38l1 3 3 1-3 1-1 3-1-3-3-1 3-1"/>';
-    return `<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${art}</svg>`;
-  }
   function forecastBody(days) {
-    return `<div class="vaca-forecast-heading"><div><p class="vaca-forecast-kicker">OBSERVATORIO DE CASCABELES</p><h3 id="vaca-forecast-title">¿Vendrá la Vaca?</h3><p class="vaca-forecast-intro">Probabilidad de visita a Casa Tosico</p></div><p class="vaca-forecast-range">${days[0].dateLabel} — ${days[6].dateLabel}</p></div>
-      <ol class="vaca-forecast-days">${days.map((day, index) => `<li class="vaca-forecast-day" data-outlook="${day.outlook}"${index === 0 ? ' aria-current="date"' : ''}><p class="vaca-forecast-weekday">${day.weekday}</p><time class="vaca-forecast-date" datetime="${day.iso}">${day.dateLabel}</time><span class="vaca-forecast-icon">${weatherIcon(day.outlook)}</span><strong class="vaca-forecast-chance" aria-label="${day.chance}% de probabilidad de visita">${day.chance}<small>%</small></strong><span class="vaca-forecast-signal">${day.signal}</span></li>`).join('')}</ol>
-      <p class="vaca-forecast-note">Parte mágico orientativo. La Vaca se reserva el derecho a aparecer por sorpresa.</p>`;
+    return root.CastoriVacaRadar.render(days);
   }
   function renderForecast(now) {
     const days = forecast(now);
@@ -92,6 +79,7 @@
           <div class="decoration-review-rating-heading"><span>Termómetro navideño</span><strong aria-label="Puntuación pendiente">— <small>/ 10</small></strong></div>
           <div class="decoration-review-thermometer" aria-hidden="true"><span class="decoration-review-mercury"></span><span class="decoration-review-bulb"></span></div>
           <p class="decoration-review-rating-note"><span class="decoration-review-deliberation">Deliberando<span class="decoration-review-thinking-dots" aria-hidden="true"><i></i><i></i><i></i></span></span><span>Puntuación pendiente de la Vaca</span></p>
+          ${root.CastoriDecorationComments?.render() || ''}
         </div>
       </div>
       <div class="decoration-review-deadline"><p class="decoration-review-date">CIERRE DE LA EVALUACIÓN<time datetime="2026-12-01T00:00:00+01:00">1 de diciembre</time></p>
@@ -106,6 +94,8 @@
   function pause() { if (timer !== null) clearTimeout(timer); timer = null; }
   function unmount() {
     pause();
+    root.CastoriDecorationComments?.unmount();
+    root.CastoriVacaRadar?.unmount();
     if (section) {
       section.ownerDocument.removeEventListener('visibilitychange', refresh);
       section.ownerDocument.removeEventListener('castori:seasonchange', refresh);
@@ -120,9 +110,12 @@
     const weather = section.querySelector('[data-vaca-forecast]');
     const today = dayKey(now);
     if (weather.getAttribute('data-forecast-day') !== today) {
+      root.CastoriVacaRadar?.unmount();
       weather.innerHTML = forecastBody(forecast(now));
       weather.setAttribute('data-forecast-day', today);
+      root.CastoriVacaRadar?.mount(weather);
     }
+    root.CastoriVacaRadar?.refresh();
     const value = remaining(now);
     const wasClosed = section.classList.contains('decoration-review-closed');
     section.classList.toggle('decoration-review-closed', value.closed);
@@ -144,8 +137,10 @@
     unmount();
     section = node;
     if (!section) return;
+    root.CastoriDecorationComments?.mount(section.querySelector('[data-decoration-comments]'));
     section.ownerDocument.addEventListener('visibilitychange', refresh);
     section.ownerDocument.addEventListener('castori:seasonchange', refresh);
+    root.CastoriVacaRadar?.mount(section.querySelector('[data-vaca-forecast]'));
     refresh();
   }
   root.CastoriDecorationReview = { render, mount, unmount, remaining, forecast };
