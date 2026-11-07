@@ -1,9 +1,9 @@
 (function () {
   'use strict';
 
-  const trigger = '.aqui manda el oso';
+  const trigger = '.hola vaca soy el oso';
   const duration = 10000;
-  const usedKey = 'castori-bear-alarm-used-v1';
+  const usedKey = 'castori-bear-alarm-used-v2';
   let active = null;
 
   function startSound() {

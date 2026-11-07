@@ -1075,8 +1075,8 @@
   async function sendMessage(text) {
     if (readOnly()) return;
     text = text.trim(); const id = activeId; if (!text || !ready(id)) return; const input = document.getElementById('chat-input');
-    if (view === 'chat' && window.CastoriBearAlarm?.matches(id, text) &&
-        window.CastoriBearAlarm.play({ onFinish: () => toast('Oso espantado. Puedes continuar, Patita. 🐮') })) {
+    if (view === 'chat' && window.CastoriBearAlarm?.matches(id, text)) {
+      window.CastoriBearAlarm.play({ onFinish: () => toast('Oso espantado. Puedes continuar, Patita. 🐮') });
       if (input) { input.value = ''; input.style.height = 'auto'; }
       return;
     }
