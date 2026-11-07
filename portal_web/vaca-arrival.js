@@ -5,7 +5,9 @@
   const START = Date.parse('2026-11-05T00:00:00+01:00');
   const END = Date.parse('2027-01-11T00:00:00+01:00');
   const SEEN_KEY = 'castori.vaca-arrival.2026-11.v1';
+  const SOUND_KEY = 'castori.vaca-arrival.sound.v1';
   const DURATION = 26000;
+  const clock = () => root.performance?.now() ?? Date.now();
   const news = [
     { title: 'La Vaca ha abandonado la Castora Celestial.', text: 'Mimosuga confirma: falta una vaca y sobra purpurina.', aside: '«¡MUUU! No me he escapado. He salido sin avisar.»' },
     { title: 'Autopista astral abierta', text: 'Peaje pagado con tres campanillas. Tráfico de renos desviado. Destino: Casa Tosico.', aside: '«¡Muuu! El peaje se ha quedado con mi lazo. ¡Era de regalo!»' },
@@ -17,7 +19,7 @@
     { label: '02 · HIPERESPACIO', title: '¡AUTOPISTA ASTRAL ABIERTA!', text: 'Peaje pagado con tres campanillas. Tráfico de renos desviado. Destino: Casa Tosico.', aside: '«¡Muuu! El peaje se ha quedado con mi lazo. ¡Era de regalo!»' },
     { label: '03 · APROXIMACIÓN A CASA TOSICO', title: '¡DESPEJAD LOS BALCONES!', text: 'La llegada es inminente. Sujetad macetas. Dejad sitio para lo imposible.', aside: '«¡Patita, haz sitio! Lo del lazo en el cuerno estaba planeado. MUUU.»' }
   ];
-  let active = null, seenInMemory = false;
+  let active = null, seenInMemory = false, soundMuted = false, soundPreferenceRead = false;
   const now = () => root.CastoriChristmas?.now() ?? Date.now();
   const available = () => now() >= START && now() < END;
   const accessible = () => doc?.body?.dataset.access === 'open' && doc.visibilityState !== 'hidden' && available();
@@ -40,12 +42,23 @@
     let value = {};
     try { value = root.CastoriChristmas?.preferences?.() || {}; } catch (_) { /* Effects are optional. */ }
     return {
-      soundMuted: value.soundMuted === true,
       // christmas-paused also describes a temporarily hidden document. Only the
       // explicit preference may skip a newly opened, visible performance.
       motionPaused: value.motionPaused === true,
       reducedMotion: value.reducedMotion === true || media?.matches === true
     };
+  }
+  function readSoundPreference() {
+    if (soundPreferenceRead) return;
+    soundPreferenceRead = true;
+    try {
+      const saved = root.localStorage.getItem(SOUND_KEY);
+      if (saved === 'muted' || saved === 'on') soundMuted = saved === 'muted';
+    } catch (_) { /* Keep the user's choice in memory when storage is unavailable. */ }
+  }
+  function saveSoundPreference(muted) {
+    soundMuted = muted;
+    try { root.localStorage.setItem(SOUND_KEY, muted ? 'muted' : 'on'); } catch (_) { /* Still applies to this visit. */ }
   }
   function render() {
     if (!available()) return '';
@@ -81,32 +94,49 @@
         <div class="arrival-route"><span>CASTORA CELESTIAL</span><i class="arrival-route-flight" aria-hidden="true">✦ ➜</i><span>CASA TOSICO</span></div>
         <ol class="vaca-arrival-summary" hidden aria-label="El comunicado completo">${news.map(item => `<li><strong>${item.title}</strong><span>${item.text}</span><small>${item.aside}</small></li>`).join('')}</ol>
         <div class="arrival-progress" aria-label="Actos de la llegada"><span class="is-active" aria-current="step">00 · ALERTA</span><span>01 · DESPEGUE</span><span>02 · HIPERESPACIO</span><span>03 · LLEGADA</span></div>
-        <div class="arrival-controls"><button type="button" class="vaca-arrival-mute" aria-pressed="false">Silenciar</button><button type="button" class="vaca-arrival-skip">Leer el mensaje completo</button><button type="button" class="vaca-arrival-close-final" hidden>Entendido. Despejo el balcón.</button></div>
+        <div class="arrival-controls"><button type="button" class="vaca-arrival-mute" aria-pressed="true">Sonido: sí</button><button type="button" class="vaca-arrival-skip">Leer el mensaje completo</button><button type="button" class="vaca-arrival-close-final" hidden>Entendido. Despejo el balcón.</button></div>
         <p class="arrival-footer">Servicio de mensajería mágica · No se admiten devoluciones de purpurina.</p>
       </div>`;
   }
   function clearTimers(run) { for (const timer of run.timers) clearTimeout(timer); run.timers.clear(); }
   function stopAudio(run) {
-    run.soundStopped = true;
+    run.soundGeneration++;
     const stop = run.stopSound; run.stopSound = null;
     try { stop?.(); } catch (_) { /* Optional sound cannot keep the scene open. */ }
   }
-  function muteButton(run, text) {
+  function updateSoundButton(run) {
     const button = run.dialog.querySelector('.vaca-arrival-mute');
-    button.textContent = text; button.disabled = true; button.setAttribute('aria-pressed', 'true');
+    const playing = !soundMuted && !run.soundBlocked && !run.soundEnded && !run.audioUnavailable;
+    button.textContent = run.soundEnded ? 'Sonido finalizado' : run.audioUnavailable ? 'Sonido no disponible' : soundMuted ? 'Sonido: no' : run.soundBlocked ? 'Activar sonido' : 'Sonido: sí';
+    button.disabled = run.soundEnded || run.audioUnavailable;
+    button.setAttribute('aria-pressed', String(playing));
+    button.setAttribute('aria-label', playing ? 'Silenciar sonido' : button.disabled ? button.textContent : 'Activar sonido');
   }
   function sound(run) {
     const engine = root.CastoriVacaArrivalAudio;
-    if (typeof engine?.play !== 'function') return false;
+    if (typeof engine?.play !== 'function') { run.audioUnavailable = true; updateSoundButton(run); return; }
+    stopAudio(run);
+    const generation = run.soundGeneration;
+    run.soundBlocked = false;
+    const blocked = () => {
+      if (active !== run || run.done || run.soundEnded || generation !== run.soundGeneration || soundMuted) return;
+      run.soundBlocked = true; stopAudio(run); updateSoundButton(run);
+    };
     try {
       // The engine creates/resumes audio synchronously inside this trusted click.
-      const cleanup = engine.play({ duration: DURATION,
-        isAllowed: () => active === run && !run.done && !run.complete && !run.soundStopped && accessible() && !preferences(run.media).soundMuted });
-      if (typeof cleanup !== 'function') return false;
+      const cleanup = engine.play({ duration: DURATION, offset: Math.max(0, clock() - run.startedAt), onBlocked: blocked,
+        isAllowed: () => active === run && !run.done && !run.soundEnded && generation === run.soundGeneration && accessible() && !soundMuted });
+      if (typeof cleanup !== 'function') { blocked(); return; }
+      if (generation !== run.soundGeneration) { cleanup(); return; }
       run.stopSound = cleanup;
-      if (cleanup.available === false) { stopAudio(run); return false; }
-      return true;
-    } catch (_) { stopAudio(run); return false; }
+      if (cleanup.available === false) blocked();
+    } catch (_) { blocked(); }
+    updateSoundButton(run);
+  }
+  function toggleSound(run, event) {
+    if (event?.isTrusted !== true || active !== run || run.done || run.soundEnded || !accessible()) return;
+    if (soundMuted || run.soundBlocked) { saveSoundPreference(false); sound(run); }
+    else { saveSoundPreference(true); stopAudio(run); updateSoundButton(run); }
   }
   function changeStage(run, index) {
     run.dialog.setAttribute('data-stage', String(index));
@@ -120,18 +150,23 @@
       if (position === index) node.setAttribute('aria-current', 'step'); else node.removeAttribute('aria-current');
     });
   }
-  function complete(run) {
-    if (active !== run || run.done || run.complete) return;
-    run.complete = true; clearTimers(run); stopAudio(run); changeStage(run, 3);
+  function complete(run, { keepSound = false } = {}) {
+    if (active !== run || run.done) return;
+    if (!keepSound) {
+      clearTimeout(run.soundTimer); run.soundTimer = null;
+      run.soundEnded = true; stopAudio(run); updateSoundButton(run);
+    }
+    if (run.complete) return;
+    run.complete = true; clearTimers(run); changeStage(run, 3);
     run.dialog.classList.add('is-complete');
     run.dialog.querySelector('.vaca-arrival-summary').hidden = false;
     run.dialog.querySelector('.vaca-arrival-skip').hidden = true;
     run.dialog.querySelector('.vaca-arrival-close-final').hidden = false;
-    if (!run.dialog.querySelector('.vaca-arrival-mute').disabled) muteButton(run, 'Sonido finalizado');
   }
   function finish(run, reason) {
     if (run.done) return;
     run.done = true; clearTimers(run); stopAudio(run);
+    clearTimeout(run.soundTimer); run.soundTimer = null;
     doc.removeEventListener('visibilitychange', run.onVisibility);
     doc.removeEventListener('castori:seasonchange', run.onSeason);
     root.removeEventListener('pagehide', run.onPageHide);
@@ -151,14 +186,16 @@
     dialog.setAttribute('aria-labelledby', 'vaca-arrival-title'); dialog.setAttribute('aria-describedby', 'vaca-arrival-description');
     dialog.innerHTML = scene();
     const media = root.matchMedia?.('(prefers-reduced-motion: reduce)');
+    readSoundPreference();
     const settings = preferences(media), still = settings.reducedMotion || settings.motionPaused;
     if (still) dialog.classList.add('is-still');
     const run = { dialog, media, trigger, previousFocus: doc.activeElement, previousOverflow: doc.body.style.overflow,
-      timers: new Set(), stopSound: null, soundStopped: false, done: false, complete: false };
+      timers: new Set(), startedAt: clock(), soundTimer: null, stopSound: null, soundGeneration: 0,
+      soundBlocked: false, soundEnded: false, audioUnavailable: false, done: false, complete: false };
     run.onVisibility = () => { if (doc.visibilityState === 'hidden') finish(run, 'hidden'); };
     run.onPageHide = () => finish(run, 'hidden');
     run.onSeason = () => { if (!accessible()) finish(run, 'expired'); };
-    run.onMotion = () => { if (preferences(media).reducedMotion) { dialog.classList.add('is-still'); complete(run); } };
+    run.onMotion = () => { if (preferences(media).reducedMotion) { dialog.classList.add('is-still'); complete(run, { keepSound: true }); } };
     dialog.addEventListener('cancel', e => { e.preventDefault(); finish(run, 'dismissed'); });
     dialog.addEventListener('close', () => finish(run, 'dismissed'));
     dialog.querySelector('.vaca-arrival-close').addEventListener('click', () => finish(run, 'dismissed'));
@@ -166,7 +203,7 @@
     dialog.querySelector('.vaca-arrival-skip').addEventListener('click', () => {
       complete(run); dialog.querySelector('.vaca-arrival-close-final').focus({ preventScroll: true });
     });
-    dialog.querySelector('.vaca-arrival-mute').addEventListener('click', () => { stopAudio(run); muteButton(run, 'Sonido silenciado'); });
+    dialog.querySelector('.vaca-arrival-mute').addEventListener('click', event => toggleSound(run, event));
     doc.body.appendChild(dialog);
     try { dialog.showModal(); } catch (_) { dialog.remove(); return false; }
     active = run; doc.body.style.overflow = 'hidden';
@@ -175,16 +212,20 @@
     root.addEventListener('pagehide', run.onPageHide);
     media?.addEventListener?.('change', run.onMotion);
     remember(); // Act zero is already readable: interruptions still leave a replay button.
-    if (still) { complete(run); muteButton(run, 'Escena sin sonido'); }
+    if (!soundMuted) sound(run);
+    updateSoundButton(run);
+    run.soundTimer = setTimeout(() => {
+      run.soundTimer = null;
+      if (!accessible()) finish(run, 'hidden'); else complete(run);
+    }, Math.max(0, DURATION - (clock() - run.startedAt)));
+    if (still) complete(run, { keepSound: true });
     else {
-      if (settings.soundMuted) muteButton(run, 'Sonido desactivado');
-      else if (!sound(run)) muteButton(run, 'Sin sonido');
-      for (const [delay, index] of [[3000, 1], [9000, 2], [17000, 3], [DURATION, 4]]) {
+      for (const [delay, index] of [[3000, 1], [9000, 2], [17000, 3]]) {
         const timer = setTimeout(() => {
           run.timers.delete(timer);
           if (active !== run || run.done || run.complete) return;
           if (!accessible()) { finish(run, 'hidden'); return; }
-          if (index === 4) complete(run); else changeStage(run, index);
+          changeStage(run, index);
         }, delay);
         run.timers.add(timer);
       }

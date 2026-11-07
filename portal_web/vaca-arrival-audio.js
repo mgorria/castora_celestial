@@ -2,13 +2,15 @@
   'use strict';
 
   const SCORE_LENGTH = 26000;
+  const RESUME_TIMEOUT = 1000;
   const clock = () => root.performance?.now() ?? Date.now();
 
   // The caller owns the trusted gesture. Loading this file never opens an audio context.
-  function play({ duration = SCORE_LENGTH, isAllowed = () => true } = {}) {
+  function play({ duration = SCORE_LENGTH, offset = 0, isAllowed = () => true, onBlocked = () => {} } = {}) {
     const length = Math.min(SCORE_LENGTH, Number.isFinite(duration) ? Math.max(0, duration) : SCORE_LENGTH);
-    const started = clock(), nodes = new Set(), sources = new Set();
-    let context, master, timer, finished = false, scheduled = false, noiseBuffer;
+    const attempted = clock(), started = attempted - Math.min(length, Number.isFinite(offset) ? Math.max(0, offset) : 0);
+    const nodes = new Set(), sources = new Set();
+    let context, master, timer, finished = false, scheduled = false, noiseBuffer, launching = true, waitingSince = attempted;
     const allowed = () => { try { return isAllowed() === true; } catch (_) { return false; } };
     const left = () => Math.max(0, length - (clock() - started));
     const track = node => { nodes.add(node); return node; };
@@ -28,19 +30,39 @@
     }
     stop.available = false;
     Object.defineProperty(stop, 'active', { get: () => !finished && !!context });
-    if (!length || !allowed()) { stop(); return stop; }
+    function blocked() {
+      if (finished) return;
+      const notify = allowed() && left() > 0;
+      if (launching) stop.available = false;
+      stop();
+      if (notify) { try { onBlocked(); } catch (_) { /* The caller cannot interrupt cleanup. */ } }
+    }
+    function ready() {
+      if (finished) return;
+      try { score(); } catch (_) { blocked(); }
+    }
+    if (!left() || !allowed()) { stop(); return stop; }
     const Audio = root.AudioContext || root.webkitAudioContext;
-    if (!Audio) { stop(); return stop; }
+    if (!Audio) { blocked(); return stop; }
 
     function watchdog() {
       if (finished) return;
       if (!left() || !allowed() || context.state === 'closed') { stop(); return; }
+      if (context.state === 'running') {
+        waitingSince = null;
+        if (!scheduled) ready();
+      } else {
+        waitingSince ??= clock();
+        if (clock() - waitingSince >= RESUME_TIMEOUT) { blocked(); return; }
+      }
+      if (finished) return;
       timer = setTimeout(watchdog, Math.min(250, left()));
     }
 
     function score() {
       if (finished || scheduled) return;
-      if (!allowed() || !left() || context.state !== 'running') { stop(); return; }
+      if (!allowed() || !left() || context.state === 'closed') { stop(); return; }
+      if (context.state !== 'running') return;
       scheduled = true;
       const passed = (clock() - started) / 1000;
       const base = context.currentTime, deadline = base + left() / 1000;
@@ -179,12 +201,11 @@
       stop.available = true;
       // Both operations happen synchronously inside the original click handler.
       const resumed = context.resume?.();
-      const ready = () => { if (finished) return; try { score(); } catch (_) { stop(); } };
       if (context.state === 'running') ready();
-      if (resumed?.then) resumed.then(ready, stop);
-      else if (context.state !== 'running') stop();
+      if (resumed?.then) resumed.then(ready, blocked);
       if (!finished) watchdog();
-    } catch (_) { stop.available = false; stop(); }
+    } catch (_) { stop.available = false; blocked(); }
+    launching = false;
     return stop;
   }
 
