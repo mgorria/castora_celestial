@@ -1,0 +1,256 @@
+<svg xmlns="http://www.w3.org/2000/svg">
+  <title>Pequeñas paradas de la Vaca Mágica</title>
+  <defs>
+    <linearGradient id="vr-station-lavender" x1="0" y1="0" x2=".8" y2="1">
+      <stop stop-color="#e7dcff"/><stop offset="1" stop-color="#a99bd8"/>
+    </linearGradient>
+    <linearGradient id="vr-station-rose" x1="0" y1="0" x2=".7" y2="1">
+      <stop stop-color="#ffe0e6"/><stop offset="1" stop-color="#e79db8"/>
+    </linearGradient>
+    <linearGradient id="vr-station-butter" x1="0" y1="0" x2=".8" y2="1">
+      <stop stop-color="#fff4cc"/><stop offset="1" stop-color="#edca88"/>
+    </linearGradient>
+    <linearGradient id="vr-station-mint" x1="0" y1="0" x2=".8" y2="1">
+      <stop stop-color="#d8f5e9"/><stop offset="1" stop-color="#85c7bc"/>
+    </linearGradient>
+    <linearGradient id="vr-station-copper" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#ffd9a5"/><stop offset=".46" stop-color="#d79e77"/><stop offset="1" stop-color="#ab6c65"/>
+    </linearGradient>
+    <linearGradient id="vr-station-cloud" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#f8eafa"/><stop offset="1" stop-color="#b9addc"/>
+    </linearGradient>
+    <radialGradient id="vr-station-glass" cx=".35" cy=".28" r=".85">
+      <stop stop-color="#effff6"/><stop offset=".44" stop-color="#a0dfd4"/><stop offset="1" stop-color="#53658c"/>
+    </radialGradient>
+    <g id="vr-station-island" stroke="none">
+      <ellipse cx="60" cy="91" rx="40" ry="5" fill="#44365f" opacity=".2"/>
+      <path d="M17 82c-2-7 5-12 13-10 2-9 14-11 21-5 7-9 20-7 24 2 9-5 20-1 22 6 11-1 15 10 5 14-11 5-69 6-82 0-4-2-5-5-3-7Z" fill="url(#vr-station-cloud)"/>
+      <path d="M26 79c3-4 8-5 12-3m41-1c4-2 8 0 9 3" fill="none" stroke="#fff7ef" stroke-width="2" stroke-linecap="round" opacity=".8"/>
+      <ellipse cx="61" cy="82" rx="30" ry="4" fill="#7a6b9b" opacity=".2"/>
+    </g>
+    <g id="vr-station-spark" fill="#ffe6a8" stroke="none">
+      <path d="m0-6 1.7 4.3L6 0 1.7 1.7 0 6-1.7 1.7-6 0-1.7-1.7Z"/>
+      <circle cx="7" cy="-6" r="1.3" fill="#ffeef4"/>
+    </g>
+    <g id="vr-station-prop-shadow" stroke="none">
+      <ellipse cx="60" cy="87" rx="28" ry="5" fill="#584775" opacity=".18"/>
+    </g>
+  </defs>
+
+  <symbol id="market" viewBox="0 0 120 100">
+    <use href="#vr-station-island"/>
+    <g stroke="#655478" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M27 38h66v42H27Z" fill="url(#vr-station-butter)"/>
+      <path d="m23 35 15-16h44l15 16Z" fill="url(#vr-station-lavender)"/>
+      <path d="m26 33 12-14h44l12 14" fill="none" stroke="#fff0e9" stroke-width="3"/>
+      <path d="M34 18v-8h9v9" fill="#cba1c0"/>
+      <path d="M33 10h11" stroke="#fae7ed" stroke-width="3"/>
+      <rect x="53" y="54" width="18" height="26" rx="9" fill="#7e6a91"/>
+      <path d="M57 61h10v12H57Z" fill="#ffe6a6" stroke="none"/>
+      <circle cx="67" cy="74" r="1" fill="#fff0ca" stroke="none"/>
+      <rect x="34" y="54" width="12" height="15" rx="3" fill="#ffeab4"/>
+      <path d="M40 55v13m-5-7h10" stroke="#b9908e" stroke-width="1.2"/>
+      <rect x="77" y="54" width="10" height="15" rx="3" fill="#ffeab4"/>
+      <path d="M82 55v13" stroke="#b9908e" stroke-width="1.2"/>
+      <path d="M25 33h70l5 13H20Z" fill="#f6d5df"/>
+      <path d="m35 33-3 13H21l4-13Zm20 0-1 13H43l2-13Zm20 0 2 13H65l-1-13Zm20 0 4 13H88l-3-13Z" fill="#ae8fbf" stroke="none"/>
+      <path d="M20 46v4c0 5 11 5 12 0 1 5 11 5 11 0 1 5 11 5 11 0 1 5 11 5 11 0 1 5 11 5 12 0 1 5 11 5 11 0 1 5 12 5 12 0v-4" fill="#f8dce5"/>
+      <path d="M28 29q32 11 64 0" fill="none" stroke="#897993" stroke-width="1.2"/>
+      <g stroke="none">
+        <circle cx="33" cy="31" r="2.4" fill="#ffeab4"/><circle cx="47" cy="35" r="2.4" fill="#a6dfcb"/>
+        <circle cx="62" cy="36" r="2.4" fill="#ffd4dd"/><circle cx="77" cy="34" r="2.4" fill="#ffeab4"/><circle cx="90" cy="30" r="2.4" fill="#a6dfcb"/>
+      </g>
+      <path d="m82 69-2 13h15l-2-13Z" fill="url(#vr-station-mint)"/>
+      <path d="M85 70v-3a3 3 0 0 1 6 0v3" fill="none"/>
+      <path d="m94 74-1 10h12l-1-10Z" fill="url(#vr-station-rose)"/>
+      <path d="M97 74v-2a2 2 0 0 1 4 0v2" fill="none"/>
+      <path d="M23 76h20v5H23Z" fill="#b4ccbb"/>
+    </g>
+    <use href="#vr-station-spark" transform="translate(103 22) scale(.8)"/>
+    <use href="#vr-station-spark" transform="translate(16 60) scale(.55)"/>
+  </symbol>
+
+  <symbol id="fuel" viewBox="0 0 120 100">
+    <use href="#vr-station-island"/>
+    <g stroke="#655478" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M73 37c18-1 20 11 19 26 0 11-14 13-15 3V54" fill="none" stroke="#635779" stroke-width="5"/>
+      <path d="M73 37c18-1 20 11 19 26 0 11-14 13-15 3V54" fill="none" stroke="#ba9cc5" stroke-width="2.2"/>
+      <path d="m76 48 8 2-3 11-7-2 1-8-4-3 3-5 5 3" fill="url(#vr-station-copper)"/>
+      <rect x="33" y="23" width="39" height="53" rx="9" fill="url(#vr-station-lavender)"/>
+      <path d="M41 24v-6c0-6 23-6 23 0v6" fill="url(#vr-station-rose)"/>
+      <rect x="39" y="30" width="27" height="28" rx="5" fill="#625878"/>
+      <path d="M41 45q7-5 12 0t11-1v9c0 2-2 3-4 3H45c-3 0-4-2-4-3Z" fill="#d8ace0" stroke="none"/>
+      <path d="m52 33 2.5 5 5.5.8-4 3.9 1 5.5-5-2.6-5 2.6 1-5.5-4-3.9 5.5-.8Z" fill="url(#vr-station-butter)" stroke="#fff0c8" stroke-width="1"/>
+      <circle cx="46" cy="51" r="1.3" fill="#ffe5ac" stroke="none"/><circle cx="59" cy="50" r="1.2" fill="#fff2d7" stroke="none"/>
+      <path d="M44 64h17" stroke="#ffe4b7" stroke-width="3"/>
+      <rect x="29" y="74" width="47" height="8" rx="4" fill="#d9b3c7"/>
+      <circle cx="66" cy="66" r="2" fill="#a5dec9" stroke-width="1"/>
+      <path d="M39 20h27" stroke="#fff0dc" stroke-width="2"/>
+    </g>
+    <use href="#vr-station-spark" transform="translate(87 23)"/>
+    <use href="#vr-station-spark" transform="translate(23 49) scale(.65)"/>
+    <circle cx="98" cy="39" r="2" fill="#b7e0d2"/>
+  </symbol>
+
+  <symbol id="cookies" viewBox="0 0 120 100">
+    <use href="#vr-station-island"/>
+    <g stroke="#655478" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M69 12c-20-4-30 18-17 31 10 10 25 4 28-6-15 6-27-10-11-25Z" fill="url(#vr-station-butter)" stroke="#c5a082"/>
+      <path d="M85 24v14" stroke="#b99bc8" stroke-width="1.2"/>
+      <path d="m85 35 2 4 4 .5-3 3 .7 4-3.7-2-3.7 2 .7-4-3-3 4-.5Z" fill="#f6d2dc" stroke-width="1.2"/>
+      <path d="m40 65-5 17m42-17 6 17M60 65v18" fill="none" stroke="#bc8b84" stroke-width="4"/>
+      <path d="M34 76h51" stroke="#d6a89a" stroke-width="3"/>
+      <ellipse cx="59" cy="62" rx="34" ry="9" fill="#c99bae"/>
+      <ellipse cx="59" cy="59" rx="34" ry="9" fill="url(#vr-station-rose)"/>
+      <ellipse cx="67" cy="57" rx="17" ry="5" fill="#f8f0dd" stroke="#b6a5c8" stroke-width="1.2"/>
+      <path d="M32 46h16v11c0 7-16 7-16 0Z" fill="url(#vr-station-mint)"/>
+      <path d="M48 49h3c7 0 5 10-3 8" fill="none" stroke-width="2.2"/>
+      <ellipse cx="40" cy="46" rx="8" ry="2.5" fill="#79617c"/>
+      <path d="M38 41c-6-5 5-6 0-12m7 11c-4-4 4-5 1-9" fill="none" stroke="#f8e8ef" stroke-width="2"/>
+      <circle cx="63" cy="51" r="7" fill="#e7ba7f" stroke="#b68b75" stroke-width="1.3"/>
+      <circle cx="75" cy="52" r="7" fill="#f2cd91" stroke="#b68b75" stroke-width="1.3"/>
+      <g fill="#8e6b73" stroke="none"><circle cx="61" cy="48" r="1.4"/><circle cx="65" cy="53" r="1.4"/><circle cx="73" cy="49" r="1.3"/><circle cx="78" cy="52" r="1.4"/><circle cx="73" cy="55" r="1.2"/></g>
+      <path d="M68 40c-3-4 4-4 1-9" fill="none" stroke="#f8e8ef" stroke-width="1.8"/>
+    </g>
+    <use href="#vr-station-spark" transform="translate(26 27) scale(.8)"/>
+    <use href="#vr-station-spark" transform="translate(99 53) scale(.65)"/>
+  </symbol>
+
+  <symbol id="post" viewBox="0 0 120 100">
+    <use href="#vr-station-island"/>
+    <g stroke="#655478" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M31 43C15 45 11 30 14 22c5 8 10 10 19 8M87 43c16 2 20-13 17-21-5 8-10 10-19 8" fill="#fff0e8" stroke="#aa96bf"/>
+      <path d="M16 31q6 9 17 7m68-7q-6 9-17 7M20 39q5 5 12 5m65-5q-5 5-12 5" fill="none" stroke="#c6b4d3"/>
+      <path d="M55 62h10v21H55Z" fill="url(#vr-station-copper)"/>
+      <path d="M46 82h28" stroke="#bb99b4" stroke-width="5"/>
+      <path d="M30 41a15 15 0 0 1 15-15h31a13 13 0 0 1 13 13v26H30Z" fill="url(#vr-station-rose)"/>
+      <path d="M30 41a14 14 0 0 1 28 0v24H30Z" fill="url(#vr-station-lavender)"/>
+      <path d="M36 42h16" stroke="#756286" stroke-width="3"/>
+      <circle cx="44" cy="58" r="2.1" fill="#f8d99e" stroke-width="1"/>
+      <path d="M76 45V20h14v9H76" fill="#acdbc9"/>
+      <path d="m65 51-7-4c-7-3-9 6-3 7l10-1 9-1c6-2 3-10-2-7Z" fill="#fbe7b5"/>
+      <path d="m63 53-6 10 7-2 2 3 3-11" fill="#fbe7b5"/>
+      <circle cx="65" cy="51" r="2.5" fill="#e8b57f" stroke-width="1"/>
+      <g transform="rotate(-14 28 68)">
+        <rect x="16" y="60" width="24" height="16" rx="2" fill="#fff2dc"/>
+        <path d="m17 61 11 9 11-9m-22 14 7-6m15 6-7-6" fill="none" stroke="#b5a1bf" stroke-width="1.2"/>
+      </g>
+      <g transform="rotate(12 60 15)">
+        <rect x="49" y="7" width="22" height="15" rx="2" fill="#fff3df"/>
+        <path d="m50 8 10 8 10-8" fill="none" stroke="#b5a1bf" stroke-width="1.2"/>
+      </g>
+    </g>
+    <use href="#vr-station-spark" transform="translate(102 63) scale(.8)"/>
+    <use href="#vr-station-spark" transform="translate(35 13) scale(.6)"/>
+  </symbol>
+
+  <symbol id="lookout" viewBox="0 0 120 100">
+    <use href="#vr-station-island"/>
+    <g stroke="#655478" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="61" cy="80" rx="28" ry="5" fill="#ad9bc8" stroke="#8c7aab"/>
+      <path d="m60 53-19 27m19-27 20 27m-20-27 2 29" fill="none" stroke="#b8908a" stroke-width="4"/>
+      <path d="m60 55-17 24m17-24 18 24" fill="none" stroke="#ffe0b4" stroke-width="1"/>
+      <path d="M53 49h14v9H53Z" fill="#bba4cf"/>
+      <g transform="rotate(-25 60 43)">
+        <path d="M27 39h13v9H27Z" fill="#8b719e"/>
+        <path d="m37 35 48-3v23l-48-3Z" fill="url(#vr-station-copper)"/>
+        <path d="M42 35v17m33-19v21" fill="none" stroke="#f4d1a5" stroke-width="3"/>
+        <rect x="82" y="30" width="8" height="27" rx="2" fill="#e8c29c"/>
+        <ellipse cx="90" cy="43.5" rx="5" ry="13.5" fill="url(#vr-station-glass)"/>
+        <path d="M90 34c-3 3-3 7-3 10" fill="none" stroke="#f4fff4" stroke-width="1.5"/>
+      </g>
+      <circle cx="60" cy="55" r="5" fill="#f3d5a6"/>
+      <circle cx="60" cy="55" r="1.6" fill="#a47c8f" stroke="none"/>
+    </g>
+    <use href="#vr-station-spark" transform="translate(22 27) scale(.85)"/>
+    <use href="#vr-station-spark" transform="translate(104 14) scale(.8)"/>
+    <circle cx="32" cy="14" r="2" fill="#d6c7ef"/><circle cx="97" cy="61" r="1.8" fill="#bce0d1"/>
+  </symbol>
+
+  <symbol id="bag" viewBox="0 0 120 100">
+    <use href="#vr-station-prop-shadow"/>
+    <g stroke="#655478" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M43 38V28c0-20 34-20 34 0v10" fill="none" stroke="#e5bf8d" stroke-width="5"/>
+      <path d="M43 36V28c0-20 34-20 34 0v8" fill="none" stroke="#fff0c5" stroke-width="1.5"/>
+      <path d="m34 34-6 47c0 7 64 7 64 0l-6-47Z" fill="url(#vr-station-rose)"/>
+      <path d="m34 34 9 7h34l9-7" fill="#f9dde5"/>
+      <path d="m37 45-3 30m49-30 3 30" fill="none" stroke="#fff1e8" stroke-width="2" opacity=".8"/>
+      <circle cx="60" cy="59" r="13" fill="url(#vr-station-butter)" stroke="#d6ac90" stroke-width="1.5"/>
+      <path d="m60 49 2.8 6 6.7.8-5 4.6 1.3 6.6-5.8-3.4-5.8 3.4 1.3-6.6-5-4.6 6.7-.8Z" fill="#ae95bd" stroke="none"/>
+      <path d="m75 33-9-5c-7-4-10 6-3 8l12-1 11 1c7-2 4-12-2-8Z" fill="url(#vr-station-mint)" stroke-width="1.5"/>
+      <circle cx="75" cy="33" r="3" fill="#b8d7c4" stroke-width="1.2"/>
+    </g>
+    <use href="#vr-station-spark" transform="translate(101 35) scale(.8)"/>
+    <use href="#vr-station-spark" transform="translate(21 58) scale(.6)"/>
+  </symbol>
+
+  <symbol id="glitter" viewBox="0 0 120 100">
+    <use href="#vr-station-prop-shadow"/>
+    <g stroke="#655478" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M49 29h22v13c1 6 13 8 16 19l2 15c1 11-59 11-58 0l2-15c3-11 15-13 16-19Z" fill="url(#vr-station-lavender)"/>
+      <path d="M36 63q12-8 24-1t24-1l2 14c1 8-53 8-52 0Z" fill="url(#vr-station-rose)" stroke="none"/>
+      <path d="M42 52c-5 4-6 8-6 13" fill="none" stroke="#fff6e8" stroke-width="3"/>
+      <rect x="47" y="27" width="26" height="10" rx="3" fill="url(#vr-station-copper)"/>
+      <path d="m60 8 4 8 9 1-6.5 6.3 1.6 9-8.1-4.4-8.1 4.4 1.6-9L47 17l9-1Z" fill="url(#vr-station-butter)" stroke="#b4959d" stroke-width="1.5"/>
+      <path d="m61 48 2.5 5.5 6 .8-4.3 4.2 1 6-5.2-2.8-5.3 2.8 1.1-6-4.3-4.2 6-.8Z" fill="#fff0bb" stroke="#c6a0b1" stroke-width="1.2"/>
+      <g fill="#fff0c5" stroke="none"><circle cx="45" cy="69" r="2"/><circle cx="56" cy="74" r="1.6"/><circle cx="73" cy="68" r="2.3"/><circle cx="66" cy="77" r="1.5"/></g>
+    </g>
+    <use href="#vr-station-spark" transform="translate(92 37)"/>
+    <use href="#vr-station-spark" transform="translate(26 29) scale(.7)"/>
+  </symbol>
+
+  <symbol id="cookie" viewBox="0 0 120 100">
+    <use href="#vr-station-prop-shadow"/>
+    <g stroke-linecap="round" stroke-linejoin="round">
+      <path d="M60 17c17-2 35 12 37 30 3 20-13 37-33 39-21 1-38-13-40-33-2-20 13-35 36-36Z" fill="#bd8b75" stroke="#725a75" stroke-width="2"/>
+      <path d="M58 13c18-2 35 13 37 31 2 19-12 36-32 38-21 1-38-13-39-32-2-20 12-35 34-37Z" fill="url(#vr-station-butter)" stroke="#b5917f" stroke-width="2"/>
+      <path d="M32 43c2-11 11-20 23-22" fill="none" stroke="#fff2cf" stroke-width="3"/>
+      <g fill="#916c78" stroke="#7d5c6d" stroke-width="1.2">
+        <path d="m47 30 8 1-1 8-9-1Z"/><path d="m72 29 7 5-4 7-8-5Z"/>
+        <path d="m36 50 8-3 3 8-8 3Z"/><path d="m61 46 7 3-3 8-8-3Z"/>
+        <path d="m78 53 7-1 2 8-8 2Z"/><path d="m51 65 8-2 3 7-8 3Z"/>
+      </g>
+      <g fill="#c79b76"><circle cx="57" cy="25" r="1.5"/><circle cx="38" cy="39" r="1.4"/><circle cx="75" cy="68" r="1.7"/><circle cx="52" cy="49" r="1.4"/><circle cx="69" cy="64" r="1.2"/><circle cx="43" cy="65" r="1.4"/></g>
+    </g>
+    <use href="#vr-station-spark" transform="translate(101 28) scale(.85)"/>
+    <use href="#vr-station-spark" transform="translate(19 67) scale(.6)"/>
+  </symbol>
+
+  <symbol id="letter" viewBox="0 0 120 100">
+    <use href="#vr-station-prop-shadow"/>
+    <g transform="rotate(-10 60 49)" stroke="#857195" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="23" y="28" width="75" height="48" rx="5" fill="url(#vr-station-butter)"/>
+      <path d="m25 73 27-24h16l27 24" fill="#f8e8c7"/>
+      <path d="m25 31 32 25c2 2 5 2 7 0l31-25" fill="#fff4dd"/>
+      <path d="M30 35 56 55" fill="none" stroke="#fffaf0" stroke-width="1.5"/>
+      <circle cx="60" cy="57" r="9" fill="url(#vr-station-rose)" stroke="#bb85a4" stroke-width="1.5"/>
+      <path d="m60 51 1.8 3.6 4 .6-2.9 2.8.7 4-3.6-1.9-3.6 1.9.7-4-2.9-2.8 4-.6Z" fill="#ffe7b4" stroke="none"/>
+      <path d="M83 34h8v9h-8Z" fill="#c2dfcf" stroke="#adbaa9" stroke-width="1"/>
+    </g>
+    <use href="#vr-station-spark" transform="translate(99 18) scale(.85)"/>
+    <use href="#vr-station-spark" transform="translate(18 46) scale(.65)"/>
+    <path d="M34 15q7-6 14 0m-23 7q4-4 8-2" fill="none" stroke="#d9bcd7" stroke-width="2" stroke-linecap="round"/>
+  </symbol>
+
+  <symbol id="binoculars" viewBox="0 0 120 100">
+    <use href="#vr-station-prop-shadow"/>
+    <g stroke="#655478" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M39 34c-5-23 48-23 43 0" fill="none" stroke="#cba4be" stroke-width="3"/>
+      <path d="M47 36h26v15H47Z" fill="url(#vr-station-copper)"/>
+      <rect x="54" y="30" width="12" height="25" rx="5" fill="#d5bddf"/>
+      <path d="M57 34v8m6-8v8" stroke="#a68bb7" stroke-width="1.2"/>
+      <path d="m33 28-11 42c-2 14 34 19 36 4l-5-45Z" fill="url(#vr-station-lavender)"/>
+      <path d="m67 29-5 45c2 15 38 10 36-4L87 28Z" fill="url(#vr-station-lavender)"/>
+      <ellipse cx="43" cy="29" rx="10" ry="5" fill="#a58abd"/>
+      <ellipse cx="77" cy="29" rx="10" ry="5" fill="#a58abd"/>
+      <path d="m30 48-4 15m48-25-1 20" fill="none" stroke="#f9e9f8" stroke-width="3" opacity=".85"/>
+      <ellipse cx="39" cy="71" rx="18" ry="13" fill="url(#vr-station-copper)"/>
+      <ellipse cx="81" cy="71" rx="18" ry="13" fill="url(#vr-station-copper)"/>
+      <ellipse cx="39" cy="71" rx="12" ry="9" fill="url(#vr-station-glass)"/>
+      <ellipse cx="81" cy="71" rx="12" ry="9" fill="url(#vr-station-glass)"/>
+      <path d="M32 70q2-5 7-5m35 5q2-5 7-5" fill="none" stroke="#f5fff1" stroke-width="2"/>
+    </g>
+    <use href="#vr-station-spark" transform="translate(102 28) scale(.8)"/>
+    <use href="#vr-station-spark" transform="translate(17 44) scale(.6)"/>
+  </symbol>
+</svg>
