@@ -33,6 +33,9 @@ body:not(.christmas-season) .vaca-arrival-card { display: none; }
 .vaca-arrival-button-copy > span { color: #f5cabc; font: 400 11px/1.5 var(--sans); }
 .vaca-arrival-new { align-self: center; padding: 6px 9px; min-width: 27px; border: 1px solid #ffdca678; border-radius: 50px; color: #fff2d2; background: #631c36; font: 700 9px/1.2 var(--sans); letter-spacing: 1px; text-align: center; }
 .vaca-arrival-button-arrow { flex-shrink: 0; font: 400 30px/1 var(--serif); color: #ffe1ad; }
+.vaca-visit-card .vaca-arrival-trigger { min-height: 150px; background: radial-gradient(ellipse at 10% 0%, #ffe6a538, transparent 65%), linear-gradient(115deg, #75283c, #9b243c 55%, #431b38); }
+.vaca-visit-card .vaca-arrival-button-copy > strong { font-size: clamp(27px, 3.5vw, 46px); }
+.vaca-visit-card .vaca-arrival-button-copy > span { font-size: 13px; }
 
 /* A full-screen, four-act magical emergency broadcast. */
 #vaca-arrival {

@@ -4,6 +4,9 @@
   const START = Date.parse('2026-11-01T00:00:00+01:00');
   // January 10 is included; the usual house returns at midnight on January 11.
   const END = Date.parse('2027-01-11T00:00:00+01:00');
+  const VISIT_START = Date.parse('2026-11-13T00:00:00+01:00');
+  const VISIT_END = Date.parse('2026-11-14T00:00:00+01:00');
+  const visitPeriod = time => time < VISIT_START ? 'before' : time < VISIT_END ? 'arrival' : 'after';
   const STORAGE_KEY = 'castori.christmas.effects.v1';
   const doc = root.document;
   const period = time => time < START ? 'before' : time < END ? 'active' : 'after';
@@ -104,7 +107,14 @@
     return originals.get(node);
   }
   function dressHouse() {
-    const changes = [
+    const arrived = active && visitPeriod(now()) === 'arrival';
+    doc.body.classList.toggle('vaca-visit-day', arrived);
+    const changes = arrived ? [
+      ['#welcome-title', '¡La Vaca ha venido,<br><em>Patita!</em>'],
+      ['.hero-content .eyebrow', '✦ 13 DE NOVIEMBRE · VISITA CONFIRMADA'],
+      ['.hero-content > p', 'Esta noche ha habido movimiento en Casa Tosico.<br>«¿Sigilo? Muuu… ese no era mi departamento.»'],
+      ['.hero-caption', '✦ Hoy no hacen falta predicciones. La magia ya ha pasado por aquí.']
+    ] : [
       ['#welcome-title', 'La Navidad está<br>en casa, <em>Patita.</em>'],
       ['.hero-content .eyebrow', '✧ CASA TOSICO · EDICIÓN NAVIDAD'],
       ['.hero-content > p', 'Enciende la ilusión, acércate al árbol<br>y quédate un ratito con nosotros.'],
@@ -120,8 +130,9 @@
     if (!art) return;
     if (active) {
       remember(art);
-      if (art.getAttribute('src') !== 'assets/casa-celestial-navidad.png') art.setAttribute('src', 'assets/casa-celestial-navidad.png');
-      art.setAttribute('alt', 'Castori, Mimosuga y la Vaca celebran la Navidad en su casa del árbol, entre guirnaldas, regalos y luces de colores.');
+      const src = arrived ? 'assets/vaca-arrival-arrival.webp' : 'assets/casa-celestial-navidad.png';
+      if (art.getAttribute('src') !== src) art.setAttribute('src', src);
+      art.setAttribute('alt', arrived ? 'La Vaca celebra su llegada a Casa Tosico entre luces y destellos mágicos.' : 'Castori, Mimosuga y la Vaca celebran la Navidad en su casa del árbol, entre guirnaldas, regalos y luces de colores.');
     } else if (originals.has(art)) {
       const original = originals.get(art);
       art.setAttribute('src', original.src); art.setAttribute('alt', original.alt);
@@ -191,9 +202,10 @@
       doc.body.classList.remove('christmas-paused');
     }
     dressHouse();
+    root.CastoriVacaArrival?.refresh();
     if (active) syncEffects();
     if (changed) doc.dispatchEvent(new root.CustomEvent('castori:seasonchange', { detail: { active } }));
-    const boundary = time < START ? START : time < END ? END : null;
+    const boundary = [START, VISIT_START, VISIT_END, END].find(value => value > time) ?? null;
     if (boundary !== null && isVisible()) boundaryTimer = setTimeout(refresh, Math.max(1, Math.min(60000, boundary - time)));
   }
   function suspend() { clearTimeout(boundaryTimer); boundaryTimer = null; stopSnow(); stopAudio(); }
@@ -209,6 +221,6 @@
     root.addEventListener('pagehide', suspend);
     refresh();
   }
-  root.CastoriChristmas = { START, END, period, now, init, refresh, isActive: () => active,
+  root.CastoriChristmas = { START, END, VISIT_START, VISIT_END, visitPeriod, period, now, init, refresh, isActive: () => active,
     preferences: () => ({ soundMuted, motionPaused, reducedMotion: !!media?.matches }) };
 })(typeof window === 'undefined' ? globalThis : window);

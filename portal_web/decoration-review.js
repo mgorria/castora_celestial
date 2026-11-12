@@ -5,7 +5,10 @@
   // The decoration review closes at midnight on 1 December in Madrid.
   const DEADLINE = Date.parse('2026-12-01T00:00:00+01:00');
   const END = calendar?.END ?? Date.parse('2027-01-11T00:00:00+01:00');
+  const VISIT_START = calendar?.VISIT_START ?? Date.parse('2026-11-13T00:00:00+01:00');
+  const VISIT_END = calendar?.VISIT_END ?? Date.parse('2026-11-14T00:00:00+01:00');
   const currentTime = () => calendar?.now() ?? Date.now();
+  const visiting = now => now >= VISIT_START && now < VISIT_END;
   const units = [['days', 'días'], ['hours', 'horas'], ['minutes', 'minutos'], ['seconds', 'segundos']];
   const madridDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' });
   const shortDate = new Intl.DateTimeFormat('es-ES', { timeZone: 'UTC', day: 'numeric', month: 'short' });
@@ -16,9 +19,7 @@
     '2026-11-02': 18, '2026-11-03': 23, '2026-11-04': 31, '2026-11-05': 43,
     '2026-11-06': 8, '2026-11-07': 12, '2026-11-08': 10,
     '2026-11-09': 18, '2026-11-10': 26, '2026-11-11': 58, '2026-11-12': 67,
-    '2026-11-13': 76, '2026-11-14': 82, '2026-11-15': 20,
-    '2026-11-16': 16, '2026-11-17': 22, '2026-11-18': 28,
-    '2026-11-19': 66, '2026-11-20': 74, '2026-11-21': 88, '2026-11-22': 92
+    '2026-11-13': 76
   };
   const orbits = [
     { limit: 30, outlook: 'quiet', signal: 'Órbita exterior' },
@@ -40,7 +41,10 @@
       const date = new Date(firstDay + index * 86400000), iso = date.toISOString().slice(0, 10);
       const dayNumber = Math.floor(date.getTime() / 86400000);
       const weekend = [0, 6].includes(date.getUTCDay());
-      const chance = visitSignals[iso] ?? (22 + (dayNumber * 17 % 33 + 33) % 33 + (weekend ? 10 : 0));
+      // After the confirmed visit, every future date keeps a small, stable signal.
+      const chance = iso >= '2026-11-14'
+        ? (dayNumber * 17 % 21 + 21) % 21
+        : visitSignals[iso] ?? (22 + (dayNumber * 17 % 33 + 33) % 33 + (weekend ? 10 : 0));
       const orbit = orbits.find(item => chance < item.limit);
       return { iso, weekday: index === 0 ? 'Hoy' : weekday.format(date).replace('.', ''), dateLabel: shortDate.format(date).replace('.', ''), chance, signal: orbit.signal, outlook: orbit.outlook };
     });
@@ -49,6 +53,7 @@
     return root.CastoriVacaRadar.render(days);
   }
   function renderForecast(now) {
+    if (visiting(now)) return `<section class="vaca-forecast" data-vaca-forecast data-forecast-day="${dayKey(now)}" hidden></section>`;
     const days = forecast(now);
     return `<section class="vaca-forecast" data-vaca-forecast data-forecast-day="${days[0].iso}" aria-labelledby="vaca-forecast-title">${forecastBody(days)}</section>`;
   }
@@ -109,13 +114,25 @@
     if (now >= END) { section.hidden = true; unmount(); return; }
     const weather = section.querySelector('[data-vaca-forecast]');
     const today = dayKey(now);
-    if (weather.getAttribute('data-forecast-day') !== today) {
-      root.CastoriVacaRadar?.unmount();
-      weather.innerHTML = forecastBody(forecast(now));
+    if (visiting(now)) {
+      if (!weather.hidden || weather.innerHTML) {
+        root.CastoriVacaRadar?.unmount();
+        weather.innerHTML = '';
+      }
+      weather.hidden = true;
+      weather.removeAttribute('aria-labelledby');
       weather.setAttribute('data-forecast-day', today);
-      root.CastoriVacaRadar?.mount(weather);
+    } else {
+      if (weather.hidden || weather.getAttribute('data-forecast-day') !== today) {
+        root.CastoriVacaRadar?.unmount();
+        weather.innerHTML = forecastBody(forecast(now));
+        weather.setAttribute('data-forecast-day', today);
+        weather.setAttribute('aria-labelledby', 'vaca-forecast-title');
+        weather.hidden = false;
+        root.CastoriVacaRadar?.mount(weather);
+      }
+      root.CastoriVacaRadar?.refresh();
     }
-    root.CastoriVacaRadar?.refresh();
     const value = remaining(now);
     const wasClosed = section.classList.contains('decoration-review-closed');
     section.classList.toggle('decoration-review-closed', value.closed);
@@ -131,7 +148,11 @@
       const text = pad(value[key]);
       if (node.textContent !== text) node.textContent = text;
     }
-    if (section.ownerDocument.visibilityState !== 'hidden') timer = setTimeout(refresh, value.closed ? 60000 : Math.min(1000, DEADLINE - now));
+    if (section.ownerDocument.visibilityState !== 'hidden') {
+      const visitBoundary = now < VISIT_START ? VISIT_START : now < VISIT_END ? VISIT_END : null;
+      const interval = value.closed ? 60000 : Math.min(1000, DEADLINE - now);
+      timer = setTimeout(refresh, Math.max(1, Math.min(interval, visitBoundary === null ? interval : visitBoundary - now)));
+    }
   }
   function mount(node) {
     unmount();
@@ -140,7 +161,7 @@
     root.CastoriDecorationComments?.mount(section.querySelector('[data-decoration-comments]'));
     section.ownerDocument.addEventListener('visibilitychange', refresh);
     section.ownerDocument.addEventListener('castori:seasonchange', refresh);
-    root.CastoriVacaRadar?.mount(section.querySelector('[data-vaca-forecast]'));
+    if (!visiting(currentTime())) root.CastoriVacaRadar?.mount(section.querySelector('[data-vaca-forecast]'));
     refresh();
   }
   root.CastoriDecorationReview = { render, mount, unmount, remaining, forecast };
